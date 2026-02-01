@@ -1,45 +1,33 @@
-use std::io::{self, BufRead, Write};
 use std::path::Path;
 
-use n64::{cart::Cart, cpu::CPU};
+use color_eyre::eyre::WrapErr;
+use n64::{breakpoints::Breakpoint, cart::Cart, cpu::CPU};
 
-fn main() {
-    let cart = Cart::load(Path::new("sm.n64")).expect("load ROM");
+use crate::tui::{App, State};
 
-    println!("START:{:02x?}", cart.pc());
+mod tui;
+
+fn main() -> color_eyre::Result<()> {
+    color_eyre::install()?;
+
+    tui::logger::init(log::LevelFilter::Trace);
+
+    let cart = Cart::load(Path::new("sm.n64")).wrap_err("load ROM")?;
 
     let mut cpu = CPU::new();
     cpu.skip_ipl(&cart);
 
-    println!("Step: [Enter]=1, N=step N, q=quit");
+    cpu.breakpoints.add(Breakpoint::Address(0xA40004B8));
 
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
+    let mut app = App {
+        state: State::Paused,
+        cpu,
+        cart,
+        logs: Vec::new(),
+    };
 
-    loop {
-        print!("> ");
-        let _ = stdout.flush();
+    // TODO move to tui
+    ratatui::run(|terminal| app.run(terminal)).wrap_err("TUI run")?;
 
-        let mut line = String::new();
-        if stdin.lock().read_line(&mut line).is_err() {
-            break;
-        }
-        let line = line.trim();
-
-        if line.is_empty() || line == "1" {
-            cpu.step();
-            continue;
-        }
-        if line.eq_ignore_ascii_case("q") || line.eq_ignore_ascii_case("quit") {
-            break;
-        }
-        match line.parse::<u32>() {
-            Ok(n) if n > 0 => {
-                for _ in 0..n {
-                    cpu.step();
-                }
-            }
-            _ => println!("? [Enter]=1, N=step N, q=quit"),
-        }
-    }
+    Ok(())
 }

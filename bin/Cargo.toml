@@ -4,4 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+color-eyre = "0.6"
+log = "0.4"
 n64 = { path = "../lib" }
+ratatui = "0.30.0"
