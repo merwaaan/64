@@ -4,7 +4,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Stylize;
 use ratatui::symbols::border;
 use ratatui::text::{Line, Text};
-use ratatui::widgets::{Block, Paragraph, Widget};
+use ratatui::widgets::{Block, Padding, Paragraph, Widget};
 
 use n64::cpu::CPU;
 
@@ -16,7 +16,8 @@ impl Widget for InstructionsWidget<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
         let block = Block::bordered()
             .title(" Instructions ".bold())
-            .border_set(border::THICK);
+            .border_set(border::THICK)
+            .padding(Padding::uniform(1));
 
         let inner = block.inner(area);
 
@@ -27,7 +28,7 @@ impl Widget for InstructionsWidget<'_> {
             .map(|address| {
                 let instruction = self.cpu.read(address as u32);
 
-                let disassembly = decode(instruction).disassemble(&self.cpu, instruction);
+                let disassembly = decode(instruction).disassemble(self.cpu, instruction);
 
                 let line = Line::from(format!("{:08X}: {}", address, disassembly));
 

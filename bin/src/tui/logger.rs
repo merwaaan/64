@@ -16,15 +16,13 @@ impl Log for TuiLogger {
         if !self.enabled(record.metadata()) {
             return;
         }
-        let line = format!(
-            "{} {}",
-            level_prefix(record.level()),
-            record.args()
-        );
-        if let Some(buf) = LOG_BUF.get() {
-            if let Ok(mut guard) = buf.lock() {
-                guard.push(line);
-            }
+
+        let line = format!("{} {}", level_prefix(record.level()), record.args());
+
+        if let Some(buf) = LOG_BUF.get()
+            && let Ok(mut guard) = buf.lock()
+        {
+            guard.push(line);
         }
     }
 

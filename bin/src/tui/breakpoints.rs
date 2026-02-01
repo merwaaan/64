@@ -4,7 +4,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Stylize;
 use ratatui::symbols::border;
 use ratatui::text::{Line, Text};
-use ratatui::widgets::{Block, Paragraph, Widget};
+use ratatui::widgets::{Block, Padding, Paragraph, Widget};
 
 use n64::cpu::CPU;
 
@@ -16,7 +16,8 @@ impl Widget for BreakpointsWidget<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
         let block = Block::bordered()
             .title(" Breakpoints ".bold())
-            .border_set(border::THICK);
+            .border_set(border::THICK)
+            .padding(Padding::uniform(1));
 
         let inner = block.inner(area);
 
