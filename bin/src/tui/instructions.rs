@@ -26,7 +26,7 @@ impl Widget for InstructionsWidget<'_> {
         let lines: Vec<Line> = (self.cpu.regs.pc..self.cpu.regs.pc + 16 * 4)
             .step_by(4)
             .map(|address| {
-                let instruction = self.cpu.read(address as u32);
+                let instruction = self.cpu.read(address);
 
                 let disassembly = decode(instruction).disassemble(self.cpu, instruction);
 

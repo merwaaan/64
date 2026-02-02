@@ -17,7 +17,8 @@ fn main() -> color_eyre::Result<()> {
     let mut cpu = CPU::new(cart);
     cpu.skip_ipl();
 
-    cpu.breakpoints.add(Breakpoint::Address(0x8000_0130)); //a4000040
+    // TODO NEXT: impl LD etc + impl regs as u64 :/
+    cpu.breakpoints.add(Breakpoint::Address(0x802e_f168)); //a4000040 0x8000_01d0
 
     let mut app = App {
         state: State::Running(RunMode::Loop),

@@ -51,10 +51,9 @@ impl Widget for CpuWidget<'_> {
         let left_lines: Vec<Line> = (0..16)
             .map(|i| {
                 Line::from(format!(
-                    "{:2} {:08X} {:08X}",
+                    "{:2} {:08X}",
                     Registers::gpr_name(i),
-                    self.cpu.regs.gpr[i] >> 32,
-                    self.cpu.regs.gpr[i] & 0xFFFFFFFF
+                    self.cpu.regs.gpr[i]
                 ))
             })
             .collect();
@@ -62,10 +61,9 @@ impl Widget for CpuWidget<'_> {
         let right_lines: Vec<Line> = (16..32)
             .map(|i| {
                 Line::from(format!(
-                    "{:2} {:08X} {:08X}",
+                    "{:2} {:08X}",
                     Registers::gpr_name(i),
-                    self.cpu.regs.gpr[i] >> 32,
-                    self.cpu.regs.gpr[i] & 0xFFFFFFFF
+                    self.cpu.regs.gpr[i]
                 ))
             })
             .collect();

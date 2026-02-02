@@ -43,7 +43,7 @@ pub struct App {
     pub logs: Vec<String>,
 }
 
-const INSTR_PER_FRAME: usize = 100;
+const INSTR_PER_FRAME: usize = 100_000;
 
 impl App {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
@@ -161,7 +161,12 @@ impl Widget for &App {
             .title(Line::from(" Log ".bold()))
             .border_set(border::THICK);
 
-        let log_lines: Vec<Line> = self.logs.iter().map(|s| Line::from(s.as_str())).collect();
+        let log_lines: Vec<Line> = self
+            .logs
+            .iter()
+            .rev()
+            .map(|s| Line::from(s.as_str()))
+            .collect();
 
         let log_content = if log_lines.is_empty() {
             Text::from("(no messages)")
