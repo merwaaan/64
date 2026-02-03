@@ -1,36 +1,159 @@
 #![allow(clippy::upper_case_acronyms)]
 
 use crate::cpu::CPU;
+use crate::data::Data;
+use crate::map::address_info;
 use crate::registers::Registers;
+use crate::system::System;
+
+#[derive(Clone, Copy)]
+pub struct Opcode(pub u32);
+
+impl Opcode {
+    fn group(&self) -> u32 {
+        self.0 >> 26
+    }
+
+    // x -> register index
+    // xv -> register value
+    // xn -> register name
+    // x0n -> COP0 register name
+
+    fn base(&self) -> usize {
+        ((self.0 >> 21) & 0x1F) as usize
+    }
+
+    fn basev(&self, cpu: &CPU) -> u32 {
+        cpu.regs.gpr[self.base()].get()
+    }
+
+    fn basen(&self) -> &'static str {
+        Registers::gpr_name(self.base())
+    }
+
+    fn rs(&self) -> usize {
+        ((self.0 >> 21) & 0x1F) as usize
+    }
+
+    fn rsv(&self, cpu: &CPU) -> u32 {
+        cpu.regs.gpr[self.rs()].get()
+    }
+
+    fn rsn(&self) -> &'static str {
+        Registers::gpr_name(self.rs())
+    }
+
+    fn rt(&self) -> usize {
+        ((self.0 >> 16) & 0x1F) as usize
+    }
+
+    fn rtv(&self, cpu: &CPU) -> u32 {
+        cpu.regs.gpr[self.rt()].get()
+    }
+
+    fn rtn(&self) -> &'static str {
+        Registers::gpr_name(self.rt())
+    }
+
+    fn rt0n(&self) -> &'static str {
+        Registers::cop0_name(self.rt())
+    }
+
+    fn rd(&self) -> usize {
+        ((self.0 >> 11) & 0x1F) as usize
+    }
+
+    fn rdn(&self) -> &'static str {
+        Registers::gpr_name(self.rd())
+    }
+
+    fn rd0n(&self) -> &'static str {
+        Registers::cop0_name(self.rd())
+    }
+
+    fn shift(&self) -> u32 {
+        (self.0 >> 6) & 0x1F
+    }
+
+    fn imm16(&self) -> u16 {
+        self.0 as u16
+    }
+
+    fn branch_offset(&self) -> u32 {
+        (self.imm16() as i16 as i32 as u32) << 2
+    }
+
+    fn branch_target(&self, cpu: &CPU) -> u32 {
+        cpu.regs
+            .pc
+            .wrapping_add(4)
+            .wrapping_add(self.branch_offset())
+    }
+}
 
 /// Result of a branch/jump: target PC to use after the delay slot.
 #[derive(Clone, Copy, Debug)]
 pub struct DelayedBranching(pub u32);
 // TODO impl delay slot skip here?
 
+pub struct Disassembly {
+    pub mnemonics: String,
+    pub hint: Option<String>,
+}
+
+impl Disassembly {
+    pub fn new(mnemonics: String) -> Self {
+        Self {
+            mnemonics,
+            hint: None,
+        }
+    }
+
+    pub fn with_hint(self, hint: String) -> Self {
+        Self {
+            hint: Some(hint),
+            ..self
+        }
+    }
+
+    pub fn with_address_hint(self, addr: u32) -> Self {
+        if let Some(hint) = address_info(addr) {
+            Self {
+                hint: Some(hint.to_string()),
+                ..self
+            }
+        } else {
+            self
+        }
+    }
+}
+
 /// Instruction trait.
 pub trait Instruction {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching>;
-    fn disassemble(&self, cpu: &CPU, op: u32) -> String;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching>;
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly;
 }
 
 /// Returns the instruction for the given op
-pub fn decode(op: u32) -> &'static dyn Instruction {
-    let op_top = op >> 26; // TODO rename
-
-    match op_top {
+pub fn decode(opcode: Opcode) -> &'static dyn Instruction {
+    match opcode.group() {
         // Special group
-        0x00 => match op & 0x3F {
+        0x00 => match opcode.0 & 0x3F {
             0x00 => &SLL_,
             0x02 => &SRL_,
+            0x03 => &SRA_,
             0x04 => &SLLV_,
             0x06 => &SRLV_,
             0x08 => &JR_,
             0x09 => &JALR_,
             0x10 => &MFHI_,
+            0x11 => &MTHI_,
             0x12 => &MFLO_,
+            0x13 => &MTLO_,
             0x18 => &MULT_,
             0x19 => &MULTU_,
+            0x1D => &DMULTU_,
+            0x1F => &DDIVU_,
             0x20 => &ADD_,
             0x21 => &ADDU_,
             0x22 => &SUB_,
@@ -38,19 +161,29 @@ pub fn decode(op: u32) -> &'static dyn Instruction {
             0x24 => &AND_,
             0x25 => &OR_,
             0x26 => &XOR_,
+            0x27 => &NOR_,
             0x2A => &SLT_,
             0x2B => &SLTU_,
+            0x3C => &DSLL32_,
+            0x3F => &DSRA32_,
             _ => &UNKNOWN_,
         },
         // Regimm group
-        0x01 => match op & 0x1F_0000 {
+        0x01 => match opcode.0 & 0x1F_0000 {
             0x110000 => &BGEZAL_,
             _ => &UNKNOWN_,
         },
+        // COP0 group
+        0x10 => match opcode.0 & 0x3E0_0000 {
+            0x000_0000 => &MFC0_,
+            0x080_0000 => &MTC0_,
+            0x200_0000 => &TLBWI_,
+            _ => &UNKNOWN_,
+        },
         // COP1 group
-        0x11 => match op & 0x3E0_0000 {
-            0x40_0000 => &CFC1_,
-            0xC0_0000 => &CTC1_,
+        0x11 => match opcode.0 & 0x3E0_0000 {
+            0x040_0000 => &CFC1_,
+            0x0C0_0000 => &CTC1_,
             _ => &UNKNOWN_,
         },
         0x03 => &JAL_,
@@ -69,12 +202,17 @@ pub fn decode(op: u32) -> &'static dyn Instruction {
         0x14 => &BEQL_,
         0x15 => &BNEL_,
         0x16 => &BLEZL_,
+        0x21 => &LH_,
         0x23 => &LW_,
+        0x25 => &LHU_,
+        0x29 => &SH_,
         0x2B => &SW_,
-        0x10 => &COP0_,
         0x2C => &SDL_,
         0x2D => &SDR_,
         0x2F => &CACHE_,
+        0x30 => &LL_,
+        0x37 => &LD_,
+        0x38 => &SC_,
         0x39 => &SWC1_, // TODO generalize?
         _ => &UNKNOWN_,
     }
@@ -93,567 +231,810 @@ macro_rules! instruction_struct {
 instruction_struct!(UNKNOWN);
 
 impl Instruction for UNKNOWN {
-    fn execute(&self, _cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        panic!("Unknown opcode: {:08X}", op)
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        unimplemented!("Unknown opcode {:08X} @ {:08X}", op.0, s.cpu.regs.pc)
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("<UNKNOWN {:08X}>", op)
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("<UNKNOWN {:08X}>", op.0))
     }
 }
 
 instruction_struct!(ADD);
 
 impl Instruction for ADD {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rd(op)] = cpu.regs.gpr[rs(op)].wrapping_add(cpu.regs.gpr[rt(op)]);
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(op.rsv(&s.cpu).wrapping_add(op.rtv(&s.cpu)));
         None
-
-        // TODO overflow rules
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("ADD {}, {}, {}", reg(rd(op)), reg(rs(op)), reg(rt(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("ADD {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
     }
 }
 
 instruction_struct!(ADDI);
 
 impl Instruction for ADDI {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rt(op)] = cpu.regs.gpr[rs(op)].wrapping_add(imm16(op) as i16 as u32);
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rt()].set(op.rsv(&s.cpu).wrapping_add(op.imm16() as i16 as u32));
         None
-
-        // TODO overflow rules
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("ADDI {}, {}, {:#06X}", rt(op), rs(op), imm16(op))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "ADDI {}, {}, {:#06X}",
+            op.rtn(),
+            op.rsn(),
+            op.imm16()
+        ))
     }
 }
 
 instruction_struct!(ADDIU);
 
 impl Instruction for ADDIU {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let imm = (imm16(op) as i16 as i32) as u32;
-        let rt = rt(op);
-        let rs = rs(op);
-
-        cpu.regs.gpr[rt] = cpu.regs.gpr[rs].wrapping_add(imm);
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let imm = (op.imm16() as i16 as i32) as u32;
+        s.cpu.regs.gpr[op.rt()].set(op.rsv(&s.cpu).wrapping_add(imm));
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("ADDIU {}, {}, {:#06X}", reg(rt(op)), reg(rs(op)), imm16(op))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "ADDIU {}, {}, {:#06X}",
+            op.rtn(),
+            op.rsn(),
+            op.imm16()
+        ))
     }
 }
 
 instruction_struct!(ADDU);
 
 impl Instruction for ADDU {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rd(op)] = cpu.regs.gpr[rs(op)].wrapping_add(cpu.regs.gpr[rt(op)]);
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(op.rsv(&s.cpu).wrapping_add(op.rtv(&s.cpu)));
         None
-
-        // TODO no overflow exception
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("ADDU {}, {}, {}", reg(rd(op)), reg(rs(op)), reg(rt(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("ADDU {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
     }
 }
 
 instruction_struct!(AND);
 
 impl Instruction for AND {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rd(op)] = cpu.regs.gpr[rs(op)] & cpu.regs.gpr[rt(op)];
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(op.rsv(&s.cpu) & op.rtv(&s.cpu));
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("AND {}, {}, {}", reg(rd(op)), reg(rs(op)), reg(rt(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("AND {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
     }
 }
 
 instruction_struct!(ANDI);
 
 impl Instruction for ANDI {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let imm = imm16(op) as u32;
-        let rt = rt(op);
-        let rs = rs(op);
-
-        cpu.regs.gpr[rt] = cpu.regs.gpr[rs] & imm;
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rt()].set(op.rsv(&s.cpu) & op.imm16() as u32);
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        let imm = imm16(op);
-        let rt = rt(op);
-        let rs = rs(op);
-
-        format!("ANDI {}, {}, {:#06X}", reg(rt), reg(rs), imm)
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "ANDI {}, {}, {:#06X}",
+            op.rtn(),
+            op.rsn(),
+            op.imm16()
+        ))
     }
 }
+
+// TODO sahre branching offset func!
 
 instruction_struct!(BEQ);
 
 impl Instruction for BEQ {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        if cpu.regs.gpr[rs(op)] == cpu.regs.gpr[rt(op)] {
-            let future_pc = cpu.regs.pc.wrapping_add(4).wrapping_add(branch_offset(op));
-
-            Some(DelayedBranching(future_pc))
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        if op.rsv(&s.cpu) == op.rtv(&s.cpu) {
+            Some(DelayedBranching(op.branch_target(&s.cpu)))
         } else {
             None
         }
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!(
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
             "BEQ {}, {}, {:#06X}",
-            reg(rs(op)),
-            reg(rt(op)),
-            branch_offset(op)
-        )
+            op.rsn(),
+            op.rtn(),
+            op.branch_offset()
+        ))
     }
 }
 
 instruction_struct!(BEQL);
 
 impl Instruction for BEQL {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        if cpu.regs.gpr[rs(op)] == cpu.regs.gpr[rt(op)] {
-            let future_pc = cpu.regs.pc.wrapping_add(4).wrapping_add(branch_offset(op));
-
-            Some(DelayedBranching(future_pc))
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        if op.rsv(&s.cpu) == op.rtv(&s.cpu) {
+            Some(DelayedBranching(op.branch_target(&s.cpu)))
         } else {
-            // Skip the delay slot
-            cpu.regs.pc = cpu.regs.pc.wrapping_add(4);
-
+            s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
             None
         }
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!(
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
             "BEQL {}, {}, {:#06X}",
-            reg(rs(op)),
-            reg(rt(op)),
-            branch_offset(op)
-        )
+            op.rsn(),
+            op.rtn(),
+            op.branch_offset()
+        ))
     }
 }
 
 instruction_struct!(BGEZAL);
 
 impl Instruction for BGEZAL {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[31] = cpu.regs.pc.wrapping_add(8);
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        // Read before linking (matters when rs == 31)
+        let rs = op.rsv(&s.cpu);
 
-        if (cpu.regs.gpr[rs(op)] as i32) >= 0 {
-            let future_pc = cpu.regs.pc.wrapping_add(4).wrapping_add(branch_offset(op));
+        s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
-            Some(DelayedBranching(future_pc))
+        if (rs as i32) >= 0 {
+            Some(DelayedBranching(op.branch_target(&s.cpu)))
         } else {
             None
         }
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("BGEZAL {}, {:#06X}", reg(rs(op)), branch_offset(op))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("BGEZAL {}, {:#06X}", op.rsn(), op.branch_offset()))
+        // TODO cond result?
     }
 }
 
 instruction_struct!(BGTZ);
 
 impl Instruction for BGTZ {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        if (cpu.regs.gpr[rs(op)] as i32) > 0 {
-            let future_pc = cpu.regs.pc.wrapping_add(4).wrapping_add(branch_offset(op));
-
-            Some(DelayedBranching(future_pc))
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        if (op.rsv(&s.cpu) as i32) > 0 {
+            Some(DelayedBranching(op.branch_target(&s.cpu)))
         } else {
             None
         }
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("BGTZ {}, {:#06X}", reg(rs(op)), branch_offset(op))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("BGTZ {}, {:#06X}", op.rsn(), op.branch_offset()))
     }
-}
-
-fn branch_offset(op: u32) -> u32 {
-    (imm16(op) as i16 as i32 as u32) << 2
 }
 
 instruction_struct!(BLEZ);
 
 impl Instruction for BLEZ {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        if (cpu.regs.gpr[rs(op)] as i32) <= 0 {
-            let future_pc = cpu.regs.pc.wrapping_add(4).wrapping_add(branch_offset(op));
-
-            Some(DelayedBranching(future_pc))
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        if (op.rsv(&s.cpu) as i32) <= 0 {
+            Some(DelayedBranching(op.branch_target(&s.cpu)))
         } else {
             None
         }
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("BLEZ {}, {:#06X}", reg(rs(op)), branch_offset(op))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("BLEZ {}, {:#06X}", op.rsn(), op.branch_offset()))
     }
 }
 
 instruction_struct!(BLEZL);
 
 impl Instruction for BLEZL {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        if (cpu.regs.gpr[rs(op)] as i32) <= 0 {
-            let future_pc = cpu.regs.pc.wrapping_add(4).wrapping_add(branch_offset(op));
-
-            Some(DelayedBranching(future_pc))
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        if (op.rsv(&s.cpu) as i32) <= 0 {
+            Some(DelayedBranching(op.branch_target(&s.cpu)))
         } else {
-            // Skip the delay slot
-            cpu.regs.pc = cpu.regs.pc.wrapping_add(4);
-
+            s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
             None
         }
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("BLEZL {}, {:#06X}", reg(rs(op)), branch_offset(op))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("BLEZL {}, {:#06X}", op.rsn(), op.branch_offset()))
     }
 }
 
 instruction_struct!(BNE);
 
 impl Instruction for BNE {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let rs = rs(op);
-        let rt = rt(op);
-
-        if cpu.regs.gpr[rs] != cpu.regs.gpr[rt] {
-            let future_pc = cpu.regs.pc.wrapping_add(4).wrapping_add(branch_offset(op));
-
-            Some(DelayedBranching(future_pc))
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        if op.rsv(&s.cpu) != op.rtv(&s.cpu) {
+            Some(DelayedBranching(op.branch_target(&s.cpu)))
         } else {
             None
         }
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!(
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
             "BNE {}, {}, {:#X}",
-            reg(rs(op)),
-            reg(rt(op)),
-            branch_offset(op)
-        )
+            op.rsn(),
+            op.rtn(),
+            op.branch_offset()
+        ))
     }
 }
 
 instruction_struct!(BNEL);
 
 impl Instruction for BNEL {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let rs = rs(op);
-        let rt = rt(op);
-
-        if cpu.regs.gpr[rs] != cpu.regs.gpr[rt] {
-            let future_pc = cpu.regs.pc.wrapping_add(4).wrapping_add(branch_offset(op));
-
-            Some(DelayedBranching(future_pc))
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        if op.rsv(&s.cpu) != op.rtv(&s.cpu) {
+            Some(DelayedBranching(op.branch_target(&s.cpu)))
         } else {
-            // Skip the delay slot
-            cpu.regs.pc = cpu.regs.pc.wrapping_add(4);
-
+            s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
             None
         }
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!(
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
             "BNEL {}, {}, {:#X}",
-            reg(rs(op)),
-            reg(rt(op)),
-            branch_offset(op)
-        )
+            op.rsn(),
+            op.rtn(),
+            op.branch_offset()
+        ))
     }
 }
 
 instruction_struct!(CACHE);
 
 impl Instruction for CACHE {
-    fn execute(&self, _cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        log::warn!("CACHE {:08X}", op);
+    fn execute(&self, _s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        log::warn!("CACHE {:08X}", op.0);
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        let sub = (op >> 16) & 0x1F;
-        let base = rs(op);
-
-        format!("CACHE {}, {}({})", sub, imm16(op), reg(base))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "CACHE {}, {}({})",
+            op.rtn(),
+            op.imm16(),
+            op.basen()
+        ))
     }
 }
 
 instruction_struct!(CFC1);
 
 impl Instruction for CFC1 {
-    fn execute(&self, _cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        log::warn!("CFC1 {:08X}", op);
-        // TODO cpu.regs.gpr[rt(op)] = cpu.regs.fpr[rd(op)] as u32;
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rt()].set64(s.cpu.regs.fpr[op.rd()] as u64);
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("CFC1 {}, {}", reg(rt(op)), regf(rd(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("CFC1 {}, {}", op.rtn(), regf(op.rd())))
     }
 }
 
-instruction_struct!(COP0);
+instruction_struct!(DDIVU);
 
-impl Instruction for COP0 {
-    fn execute(&self, _cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let sub = (op >> 21) & 0x1F;
+impl Instruction for DDIVU {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let rsv = s.cpu.regs.gpr[op.rs()].get64();
+        let rtv = s.cpu.regs.gpr[op.rt()].get64();
 
-        match sub {
-            _ => log::warn!("MTC0 {:08X}", op),
-        }
+        let quotient = rsv / rtv;
+        let remainder = rsv % rtv;
+
+        s.cpu.regs.mult_hi.set64(remainder);
+        s.cpu.regs.mult_lo.set64(quotient);
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        let sub = (op >> 21) & 0x1F;
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("DDIVU {}, {}", op.rsn(), op.rtn()))
+    }
+}
 
-        // TODO
+instruction_struct!(DMULTU);
 
-        format!("<COP0 {:02x}>", sub)
+impl Instruction for DMULTU {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let result =
+            (s.cpu.regs.gpr[op.rs()].get64() as u128) * (s.cpu.regs.gpr[op.rt()].get64() as u128);
+
+        s.cpu.regs.mult_hi.set64((result >> 64) as u64);
+        s.cpu.regs.mult_lo.set64(result as u64);
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("DMULTU {}, {}", op.rsn(), op.rtn()))
+    }
+}
+
+instruction_struct!(DSLL32);
+
+impl Instruction for DSLL32 {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let data = s.cpu.regs.gpr[op.rt()].get64() << (op.shift() + 32);
+
+        s.cpu.regs.gpr[op.rd()].set64(data);
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("DSLL32 {}, {}, {}", op.rdn(), op.rtn(), op.shift()))
+    }
+}
+
+instruction_struct!(DSRA32);
+
+impl Instruction for DSRA32 {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let data = (s.cpu.regs.gpr[op.rt()].get64() as i64 >> (op.shift() + 32)) as u64;
+
+        s.cpu.regs.gpr[op.rd()].set64(data);
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("DSRA32 {}, {}, {}", op.rdn(), op.rtn(), op.shift()))
+    }
+}
+
+instruction_struct!(MTC0);
+
+impl Instruction for MTC0 {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let mut data = s.cpu.regs.gpr[op.rt()].get64();
+
+        // TODO cause: only two last bits can be written! move to reg implem
+        if op.rd() == 13 {
+            data = (data & 3) | (s.cpu.regs.cop0[13].get64() & 0xFFFF_FFFF_FFFF_FFFC);
+        }
+
+        s.cpu.regs.cop0[op.rd()].set64(data);
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("MTC0 {}, {}", op.rtn(), op.rd0n()))
+    }
+}
+
+instruction_struct!(MFC0);
+
+impl Instruction for MFC0 {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rt()].set64(s.cpu.regs.cop0[op.rd()].get64());
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("MFC0 {}, {}", op.rtn(), op.rd0n()))
     }
 }
 
 instruction_struct!(CTC1);
 
 impl Instruction for CTC1 {
-    fn execute(&self, _cpu: &mut CPU, _op: u32) -> Option<DelayedBranching> {
-        // TODO cpu.regs.gpr[rt(op)] = cpu.regs.fpr[rd(op)] as u32;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        // TODO cpu.regs.gpr[op.rt()] = cpu.regs.fpr[op.rd()] as u32;
+
+        s.cpu.regs.fpr[op.rd()] = s.cpu.regs.gpr[op.rt()].get64() as f64;
+
+        // TODO exceptions
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
         // TODO
-        format!("CTC1 {}, {}", reg(rt(op)), regf(rd(op)))
+        Disassembly::new(format!("CTC1 {}, {}", op.rtn(), regf(op.rd())))
     }
 }
 
 instruction_struct!(JAL);
 
 impl JAL {
-    fn target(pc: u32, op: u32) -> u32 {
+    fn target(pc: u32, op: Opcode) -> u32 {
         let hi = pc.wrapping_add(4) & 0xF000_0000;
-        let lo = (op & 0x03FF_FFFF) << 2;
+        let lo = (op.0 & 0x03FF_FFFF) << 2;
         hi | lo
     }
 }
 
 impl Instruction for JAL {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[31] = cpu.regs.pc.wrapping_add(8);
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
-        Some(DelayedBranching(JAL::target(cpu.regs.pc, op)))
+        Some(DelayedBranching(JAL::target(s.cpu.regs.pc, op)))
     }
 
     // TODO cpu doesn't necessarily have the correct PC! just pass the PC?
-    fn disassemble(&self, cpu: &CPU, op: u32) -> String {
-        format!("JAL {:#06X}", JAL::target(cpu.regs.pc, op))
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("JAL {:#06X}", JAL::target(s.cpu.regs.pc, op)))
     }
 }
 
 instruction_struct!(JALR);
 
 impl Instruction for JALR {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rd(op)] = cpu.regs.pc.wrapping_add(8);
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        // Read before linking (matters when rd == rs)
+        let target = op.rsv(&s.cpu);
 
-        Some(DelayedBranching(cpu.regs.gpr[rs(op)]))
+        s.cpu.regs.gpr[op.rd()].set(s.cpu.regs.pc.wrapping_add(8));
+
+        Some(DelayedBranching(target))
     }
 
     // TODO cpu doesn't necessarily have the correct PC! just pass the PC?
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("JALR {}, {}", reg(rd(op)), reg(rs(op)))
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "JALR {}, {}={:#06X}",
+            op.rdn(),
+            op.rsn(),
+            op.rsv(&s.cpu)
+        ))
     }
 }
 
 instruction_struct!(JR);
 
 impl Instruction for JR {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let target = cpu.regs.gpr[rs(op)];
-
-        Some(DelayedBranching(target))
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        Some(DelayedBranching(op.rsv(&s.cpu)))
     }
 
-    // TODO cpu doesn't necessarily have the correct PC! just pass the PC?
-    fn disassemble(&self, cpu: &CPU, op: u32) -> String {
-        let rs = rs(op);
-        let addr = cpu.regs.gpr[rs] as u32;
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("JR {}={:#06X}", op.rsn(), op.rsv(&s.cpu)))
+    }
+}
 
-        format!("JR {}={:#06X}", reg(rs), addr)
+instruction_struct!(LD);
+
+impl Instruction for LD {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        s.cpu.regs.gpr[op.rt()].set64(s.read::<u64>(addr));
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        Disassembly::new(format!(
+            "LD {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(addr)
+    }
+}
+
+instruction_struct!(LH);
+
+impl Instruction for LH {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        let data = s.read::<u16>(addr) as i16 as i32 as u32;
+
+        s.cpu.regs.gpr[op.rt()].set(data);
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        Disassembly::new(format!(
+            "LH {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(addr)
+    }
+}
+
+instruction_struct!(LHU);
+
+// TODOM LHU @ 802efaa4 not working!
+impl Instruction for LHU {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        let data = s.read::<u16>(addr).to_u32();
+
+        s.cpu.regs.gpr[op.rt()].set(data);
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        Disassembly::new(format!(
+            "LHU {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(addr)
+    }
+}
+instruction_struct!(LL);
+
+impl Instruction for LL {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        s.cpu.regs.load_linked_bit = true;
+        s.cpu.regs.load_linked_addr = addr;
+
+        s.cpu.regs.gpr[op.rt()].set(s.read(addr));
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        Disassembly::new(format!(
+            "LL {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(addr)
     }
 }
 
 instruction_struct!(LUI);
 
 impl Instruction for LUI {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rt(op)] = (imm16(op) as u32) << 16;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rt()].set((op.imm16() as u32) << 16);
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("LUI {}, {:#04X}", reg(rt(op)), imm16(op))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("LUI {}, {:#04X}", op.rtn(), op.imm16()))
     }
 }
 
 instruction_struct!(LW);
 
 impl Instruction for LW {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let offset = imm16(op) as i16 as i32 as u32;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
 
-        let addr = cpu.regs.gpr[rs(op)].wrapping_add(offset);
-
-        cpu.regs.gpr[rt(op)] = cpu.read(addr);
+        s.cpu.regs.gpr[op.rt()].set(s.read(addr));
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        let offset = imm16(op) as i16;
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
 
-        format!("LW {}, {:#06X}({})", reg(rt(op)), offset, reg(rs(op)))
+        Disassembly::new(format!(
+            "LW {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(addr)
     }
 }
 
 instruction_struct!(MFHI);
 
 impl Instruction for MFHI {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rd(op)] = cpu.regs.mult_hi;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(s.cpu.regs.mult_hi.get());
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("MFHI {}", reg(rd(op)),)
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("MFHI {}", op.rdn()))
     }
 }
 
 instruction_struct!(MFLO);
 
 impl Instruction for MFLO {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rd(op)] = cpu.regs.mult_lo;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(s.cpu.regs.mult_lo.get());
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("MFLO {}", reg(rd(op)),)
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("MFLO {}", op.rdn()))
+    }
+}
+
+instruction_struct!(MTHI);
+
+impl Instruction for MTHI {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.mult_hi.set64(s.cpu.regs.gpr[op.rs()].get64());
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("MTHI {}", op.rsn()))
+    }
+}
+
+instruction_struct!(MTLO);
+
+impl Instruction for MTLO {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.mult_lo.set64(s.cpu.regs.gpr[op.rs()].get64());
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("MTLO {}", op.rsn()))
     }
 }
 
 instruction_struct!(MULT);
 
 impl Instruction for MULT {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let rt = rt(op);
-        let rs = rs(op);
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let result = (op.rsv(&s.cpu) as i32 as i64).wrapping_mul(op.rtv(&s.cpu) as i32 as i64);
 
-        let result = (cpu.regs.gpr[rs] as i32 as i64).wrapping_mul(cpu.regs.gpr[rt] as i32 as i64);
-
-        cpu.regs.mult_hi = (result >> 32) as u32; // TODO 64 -> sign extend res
-        cpu.regs.mult_lo = result as u32;
+        s.cpu.regs.mult_hi.set((result >> 32) as u32); // TODO 64 -> sign extend res???
+        s.cpu.regs.mult_lo.set(result as u32);
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        let rt = rt(op);
-        let rs = rs(op);
-
-        format!("MULT {}, {}", reg(rs), reg(rt))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("MULT {}, {}", op.rsn(), op.rtn()))
     }
 }
 
 instruction_struct!(MULTU);
 
 impl Instruction for MULTU {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let rt = rt(op);
-        let rs = rs(op);
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let result = (op.rsv(&s.cpu) as u64) * (op.rtv(&s.cpu) as u64);
 
-        let result = (cpu.regs.gpr[rs] as u64) * (cpu.regs.gpr[rt] as u64);
-
-        cpu.regs.mult_hi = (result >> 32) as u32;
-        cpu.regs.mult_lo = (result & 0xFFFFFFFF) as u32;
+        s.cpu.regs.mult_hi.set((result >> 32) as u32);
+        s.cpu.regs.mult_lo.set(result as u32);
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        let rt = rt(op);
-        let rs = rs(op);
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("MULTU {}, {}", op.rsn(), op.rtn()))
+    }
+}
 
-        format!("MULTU {}, {}", reg(rs), reg(rt))
+instruction_struct!(NOR);
+
+impl Instruction for NOR {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(!(op.rsv(&s.cpu) | op.rtv(&s.cpu)));
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("NOR {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
     }
 }
 
 instruction_struct!(OR);
 
 impl Instruction for OR {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rd(op)] = cpu.regs.gpr[rs(op)] | cpu.regs.gpr[rt(op)];
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(op.rsv(&s.cpu) | op.rtv(&s.cpu));
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("OR {}, {}, {}", reg(rd(op)), reg(rs(op)), reg(rt(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("OR {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
     }
 }
 
 instruction_struct!(ORI);
 
 impl Instruction for ORI {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let imm = imm16(op) as u32;
-        let rt = rt(op);
-        let rs = rs(op);
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rt()].set(op.rsv(&s.cpu) | op.imm16() as u32);
+        None
+    }
 
-        cpu.regs.gpr[rt] = cpu.regs.gpr[rs] | imm;
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "ORI {}, {}, {:#06X}",
+            op.rtn(),
+            op.rsn(),
+            op.imm16()
+        ))
+    }
+}
+
+instruction_struct!(SC);
+
+impl Instruction for SC {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        s.cpu.regs.gpr[op.rt()].set(s.cpu.regs.load_linked_bit as u32);
+
+        if s.cpu.regs.load_linked_bit {
+            s.write(addr, op.rtv(&s.cpu));
+        }
+
+        s.cpu.regs.load_linked_bit = false;
+
+        // TODO impl effects: ERET/write to addr/link addr changed
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        let imm = imm16(op);
-        let rt = rt(op);
-        let rs = rs(op);
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
 
-        format!("ORI {}, {}, {:#06X}", reg(rt), reg(rs), imm)
+        Disassembly::new(format!(
+            "SC {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.basen()
+        ))
+        .with_address_hint(addr)
     }
 }
 
@@ -662,12 +1043,11 @@ impl Instruction for ORI {
 instruction_struct!(SDL);
 
 impl Instruction for SDL {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let value = cpu.regs.gpr[rt(op)];
-
-        let offset = imm16(op) as i16 as i32 as u32;
-        let base = cpu.regs.gpr[base(op)];
-        let addr = base + offset;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let value = op.rtv(&s.cpu);
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
 
         let byte_offset = addr & 7;
 
@@ -675,14 +1055,19 @@ impl Instruction for SDL {
             let byte_addr = addr + i;
             let byte = (value >> (7 - i)) as u8;
 
-            cpu.write8(byte_addr, byte);
+            s.write(byte_addr, byte);
         }
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("SDL {}, {:#06X}({})", reg(rt(op)), imm16(op), reg(base(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "SDL {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.basen()
+        ))
     }
 }
 
@@ -691,12 +1076,11 @@ impl Instruction for SDL {
 instruction_struct!(SDR);
 
 impl Instruction for SDR {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let value = cpu.regs.gpr[rt(op)];
-
-        let offset = imm16(op) as i16 as i32 as u32;
-        let base = cpu.regs.gpr[base(op)];
-        let addr = base + offset;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let value = op.rtv(&s.cpu);
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
 
         let byte_offset = addr & 7;
 
@@ -704,278 +1088,312 @@ impl Instruction for SDR {
             let byte_addr = addr + i;
             let byte = (value >> (byte_offset + i)) as u8;
 
-            cpu.write8(byte_addr, byte);
+            s.write(byte_addr, byte);
         }
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("SDR {}, {:#06X}({})", reg(rt(op)), imm16(op), reg(base(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "SDR {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.basen()
+        ))
+    }
+}
+
+instruction_struct!(SH);
+
+impl Instruction for SH {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        let data = op.rtv(&s.cpu) as u16;
+
+        s.write(addr, data);
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        Disassembly::new(format!(
+            "SH {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(addr)
     }
 }
 
 instruction_struct!(SLL);
 
 impl Instruction for SLL {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let shift = (op >> 6) & 0x1F;
-
-        cpu.regs.gpr[rd(op)] = cpu.regs.gpr[rt(op)] << shift;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(op.rtv(&s.cpu) << op.shift());
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        let (rd, rt, sa) = (rd(op), rt(op), sa(op));
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        // SLL R0, R0 is NOP
 
-        if rd == 0 && rt == 0 && sa == 0 {
+        Disassembly::new(if op.rd() == 0 && op.rt() == 0 {
             "NOP".to_string()
         } else {
-            format!("SLL {}, {}, {}", reg(rd), reg(rt), sa)
-        }
+            format!("SLL {}, {}, {}", op.rdn(), op.rtn(), op.shift())
+        })
     }
 }
 
 instruction_struct!(SLLV);
 
 impl Instruction for SLLV {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let shift = cpu.regs.gpr[rs(op)] & 0x1F;
-
-        cpu.regs.gpr[rd(op)] = cpu.regs.gpr[rt(op)] << shift;
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(op.rtv(&s.cpu) << (op.rsv(&s.cpu) & 0x1F));
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("SLLV {}, {}, {}", reg(rd(op)), reg(rt(op)), reg(rs(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("SLLV {}, {}, {}", op.rdn(), op.rtn(), op.rsn()))
     }
 }
 
 instruction_struct!(SLT);
 
 impl Instruction for SLT {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rd(op)] =
-            ((cpu.regs.gpr[rs(op)] as i32) < (cpu.regs.gpr[rt(op)] as i32)) as u32;
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(((op.rsv(&s.cpu) as i32) < (op.rtv(&s.cpu) as i32)) as u32);
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("SLT {}, {}, {}", reg(rd(op)), reg(rs(op)), reg(rt(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("SLT {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
     }
 }
 
 instruction_struct!(SLTI);
 
 impl Instruction for SLTI {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rt(op)] = ((cpu.regs.gpr[rs(op)] as i32) < (imm16(op) as i16 as i32)) as u32;
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rt()].set(((op.rsv(&s.cpu) as i32) < (op.imm16() as i16 as i32)) as u32);
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("SLTI {}, {}, {:#06X}", reg(rt(op)), reg(rs(op)), imm16(op))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "SLTI {}, {}, {:#06X}",
+            op.rtn(),
+            op.rsn(),
+            op.imm16()
+        ))
     }
 }
 
 instruction_struct!(SLTIU);
 
 impl Instruction for SLTIU {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rt(op)] = ((cpu.regs.gpr[rs(op)]) < (imm16(op) as i16 as i32 as u32)) as u32;
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let imm = op.imm16() as i16 as i32 as u32;
+        s.cpu.regs.gpr[op.rt()].set((op.rsv(&s.cpu) < imm) as u32);
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("SLTIU {}, {}, {:#06X}", reg(rt(op)), reg(rs(op)), imm16(op))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "SLTIU {}, {}, {:#06X}",
+            op.rtn(),
+            op.rsn(),
+            op.imm16()
+        ))
     }
 }
 
 instruction_struct!(SLTU);
 
 impl Instruction for SLTU {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let rs = rs(op);
-        let rt = rt(op);
-        let rd = rd(op);
-
-        cpu.regs.gpr[rd] = (cpu.regs.gpr[rs] < cpu.regs.gpr[rt]) as u32;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set((op.rsv(&s.cpu) < op.rtv(&s.cpu)) as u32);
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("SLTU {}, {}, {}", reg(rd(op)), reg(rs(op)), reg(rt(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("SLTU {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+    }
+}
+
+instruction_struct!(SRA);
+
+impl Instruction for SRA {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set((op.rtv(&s.cpu) as i32 >> op.shift()) as u32);
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("SRA {}, {}, {}", op.rdn(), op.rtn(), op.shift()))
     }
 }
 
 instruction_struct!(SRL);
 
 impl Instruction for SRL {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let shift = (op >> 6) & 0x1F;
-
-        cpu.regs.gpr[rd(op)] = cpu.regs.gpr[rt(op)] >> shift;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(op.rtv(&s.cpu) >> op.shift());
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        let shift = (op >> 6) & 0x1F;
-
-        format!("SRL {}, {}, {}", reg(rd(op)), reg(rt(op)), shift)
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("SRL {}, {}, {}", op.rdn(), op.rtn(), op.shift()))
     }
 }
 
 instruction_struct!(SRLV);
 
 impl Instruction for SRLV {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let shift = cpu.regs.gpr[rs(op)] & 0x1F;
-
-        cpu.regs.gpr[rd(op)] = cpu.regs.gpr[rt(op)] >> shift;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(op.rtv(&s.cpu) >> (op.rsv(&s.cpu) & 0x1F));
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("SRLV {}, {}, {}", reg(rd(op)), reg(rt(op)), reg(rs(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("SRLV {}, {}, {}", op.rdn(), op.rtn(), op.rsn()))
     }
 }
 
 instruction_struct!(SUB);
 
 impl Instruction for SUB {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rd(op)] = cpu.regs.gpr[rs(op)].wrapping_sub(cpu.regs.gpr[rt(op)]);
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(op.rsv(&s.cpu).wrapping_sub(op.rtv(&s.cpu)));
 
         None
-
-        // TODO overflow rules
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("SUB {}, {}, {}", reg(rd(op)), reg(rs(op)), reg(rt(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("SUB {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
     }
 }
 
 instruction_struct!(SUBU);
 
 impl Instruction for SUBU {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rd(op)] = cpu.regs.gpr[rs(op)].wrapping_sub(cpu.regs.gpr[rt(op)]);
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(op.rsv(&s.cpu).wrapping_sub(op.rtv(&s.cpu)));
         None
-
-        // TODO no overflow exception
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("SUBU {}, {}, {}", reg(rd(op)), reg(rs(op)), reg(rt(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("SUBU {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
     }
 }
 
 instruction_struct!(SW);
 
 impl Instruction for SW {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let addr = (cpu.regs.gpr[base(op)] as u32).wrapping_add(imm16(op) as i16 as i32 as u32);
-
-        cpu.write(addr, cpu.regs.gpr[rt(op)] as u32);
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        s.write(addr, op.rtv(&s.cpu));
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("SW {}, {:#06X}({})", reg(rt(op)), imm16(op), reg(rs(op)))
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        Disassembly::new(format!(
+            "SW {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(addr)
     }
 }
 
 instruction_struct!(SWC1);
 
 impl Instruction for SWC1 {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        let addr = (cpu.regs.gpr[base(op)] as u32).wrapping_add(imm16(op) as i16 as i32 as u32);
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
         // TODO!
-        cpu.write(addr, 0);
+        s.write(addr, 0u32);
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "SWC1 {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.basen()
+        ))
+    }
+}
+
+instruction_struct!(TLBWI);
+
+impl Instruction for TLBWI {
+    fn execute(&self, s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+        log::warn!("TLBWI @ {:08X}", s.cpu.regs.pc);
 
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!(
-            "SWC1 {}, {:#06X}({})",
-            reg(rt(op)),
-            imm16(op),
-            reg(base(op))
-        )
+    fn disassemble(&self, _s: &System, _op: Opcode) -> Disassembly {
+        Disassembly::new("TLBWI".to_string())
     }
 }
 
 instruction_struct!(XOR);
 
 impl Instruction for XOR {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rd(op)] = cpu.regs.gpr[rs(op)] ^ cpu.regs.gpr[rt(op)];
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set(op.rsv(&s.cpu) ^ op.rtv(&s.cpu));
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("XOR {}, {}, {}", reg(rd(op)), reg(rs(op)), reg(rt(op)))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("XOR {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
     }
 }
 
 instruction_struct!(XORI);
 
 impl Instruction for XORI {
-    fn execute(&self, cpu: &mut CPU, op: u32) -> Option<DelayedBranching> {
-        cpu.regs.gpr[rt(op)] = cpu.regs.gpr[rs(op)] ^ imm16(op) as u32;
-
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rt()].set(op.rsv(&s.cpu) ^ op.imm16() as u32);
         None
     }
 
-    fn disassemble(&self, _cpu: &CPU, op: u32) -> String {
-        format!("XORI {}, {}, {:#06X}", reg(rt(op)), reg(rs(op)), imm16(op))
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "XORI {}, {}, {:#06X}",
+            op.rtn(),
+            op.rsn(),
+            op.imm16()
+        ))
     }
 }
 
-// Helpers to extract fields from the op
-
-fn base(op: u32) -> usize {
-    ((op >> 21) & 0x1F) as usize
-}
-
-fn rs(op: u32) -> usize {
-    ((op >> 21) & 0x1F) as usize
-}
-
-fn rt(op: u32) -> usize {
-    ((op >> 16) & 0x1F) as usize
-}
-
-fn rd(op: u32) -> usize {
-    ((op >> 11) & 0x1F) as usize
-}
-
-fn sa(op: u32) -> u32 {
-    (op >> 6) & 0x1F
-}
-
-fn imm16(op: u32) -> u16 {
-    op as u16
-}
-
-fn reg(i: usize) -> &'static str {
-    Registers::gpr_name(i)
-}
-
+// TODO rm?
 fn regf(i: usize) -> &'static str {
     Registers::fpr_name(i)
 }

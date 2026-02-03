@@ -1,16 +1,117 @@
-#[derive(Default)]
-pub struct Registers {
-    pub pc: u32,
-    pub gpr: [u32; 32], // TODO r0 = always 0
-    pub fpr: [f32; 32], // TODO 64 or 32?
-    pub mult_hi: u32,
-    pub mult_lo: u32,
-    pub status: u32,
-    pub rev: u32,
+// The MIPS registers are 64-bits.
+//
+// The Nintendo 64 runs in 32-bit mode and games mostly manipulate 32-bit values.
+// However, some instructions rely on the full 64-bit range of the registers (eg. DSLL, DSRL).
+
+#[derive(Default, Copy, Clone)]
+pub struct Reg64(u64);
+
+impl Reg64 {
+    pub fn get(&self) -> u32 {
+        self.0 as u32
+    }
+
+    pub fn set(&mut self, value: u32) {
+        // Sign-extend the 32-bit value
+        self.0 = value as i32 as u64;
+    }
+
+    pub fn get64(&self) -> u64 {
+        self.0
+    }
+
+    pub fn set64(&mut self, value: u64) {
+        self.0 = value;
+    }
 }
 
-// TODO Register struct
-// TODO protect R0
+// TODO optim: avoid branch in get?
+
+#[derive(Clone, Copy)]
+pub enum GPReg {
+    // r0 always reads as 0 and cannot be written to
+    Zero,
+    N(Reg64),
+}
+
+// TODO use Data trait?
+impl GPReg {
+    pub fn get(&self) -> u32 {
+        match self {
+            GPReg::Zero => 0,
+            GPReg::N(r) => r.get(),
+        }
+    }
+
+    pub fn set(&mut self, value: u32) {
+        match self {
+            GPReg::Zero => {}
+            GPReg::N(r) => r.set(value),
+        }
+    }
+
+    pub fn get64(&self) -> u64 {
+        match self {
+            GPReg::Zero => 0,
+            GPReg::N(r) => r.get64(),
+        }
+    }
+
+    pub fn set64(&mut self, value: u64) {
+        match self {
+            GPReg::Zero => {}
+            GPReg::N(r) => r.set64(value),
+        }
+    }
+}
+
+pub struct Registers {
+    pub pc: u32,
+
+    pub gpr: [GPReg; 32],
+
+    pub cop0: [Reg64; 32],
+
+    pub fpr: [f64; 32], // TODO to struct?
+
+    pub mult_hi: Reg64,
+    pub mult_lo: Reg64,
+
+    pub load_linked_bit: bool,
+    pub load_linked_addr: u32,
+}
+
+impl Default for Registers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Registers {
+    pub fn new() -> Self {
+        Self {
+            pc: 0,
+
+            gpr: std::array::from_fn(|i| {
+                if i == 0 {
+                    GPReg::Zero
+                } else {
+                    GPReg::N(Reg64::default())
+                }
+            }),
+
+            cop0: [Reg64::default(); 32],
+
+            fpr: [0.0; 32],
+
+            mult_hi: Reg64::default(),
+            mult_lo: Reg64::default(),
+
+            load_linked_bit: false,
+            load_linked_addr: 0,
+        }
+    }
+}
 
 impl Registers {
     pub fn gpr_name(index: usize) -> &'static str {
@@ -18,6 +119,17 @@ impl Registers {
             "R0", "AT", "V0", "V1", "A0", "A1", "A2", "A3", "T0", "T1", "T2", "T3", "T4", "T5",
             "T6", "T7", "S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7", "T8", "T9", "K0", "K1",
             "GP", "SP", "S8", "RA",
+        ];
+
+        NAMES.get(index).copied().unwrap_or("?") // TODO copied?
+    }
+
+    pub fn cop0_name(index: usize) -> &'static str {
+        const NAMES: [&str; 32] = [
+            "Index", "Random", "EntryLo0", "EntryLo1", "Context", "PageMask", "Wired", "Rsv7",
+            "BadVAddr", "Count", "EntryHi", "Compare", "Status", "Cause", "EPC", "PRId", "Config",
+            "LLAddr", "WatchLo", "WatchHi", "XContext", "Rsv21", "Rsv22", "Rsv23", "Rsv24",
+            "Rsv25", "PErr", "CacheErr", "TagLo", "TagHi", "ErrorEPC", "Rsv31",
         ];
 
         NAMES.get(index).copied().unwrap_or("?") // TODO copied?

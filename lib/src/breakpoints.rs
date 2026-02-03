@@ -1,10 +1,11 @@
 #[derive(Default)]
 pub struct Breakpoints {
-    pub breakpoints: Vec<Breakpoint>,
+    pub breakpoints: Vec<Breakpoint>, // TODO priv
 }
 
 impl Breakpoints {
     pub fn add(&mut self, breakpoint: Breakpoint) {
+        // TODO unique
         self.breakpoints.push(breakpoint);
     }
 

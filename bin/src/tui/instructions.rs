@@ -1,15 +1,15 @@
-use n64::instructions::decode;
+use n64::instructions::{Opcode, decode};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Stylize;
+use ratatui::style::{Style, Stylize};
 use ratatui::symbols::border;
-use ratatui::text::{Line, Text};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Padding, Paragraph, Widget};
 
-use n64::cpu::CPU;
+use n64::system::System;
 
 pub struct InstructionsWidget<'a> {
-    pub cpu: &'a CPU,
+    pub system: &'a System,
 }
 
 impl Widget for InstructionsWidget<'_> {
@@ -23,20 +23,37 @@ impl Widget for InstructionsWidget<'_> {
 
         block.render(area, buffer);
 
-        let lines: Vec<Line> = (self.cpu.regs.pc..self.cpu.regs.pc + 16 * 4)
+        let lines: Vec<Line> = (self.system.cpu.regs.pc..self.system.cpu.regs.pc + 16 * 4)
             .step_by(4)
-            .map(|address| {
-                let instruction = self.cpu.read(address);
+            .map(|addr| {
+                let instruction = self.system.read(addr);
 
-                let disassembly = decode(instruction).disassemble(self.cpu, instruction);
+                let opcode = Opcode(instruction);
+                let handler = decode(opcode);
+                let disassembly = handler.disassemble(self.system, opcode);
 
-                let line = Line::from(format!("{:08X}: {}", address, disassembly));
-
-                if address == self.cpu.regs.pc {
-                    line.reversed().yellow()
+                let addr_style = if addr == self.system.cpu.regs.pc {
+                    Style::default().blue().reversed()
                 } else {
-                    line
+                    Style::default().blue()
+                };
+
+                let mut spans = vec![
+                    Span::styled(format!("{:08X}:", addr), addr_style),
+                    Span::styled(
+                        format!(" {}", disassembly.mnemonics),
+                        Style::default().white(),
+                    ),
+                ];
+
+                if let Some(hint) = disassembly.hint {
+                    spans.push(Span::styled(
+                        format!("   // {}", hint),
+                        Style::default().dim(),
+                    ))
                 }
+
+                Line::from(spans)
             })
             .collect();
 

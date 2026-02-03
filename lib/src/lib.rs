@@ -1,5 +1,10 @@
 pub mod breakpoints;
 pub mod cart;
 pub mod cpu;
+pub mod data;
+pub mod events;
 pub mod instructions;
+pub mod map;
+pub mod pi;
 pub mod registers;
+pub mod system;

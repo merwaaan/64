@@ -1,4 +1,4 @@
-use n64::breakpoints::{Breakpoint, Breakpoints};
+use n64::events::Events;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
@@ -6,14 +6,14 @@ use ratatui::symbols::border;
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Block, Padding, Paragraph, Widget};
 
-pub struct BreakpointsWidget<'a> {
-    pub breakpoints: &'a Breakpoints,
+pub struct EventsWidget<'a> {
+    pub events: &'a Events,
 }
 
-impl Widget for BreakpointsWidget<'_> {
+impl Widget for EventsWidget<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
         let block = Block::bordered()
-            .title(" Breakpoints ".bold())
+            .title(" Events ".bold())
             .border_set(border::THICK)
             .padding(Padding::uniform(1));
 
@@ -21,13 +21,13 @@ impl Widget for BreakpointsWidget<'_> {
 
         block.render(area, buffer);
 
+        // TODO avoid copy
         let lines: Vec<Line> = self
-            .breakpoints
-            .breakpoints
+            .events
+            .events
             .iter()
-            .map(|breakpoint| match breakpoint {
-                Breakpoint::Address(address) => Line::from(format!("{:08X}", address)),
-            })
+            .copied()
+            .map(|event| Line::from(format!("{:?}", event)))
             .collect();
 
         Paragraph::new(Text::from(lines)).render(inner, buffer);

@@ -1,3 +1,4 @@
+use n64::system::System;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
@@ -5,10 +6,8 @@ use ratatui::symbols::border;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Padding, Paragraph, Widget};
 
-use n64::cpu::CPU;
-
 pub struct MemoryWidget<'a> {
-    pub cpu: &'a CPU,
+    pub system: &'a System,
 }
 
 impl Widget for MemoryWidget<'_> {
@@ -22,14 +21,14 @@ impl Widget for MemoryWidget<'_> {
 
         block.render(area, buffer);
 
-        let lines: Vec<Line> = (0..32usize)
+        let lines: Vec<Line> = (0..16usize)
             .map(|offset| {
-                let address = 0x8024_1800 + offset * 16;
+                let address = 0x801FB9A0 + offset * 16;
 
-                let v0 = self.cpu.read(address as u32);
-                let v1 = self.cpu.read((address + 4) as u32);
-                let v2 = self.cpu.read((address + 8) as u32);
-                let v3 = self.cpu.read((address + 12) as u32);
+                let v0: u32 = self.system.read(address as u32);
+                let v1: u32 = self.system.read((address + 4) as u32);
+                let v2: u32 = self.system.read((address + 8) as u32);
+                let v3: u32 = self.system.read((address + 12) as u32);
 
                 Line::from(vec![
                     Span::styled(

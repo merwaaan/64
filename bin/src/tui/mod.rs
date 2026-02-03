@@ -1,9 +1,11 @@
 mod breakpoints;
 mod cpu;
+mod events;
 mod instructions;
 pub mod logger;
 mod memory;
 
+use n64::system::System;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -15,9 +17,8 @@ use ratatui::{DefaultTerminal, Frame};
 use std::io::{self};
 use std::time::Duration;
 
-use n64::cpu::CPU;
-
 use crate::tui::breakpoints::BreakpointsWidget;
+use crate::tui::events::EventsWidget;
 use crate::tui::memory::MemoryWidget;
 
 use self::cpu::CpuWidget;
@@ -39,7 +40,7 @@ pub enum State {
 // TODO move app out of TUI
 pub struct App {
     pub state: State,
-    pub cpu: CPU,
+    pub system: System,
     pub logs: Vec<String>,
 }
 
@@ -52,7 +53,7 @@ impl App {
 
             if !matches!(self.state, State::Paused) {
                 for _ in 0..INSTR_PER_FRAME {
-                    let hit_breakpoint = self.cpu.step();
+                    let hit_breakpoint = self.system.step();
 
                     if hit_breakpoint {
                         self.state = State::Paused;
@@ -142,17 +143,38 @@ impl Widget for &App {
         let panels = Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
             .constraints([
-                Constraint::Fill(1),
+                Constraint::Fill(2),
+                Constraint::Fill(2),
                 Constraint::Fill(1),
                 Constraint::Fill(1),
                 Constraint::Max(20),
             ])
             .split(main_and_log[0]);
 
-        InstructionsWidget { cpu: &self.cpu }.render(panels[0], buf);
-        CpuWidget { cpu: &self.cpu }.render(panels[1], buf);
-        MemoryWidget { cpu: &self.cpu }.render(panels[2], buf);
-        BreakpointsWidget { cpu: &self.cpu }.render(panels[3], buf);
+        InstructionsWidget {
+            system: &self.system,
+        }
+        .render(panels[0], buf);
+
+        CpuWidget {
+            system: &self.system,
+        }
+        .render(panels[1], buf);
+
+        MemoryWidget {
+            system: &self.system,
+        }
+        .render(panels[2], buf);
+
+        EventsWidget {
+            events: &self.system.events,
+        }
+        .render(panels[3], buf);
+
+        BreakpointsWidget {
+            breakpoints: &self.system.breakpoints,
+        }
+        .render(panels[4], buf);
 
         // Logs
         // TODO move to widget
