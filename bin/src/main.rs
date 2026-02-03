@@ -12,13 +12,13 @@ fn main() -> color_eyre::Result<()> {
 
     tui::logger::init(log::LevelFilter::Trace);
 
-    let cart = Cart::load(Path::new("sm.n64")).wrap_err("load ROM")?;
+    let cart = Cart::load(Path::new("st.z64")).wrap_err("load ROM")?;
 
     let mut cpu = CPU::new(cart);
     cpu.skip_ipl();
 
     // TODO NEXT: impl LD etc + impl regs as u64 :/
-    cpu.breakpoints.add(Breakpoint::Address(0x802e_f168)); //a4000040 0x8000_01d0
+    cpu.breakpoints.add(Breakpoint::Address(0xA4000258)); //a4000040 0x802e_f168
 
     let mut app = App {
         state: State::Running(RunMode::Loop),

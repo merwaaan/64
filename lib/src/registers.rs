@@ -9,6 +9,9 @@ pub struct Registers {
     pub rev: u32,
 }
 
+// TODO Register struct
+// TODO protect R0
+
 impl Registers {
     pub fn gpr_name(index: usize) -> &'static str {
         const NAMES: [&str; 32] = [

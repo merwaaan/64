@@ -28,7 +28,7 @@ impl CPU {
         Self {
             regs: Registers::default(),
 
-            rdram: vec![0; 0x03F_0000],
+            rdram: vec![0; 0x03EF_0000],
 
             rspdmem: vec![0; 0x1000],
             rspimem: vec![0; 0x1000],
@@ -68,6 +68,11 @@ impl CPU {
 
     pub fn step(&mut self) -> bool {
         let instruction = self.read(self.regs.pc);
+
+        if instruction == 0x74027 {
+            panic!("PC: {:08X}", self.regs.pc);
+        }
+
         let handler = decode(instruction);
 
         let next_delayed_branching = handler.execute(self, instruction);
@@ -92,6 +97,16 @@ impl CPU {
         let word = word << 8 | data[addr as usize + 1] as u32;
         let word = word << 8 | data[addr as usize + 2] as u32;
         word << 8 | data[addr as usize + 3] as u32
+    }
+
+    // TODO bad?
+    pub fn read8(&self, addr: u32) -> u8 {
+        let addr32 = addr & !3;
+        let value32 = self.read(addr32);
+
+        let byte_offset = addr & 3;
+
+        (value32 >> ((3 - byte_offset) * 8)) as u8
     }
 
     pub fn read(&self, addr: u32) -> u32 {
@@ -128,17 +143,36 @@ impl CPU {
             }
 
             // RSP registers
-            0x0404_1000..=0x040F_FFFF => {
+            0x0404_0000..=0x040B_FFFF => {
+                log::warn!("Read RSP REGS: {:08X}", physical_addr);
                 let rsp_regs = (physical_addr >> 2) & 3;
                 self.rsp_regs[rsp_regs as usize]
             }
 
-            // RSP registers
-            0x0404_0000..=0x040B_FFFF => {
-                panic!("Reading from RSP REGS: {:08X}", physical_addr);
-            }
+            // MI interface
+            0x0430_0000..=0x043F_FFFF => {
+                let mips_reg = ((physical_addr >> 2) & 7) as usize;
 
-            // TODO others
+                match mips_reg {
+                    0 => {
+                        log::warn!("read MI_MODE");
+                        0
+                    }
+                    1 => {
+                        log::warn!("read MI_VERSION");
+                        0
+                    }
+                    2 => {
+                        log::warn!("read MI_INTERRUPT");
+                        0
+                    }
+                    3 => {
+                        log::warn!("read MI_MASK");
+                        0
+                    }
+                    _ => panic!("Invalid MIPS register: {:08X}", mips_reg),
+                }
+            }
 
             // PI interface
             0x0460_0000..=0x046FFFFF => {
@@ -207,7 +241,22 @@ impl CPU {
         }
     }
 
+    // TODO bad?
+    pub fn write8(&mut self, addr: u32, data: u8) {
+        let addr32 = addr & !3;
+        let mut value32 = self.read(addr32);
+
+        let byte_offset = addr & 3;
+
+        value32 = value32 & !(0xFF << ((3 - byte_offset) * 8))
+            | ((data as u32) << ((3 - byte_offset) * 8));
+
+        self.write(addr32, value32);
+    }
+
     pub fn write(&mut self, addr: u32, data: u32) {
+        // TODO assert aligned? read too?
+
         let physical_addr = match addr {
             0..=0x7FFF_FFFF => addr,
             0x8000_0000..=0x9FFFFFFF => addr - 0x8000_0000,
@@ -321,34 +370,30 @@ impl CPU {
                     // DRAM_ADDR
                     0x0460_0000 => {
                         log::warn!("write PI_DRAM_ADDR {:x}", data);
-                        self.pi_regs[0] = data & 0xFFFFFFFE;
+                        self.pi_regs[0] = data & 0x00FF_FFFE;
                     }
                     // CART_ADDR
                     0x0460_0004 => {
                         log::warn!("write CART_ADDR {:x}", data);
-                        self.pi_regs[1] = data & 0xFFFFFFFE;
+                        self.pi_regs[1] = data & 0xFFFF_FFFE;
                     }
                     // RD_LEN
                     // TODO
                     // WR_LEN
                     0x0460_000C => {
                         log::warn!("write WR_LEN {:x}", data);
-                        self.pi_regs[3] = data & 0x00FFFFFF;
+                        self.pi_regs[3] = data & 0x00FF_FFFF;
 
                         // TODO proper DMA transfer
 
-                        log::info!(
+                        log::warn!(
                             "PI DMA transfer: {:08X} from 0x{:08X} to 0x{:08X}",
                             self.pi_regs[3],
                             self.pi_regs[1],
                             self.pi_regs[0],
                         );
 
-                        // TODO SM64: @ 8000 0050 -> PI_WR_LEN written as FFFFF but ref emu stores 7F???
-
-                        // TODO value is minus one!!!!!!!!!!!! just +1?
-
-                        for offset in 0..self.pi_regs[3] {
+                        for offset in 0..=self.pi_regs[3] {
                             self.write(
                                 self.pi_regs[0] + offset,
                                 self.read(self.pi_regs[1] + offset),

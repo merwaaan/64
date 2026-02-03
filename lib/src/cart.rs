@@ -11,18 +11,42 @@ pub struct Cart {
 
 impl Cart {
     pub fn load(path: &Path) -> Result<Self, std::io::Error> {
-        let mut data = Vec::new();
+        let mut data = Vec::new(); // TODO just store as u32s?
 
         let file = File::open(path)?;
 
         let mut reader = BufReader::new(file);
         reader.read_to_end(&mut data)?;
 
-        // Swap bytes
-        // TODO depends on header?
+        // Convert to big-endian, the native N64 format
 
-        for word in data.chunks_exact_mut(2) {
-            word.swap(0, 1);
+        let first_word: u32 = u32::from_be_bytes(data[0..4].try_into().unwrap());
+
+        match first_word {
+            // Already big-endian
+            0x80371240 => {
+                log::info!("Big-endian");
+            }
+
+            // Byte-swapped
+            0x37804012 => {
+                log::info!("Byte-swapped");
+
+                for word in data.chunks_exact_mut(2) {
+                    word.swap(0, 1);
+                }
+            }
+
+            // Word-swapped
+            0x40123780 => {
+                log::info!("Word-swapped");
+
+                todo!("Word-swapped");
+            }
+
+            _ => {
+                log::warn!("Unknown cart format: {:#08X}", first_word);
+            }
         }
 
         Ok(Self { data })
