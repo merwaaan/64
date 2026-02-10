@@ -2,14 +2,16 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 
 use crate::breakpoints::Breakpoints;
+use crate::cop0::Cop0;
 use crate::data::Data;
-use crate::events::{Cycle, Events};
+use crate::events::{Cycle, Event, EventType, Events};
 use crate::{cart::Cart, cpu::CPU, map::Map};
 
 pub struct System {
     // Components
     pub cart: Cart,
     pub cpu: CPU,
+    pub cop0: Cop0,
     pub map: Map,
 
     // Scheduling
@@ -35,9 +37,10 @@ impl System {
             None
         };
 
-        Self {
+        let mut s = Self {
             cart,
             cpu: CPU::default(),
+            cop0: Cop0::default(),
             map: Map::default(),
 
             cycles: 0,
@@ -49,7 +52,14 @@ impl System {
             log_writer,
             log_from,
             log_to,
-        }
+        };
+
+        s.events.push(Event {
+            id: EventType::ViScanlineComplete,
+            cycle: 1000, // TODO!!!
+        });
+
+        s
     }
 
     // NOTE: IPL starts at A4000040, executes the cart boot sequence, skipped for now
@@ -64,10 +74,10 @@ impl System {
         self.cpu.regs.gpr[29].set(0xA4001FF0);
 
         // TODO cop0 (readthedocs)
-        self.cpu.regs.cop0[1].set(0x1F);
-        self.cpu.regs.cop0[12].set(0x34000000);
-        self.cpu.regs.cop0[15].set(0x00000B00);
-        self.cpu.regs.cop0[16].set(0x0006E463);
+        self.cop0.regs[1].set(0x1F);
+        self.cop0.regs[12].set(0x34000000);
+        self.cop0.regs[15].set(0x00000B00);
+        self.cop0.regs[16].set(0x0006E463);
 
         // TODO temp p64 match
         self.cpu.regs.gpr[1].set(1);
@@ -88,15 +98,15 @@ impl System {
         self.cpu.regs.gpr[25].set(0x9DEBB54F);
         self.cpu.regs.gpr[29].set(0xA4001FF0);
         self.cpu.regs.gpr[31].set(0xA4001554);
-        self.cpu.regs.cop0[4].set(0x007FFFF0);
-        self.cpu.regs.cop0[8].set(0xFFFFFFFF);
-        //self.cpu.regs.cop0[5].set(0x5000);
-        self.cpu.regs.cop0[9].set(0x5000);
-        self.cpu.regs.cop0[13].set(0x5C);
-        self.cpu.regs.cop0[14].set(0xFFFFFFFF);
-        self.cpu.regs.cop0[15].set(0x00000B22);
-        self.cpu.regs.cop0[16].set(0x7006E463);
-        self.cpu.regs.cop0[30].set(0xFFFFFFFF);
+        self.cop0.regs[4].set(0x007FFFF0);
+        self.cop0.regs[8].set(0xFFFFFFFF);
+        //self.cop0.regs[5].set(0x5000);
+        self.cop0.regs[9].set(0x5000);
+        self.cop0.regs[13].set(0x5C);
+        self.cop0.regs[14].set(0xFFFFFFFF);
+        self.cop0.regs[15].set(0x00000B22);
+        self.cop0.regs[16].set(0x7006E463);
+        self.cop0.regs[30].set(0xFFFFFFFF);
 
         // Copy the cart's boot code to memory
 
@@ -123,9 +133,8 @@ impl System {
                     .join(" ");
 
                 let cop0_hex: String = self
-                    .cpu
-                    .regs
                     .cop0
+                    .regs
                     .iter()
                     .enumerate()
                     .map(|(i, r)| {
@@ -167,6 +176,61 @@ impl System {
         // TODO how many cycles?
 
         Events::update(self);
+
+        // Check for pending interrupts
+
+        //self.map.mi.check_interrupts();
+
+        // if self.cpu.step > 5940000 {
+        //     log::info!(
+        //         "pending: {:08X} {:08X}",
+        //         self.map.mi.read::<u32>(0x430_000c).to_u32(),
+        //         self.map.mi.read::<u32>(0x430_0008).to_u32()
+        //     );
+        // }
+        // if self.cpu.step & 0b1111 == 0 {
+        //     log::info!(
+        //         "scanline: {:08X}",
+        //         self.map.vi.read::<u32>(0x440_0004).to_u32()
+        //     );
+        // }
+        // if self.map.mi.has_pending_interrupt() {
+        //     log::info!(
+        //         "ie: {}, exl: {}, erl: {}, pending: {}",
+        //         self.cop0.ie(),
+        //         self.cop0.exl(),
+        //         self.cop0.erl(),
+        //         self.map.mi.has_pending_interrupt()
+        //     );
+        // }
+
+        // TODO mask?
+        // TODO raise int if cause b0-1 set?
+        if self.cop0.ie()
+            && !self.cop0.exl()
+            && !self.cop0.erl()
+            && self.map.mi.has_pending_interrupt()
+        {
+            // EPC
+            // Cause (BD/ExcCode)
+            self.cop0.regs[13].set(0x400); // TODO tmp
+
+            self.cop0.set_exl();
+
+            self.cpu.regs.pc = 0x8000_0180; // TODO others?
+        }
+
+        // TODO NEXT
+        // - check SI INTERRUPT WHEN?
+        // - impl VI INTERRUPT
+
+        // TODO temp hack
+        // if self.cpu.regs.pc == 0x802F41E0 {
+        //     self.cpu.regs.pc = 0x8000_0180;
+        //     self.cop0.regs[12].set(0xFF03);
+        //     self.cop0.regs[13].set(0x400);
+        //     self.map.mi.regs[2] = 0xA;
+        // }
 
         // Breakpoints
 

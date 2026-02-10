@@ -1,41 +1,42 @@
 use crate::{
     data::Data,
     events::{Event, EventType},
+    mi::Interrupt,
     system::System,
 };
 
-pub const PI_START: u32 = 0x0460_0000;
-pub const PI_SIZE: u32 = 0x10_0000;
-pub const PI_END: u32 = PI_START + PI_SIZE;
+pub const START: u32 = 0x0460_0000;
+pub const SIZE: u32 = 0x10_0000;
+pub const END: u32 = START + SIZE;
 
-pub const PI_MASK: u32 = 0x1F;
+pub const MASK: u32 = 0x1F;
 
 // TODO macro?
 
-const PI_DRAM_ADDR_REG: usize = 0;
-const PI_DRAM_ADDR_LO: u32 = (PI_DRAM_ADDR_REG as u32) << 2;
-pub const PI_DRAM_ADDR: u32 = PI_START | PI_DRAM_ADDR_LO;
+const DRAM_ADDR_REG: usize = 0;
+const DRAM_ADDR_LO: u32 = (DRAM_ADDR_REG as u32) << 2;
+pub const DRAM_ADDR: u32 = START | DRAM_ADDR_LO;
 
-const PI_CART_ADDR_REG: usize = 1;
-const PI_CART_ADDR_LO: u32 = (PI_CART_ADDR_REG as u32) << 2;
-pub const PI_CART_ADDR: u32 = PI_START | PI_CART_ADDR_LO;
+const CART_ADDR_REG: usize = 1;
+const CART_ADDR_LO: u32 = (CART_ADDR_REG as u32) << 2;
+pub const CART_ADDR: u32 = START | CART_ADDR_LO;
 
-const PI_RD_LEN_REG: usize = 2;
-const PI_RD_LEN_LO: u32 = (PI_RD_LEN_REG as u32) << 2;
-pub const PI_RD_LEN: u32 = PI_START | PI_RD_LEN_LO;
+const READ_LEN_REG: usize = 2;
+const READ_LEN_LO: u32 = (READ_LEN_REG as u32) << 2;
+pub const READ_LEN: u32 = START | READ_LEN_LO;
 
-const PI_WR_LEN_REG: usize = 3;
-pub const PI_WR_LEN_LO: u32 = (PI_WR_LEN_REG as u32) << 2;
-const PI_WR_LEN: u32 = PI_START | PI_WR_LEN_LO;
+const WRITE_LEN_REG: usize = 3;
+pub const WRITE_LEN_LO: u32 = (WRITE_LEN_REG as u32) << 2;
+const WRITE_LEN: u32 = START | WRITE_LEN_LO;
 
-const PI_STATUS_REG: usize = 4;
-const PI_STATUS_LO: u32 = (PI_STATUS_REG as u32) << 2;
-pub const PI_STATUS: u32 = PI_START | PI_STATUS_LO;
+const STATUS_REG: usize = 4;
+const STATUS_LO: u32 = (STATUS_REG as u32) << 2;
+pub const STATUS: u32 = START | STATUS_LO;
 
-const PI_STATUS_DMA_BUSY_MASK: u32 = 1;
-const PI_STATUS_IO_BUSY_MASK: u32 = 2;
-const PI_STATUS_DMA_ERROR_MASK: u32 = 4;
-const PI_STATUS_DMA_COMPLETED_MASK: u32 = 8;
+const STATUS_DMA_BUSY_MASK: u32 = 1;
+const STATUS_IO_BUSY_MASK: u32 = 1 << 1;
+const STATUS_DMA_ERROR_MASK: u32 = 1 << 2;
+const STATUS_DMA_COMPLETED_MASK: u32 = 1 << 3;
 
 #[derive(Default)]
 pub struct Pi {
@@ -46,7 +47,7 @@ impl Pi {
     pub fn read<T: Data>(&self, addr: u32) -> T {
         assert_range(addr);
 
-        let reg = (addr & PI_MASK) >> 2;
+        let reg = (addr & MASK) >> 2;
 
         // TODO depends???
 
@@ -56,36 +57,37 @@ impl Pi {
     pub fn write<T: Data>(s: &mut System, addr: u32, data: T) {
         assert_range(addr);
 
-        let reg = ((addr & PI_MASK) >> 2) as usize;
+        let reg = ((addr & MASK) >> 2) as usize;
 
         let data = data.to_u32(); // TODO temp hack, should be able to write any size
 
         match reg {
-            PI_DRAM_ADDR_REG => {
-                s.map.pi.regs[PI_DRAM_ADDR_REG] = data & 0x00FF_FFFE;
+            DRAM_ADDR_REG => {
+                s.map.pi.regs[DRAM_ADDR_REG] = data & 0x00FF_FFFE;
             }
-            PI_CART_ADDR_REG => {
-                s.map.pi.regs[PI_CART_ADDR_REG] = data & 0xFFFF_FFFE; // TODO auto updated after DMA transfer
+            CART_ADDR_REG => {
+                s.map.pi.regs[CART_ADDR_REG] = data & 0xFFFF_FFFE; // TODO auto updated after DMA transfer
             }
-            PI_RD_LEN_REG => {
-                s.map.pi.regs[PI_RD_LEN_REG] = data & 0x00FF_FFFF;
+            READ_LEN_REG => {
+                s.map.pi.regs[READ_LEN_REG] = data & 0x00FF_FFFF;
 
-                unimplemented!("Write to PI_RD_LEN");
+                unimplemented!("Write to READ_LEN");
             }
-            PI_WR_LEN_REG => {
-                s.map.pi.regs[PI_WR_LEN_REG] = data & 0x00FF_FFFF;
+            WRITE_LEN_REG => {
+                s.map.pi.regs[WRITE_LEN_REG] = data & 0x00FF_FFFF;
 
                 Self::start_dma(s);
             }
-            PI_STATUS_REG => {
-                // Bit 1: clear the interrupt bit
+            STATUS_REG => {
+                // Bit 1: clear the interrupt
                 if (data & 2) == 2 {
-                    s.map.pi.regs[PI_STATUS_REG] &= !PI_STATUS_DMA_COMPLETED_MASK;
+                    s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_COMPLETED_MASK;
+                    s.map.mi.clear_pending_interrupt(Interrupt::Pi);
                 }
 
-                // Bit 0: clear the error bit
+                // Bit 0: clear the error
                 if (data & 1) == 1 {
-                    s.map.pi.regs[PI_STATUS_REG] &= !PI_STATUS_DMA_ERROR_MASK;
+                    s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_ERROR_MASK;
                 }
             }
             _ => unimplemented!("Write PI register @ {:08X}", addr),
@@ -96,25 +98,25 @@ impl Pi {
         // Instant DMA transfer!
         // TODO make it progressive?
 
-        let length = s.map.pi.regs[PI_WR_LEN_REG] + 1;
+        let length = s.map.pi.regs[WRITE_LEN_REG] + 1;
 
         log::warn!(
             "PI DMA transfer: {:#X} from {:#X} to {:#X} @ {}",
             length,
-            s.map.pi.regs[PI_CART_ADDR_REG],
-            s.map.pi.regs[PI_DRAM_ADDR_REG],
+            s.map.pi.regs[CART_ADDR_REG],
+            s.map.pi.regs[DRAM_ADDR_REG],
             s.cpu.step,
         );
 
         for offset in 0..length {
-            let data: u32 = s.read(s.map.pi.regs[PI_CART_ADDR_REG] + offset);
+            let data: u32 = s.read(s.map.pi.regs[CART_ADDR_REG] + offset);
 
-            s.write(s.map.pi.regs[PI_DRAM_ADDR_REG] + offset, data);
+            s.write(s.map.pi.regs[DRAM_ADDR_REG] + offset, data);
         }
 
         // Update the status register
 
-        s.map.pi.regs[PI_STATUS_REG] |= PI_STATUS_DMA_BUSY_MASK;
+        s.map.pi.regs[STATUS_REG] |= STATUS_DMA_BUSY_MASK;
         // TODO IO busy?
         // TODO DMA error? if already busy?
 
@@ -122,14 +124,24 @@ impl Pi {
 
         s.events.push(Event {
             id: EventType::PiDmaTransferComplete,
-            cycle: s.cycles + (length / 8 + 100/* TODO temp hack to match pj */) as usize,
+            cycle: s.cycles
+                + (
+                    length / 8
+                    /*+ 100*//* TODO temp hack to match pj */
+                ) as usize,
         });
     }
 
     pub fn dma_completed(s: &mut System) {
-        s.map.pi.regs[PI_STATUS_REG] |= PI_STATUS_DMA_COMPLETED_MASK;
-        s.map.pi.regs[PI_STATUS_REG] &= !PI_STATUS_DMA_BUSY_MASK;
+        // Update the status register
+
+        s.map.pi.regs[STATUS_REG] |= STATUS_DMA_COMPLETED_MASK;
+        s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_BUSY_MASK;
         // TODO IO busy?
+
+        // Raise the interrupt
+
+        s.map.mi.set_pending_interrupt(Interrupt::Pi);
     }
 
     pub fn address_info(addr: u32) -> Option<&'static str> {
@@ -138,21 +150,21 @@ impl Pi {
         // TODO check masks!
         // TODO normalize strings
 
-        let s = match addr & PI_MASK {
-            PI_DRAM_ADDR_LO => "PI_DRAM_ADDR",
-            PI_CART_ADDR_LO => "PI_CART_ADDR",
-            PI_RD_LEN_LO => "PI_RD_LEN",
-            PI_WR_LEN_LO => "PI_WR_LEN",
-            PI_STATUS_LO => "PI_STATUS",
-            // 0x14 => "PI_BSD_DOM1_LAT",
-            // 0x18 => "PI_BSD_DOM1_PWD",
-            // 0x20 => "PI_BSD_DOM1_RLS",
-            // 0x24 => "PI_BSD_DOM2_LAT",
-            // 0x28 => "PI_BSD_DOM2_PWD",
-            // 0x1C => "PI_BSD_DOM1_PGS",
-            // 0x2C => "PI_BSD_DOM2_PGS",
-            // 0x30 => "PI_BSD_DOM2_RLS",
-            _ => "PI_???",
+        let s = match addr & MASK {
+            DRAM_ADDR_LO => "PI_DRAM_ADDR",
+            CART_ADDR_LO => "PI_CART_ADDR",
+            READ_LEN_LO => "PI_READ_LEN",
+            WRITE_LEN_LO => "PI_WRITE_LEN",
+            STATUS_LO => "PI_STATUS",
+            // 0x14 => "BSD_DOM1_LAT",
+            // 0x18 => "BSD_DOM1_PWD",
+            // 0x20 => "BSD_DOM1_RLS",
+            // 0x24 => "BSD_DOM2_LAT",
+            // 0x28 => "BSD_DOM2_PWD",
+            // 0x1C => "BSD_DOM1_PGS",
+            // 0x2C => "BSD_DOM2_PGS",
+            // 0x30 => "BSD_DOM2_RLS",
+            _ => "???", // TODO
         };
 
         // TODO cleaner way to do that?
@@ -161,5 +173,5 @@ impl Pi {
 }
 
 fn assert_range(addr: u32) {
-    debug_assert!((PI_START..PI_END).contains(&addr));
+    debug_assert!((START..END).contains(&addr));
 }

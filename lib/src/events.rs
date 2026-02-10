@@ -1,12 +1,13 @@
 use std::{cmp::Ordering, collections::BinaryHeap};
 
-use crate::{pi::Pi, system::System};
+use crate::{pi::Pi, system::System, vi::Vi};
 
 pub type Cycle = usize;
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum EventType {
     PiDmaTransferComplete,
+    ViScanlineComplete,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -41,8 +42,12 @@ impl Event {
     pub fn handle(&self, s: &mut System) {
         match self.id {
             EventType::PiDmaTransferComplete => {
-                log::warn!("PI DMA transfer complete");
+                //log::warn!("PI DMA transfer complete");
                 Pi::dma_completed(s);
+            }
+            EventType::ViScanlineComplete => {
+                //log::warn!("VI scanline complete");
+                Vi::scanline_completed(s);
             }
         }
     }

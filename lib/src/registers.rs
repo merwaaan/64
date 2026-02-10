@@ -70,8 +70,6 @@ pub struct Registers {
 
     pub gpr: [GPReg; 32],
 
-    pub cop0: [Reg64; 32],
-
     pub fpr: [f64; 32], // TODO to struct?
 
     pub mult_hi: Reg64,
@@ -100,8 +98,6 @@ impl Registers {
                 }
             }),
 
-            cop0: [Reg64::default(); 32],
-
             fpr: [0.0; 32],
 
             mult_hi: Reg64::default(),
@@ -119,17 +115,6 @@ impl Registers {
             "R0", "AT", "V0", "V1", "A0", "A1", "A2", "A3", "T0", "T1", "T2", "T3", "T4", "T5",
             "T6", "T7", "S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7", "T8", "T9", "K0", "K1",
             "GP", "SP", "S8", "RA",
-        ];
-
-        NAMES.get(index).copied().unwrap_or("?") // TODO copied?
-    }
-
-    pub fn cop0_name(index: usize) -> &'static str {
-        const NAMES: [&str; 32] = [
-            "Index", "Random", "EntryLo0", "EntryLo1", "Context", "PageMask", "Wired", "Rsv7",
-            "BadVAddr", "Count", "EntryHi", "Compare", "Status", "Cause", "EPC", "PRId", "Config",
-            "LLAddr", "WatchLo", "WatchHi", "XContext", "Rsv21", "Rsv22", "Rsv23", "Rsv24",
-            "Rsv25", "PErr", "CacheErr", "TagLo", "TagHi", "ErrorEPC", "Rsv31",
         ];
 
         NAMES.get(index).copied().unwrap_or("?") // TODO copied?

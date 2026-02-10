@@ -1,10 +1,15 @@
+pub mod ai;
 pub mod breakpoints;
 pub mod cart;
+pub mod cop0;
 pub mod cpu;
 pub mod data;
 pub mod events;
 pub mod instructions;
 pub mod map;
+pub mod mi;
 pub mod pi;
 pub mod registers;
+pub mod si;
 pub mod system;
+pub mod vi;

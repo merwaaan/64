@@ -1,3 +1,4 @@
+use n64::cop0::Cop0;
 use n64::registers::Registers;
 use n64::system::System;
 use ratatui::buffer::Buffer;
@@ -84,9 +85,9 @@ impl Widget for CpuWidget<'_> {
             .map(|i| {
                 Line::from(format!(
                     "{:8} {:08X} {:08X}",
-                    Registers::cop0_name(i),
-                    self.system.cpu.regs.cop0[i].get64() >> 32,
-                    self.system.cpu.regs.cop0[i].get()
+                    Cop0::reg_name(i),
+                    self.system.cop0.regs[i].get64() >> 32,
+                    self.system.cop0.regs[i].get()
                 ))
             })
             .collect();
@@ -95,9 +96,9 @@ impl Widget for CpuWidget<'_> {
             .map(|i| {
                 Line::from(format!(
                     "{:8} {:08X} {:08X}",
-                    Registers::cop0_name(i),
-                    self.system.cpu.regs.cop0[i].get64() >> 32,
-                    self.system.cpu.regs.cop0[i].get()
+                    Cop0::reg_name(i),
+                    self.system.cop0.regs[i].get64() >> 32,
+                    self.system.cop0.regs[i].get()
                 ))
             })
             .collect();

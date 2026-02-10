@@ -1,33 +1,57 @@
 use crate::{
+    ai::{self, Ai},
     data::Data,
-    pi::{PI_END, PI_START, Pi},
+    mi::{self, Mi},
+    pi::{self, Pi},
+    si::{self, Si},
     system::System,
+    vi::{self, Vi},
 };
 
 pub struct Map {
-    pub rdram: Vec<u8>,
+    pub rdram: Vec<u8>, // TODO to struct
 
     // TODO to rsp struct
     pub rspdmem: Vec<u8>,
     pub rspimem: Vec<u8>,
     pub rsp_regs: [u32; 8],
 
+    pub mi: Mi,
+    pub vi: Vi,
+    pub ai: Ai,
     pub pi: Pi,
+    pub si: Si,
 }
 
 impl Default for Map {
     fn default() -> Self {
         Self {
-            rdram: vec![0; 0x03EF_0000],
+            rdram: vec![0; RDRAM_SIZE],
 
             rspdmem: vec![0; 0x1000],
             rspimem: vec![0; 0x1000],
             rsp_regs: [0; 8],
 
+            mi: Mi::default(),
+            vi: Vi::default(),
+            ai: Ai::default(),
             pi: Pi::default(),
+            si: Si::default(),
         }
     }
 }
+
+const RDRAM_START: u32 = 0x0000_0000;
+const RDRAM_SIZE: usize = 0x03F0_0000;
+const RDRAM_END: u32 = RDRAM_START + RDRAM_SIZE as u32;
+
+const RDRAM_REG_START: u32 = 0x03F0_0000;
+const RDRAM_REG_SIZE: usize = 0x0008_0000;
+const RDRAM_REG_END: u32 = RDRAM_REG_START + RDRAM_REG_SIZE as u32;
+
+const RDRAM_REG_BROADCAST_START: u32 = 0x03F8_0000;
+const RDRAM_REG_BROADCAST_SIZE: usize = 0x0008_0000;
+const RDRAM_REG_BROADCAST_END: u32 = RDRAM_REG_BROADCAST_START + RDRAM_REG_BROADCAST_SIZE as u32;
 
 impl Map {
     // fn read_word(addr: u32, buffer: &[u8]) -> u32 {
@@ -52,10 +76,11 @@ impl Map {
 
         match addr {
             // RDRAM
-            0..=0x03EF_FFFF => T::read(&s.map.rdram, addr),
+            RDRAM_START..RDRAM_END => T::read(&s.map.rdram, addr - RDRAM_START),
 
             // RDRAM registers
-            0x03F0_0000..=0x03F7_FFFF => {
+            RDRAM_REG_START..RDRAM_REG_END => {
+                panic!("Reading from RDRAM registers: {:08X}", addr);
                 log::warn!("Reading from RDRAM registers: {:08X}", addr);
                 T::default()
             }
@@ -75,33 +100,10 @@ impl Map {
                 T::from_u32(s.map.rsp_regs[rsp_reg as usize]) // TODO weirddd
             }
 
-            // MI interface
-            0x0430_0000..=0x043F_FFFF => {
-                let mips_reg = ((addr >> 2) & 7) as usize;
-
-                match mips_reg {
-                    0 => {
-                        log::warn!("read MI_MODE");
-                        T::default()
-                    }
-                    1 => {
-                        log::warn!("read MI_VERSION");
-                        T::default()
-                    }
-                    2 => {
-                        log::warn!("read MI_INTERRUPT");
-                        T::default()
-                    }
-                    3 => {
-                        log::warn!("read MI_MASK");
-                        T::default()
-                    }
-                    _ => panic!("Invalid MIPS register: {:08X}", mips_reg),
-                }
-            }
-
-            // Peripheral Interface
-            PI_START..PI_END => s.map.pi.read(addr),
+            mi::START..mi::END => s.map.mi.read(addr),
+            vi::START..vi::END => s.map.vi.read(addr),
+            ai::START..ai::END => s.map.ai.read(addr),
+            pi::START..pi::END => s.map.pi.read(addr),
 
             // RDRAM interface
             0x0470_0000..=0x047D_DFFF => {
@@ -115,38 +117,7 @@ impl Map {
                 }
             }
 
-            // SI registers
-            0x0480_0000..=0x048F_FFFF => {
-                let si_reg = ((addr >> 2) & 7) as usize;
-
-                match si_reg {
-                    0 => {
-                        log::warn!("read SI_DRAM_ADDR");
-                        T::default()
-                    }
-                    1 => {
-                        log::warn!("read SI_PIF_AD_RD64B");
-                        T::default()
-                    }
-                    2 => {
-                        log::warn!("read SI_PIF_AD_WR4B");
-                        T::default()
-                    }
-                    4 => {
-                        log::warn!("read SI_PIF_AD_WR64B");
-                        T::default()
-                    }
-                    5 => {
-                        log::warn!("read SI_PIF_AD_RD4B");
-                        T::default()
-                    }
-                    6 => {
-                        log::warn!("read SI_STATUS");
-                        T::default()
-                    }
-                    _ => panic!("Invalid SI register: {:08X}", si_reg),
-                }
-            }
+            si::START..si::END => s.map.si.read(addr),
 
             // DD
             0x0500_0000..=0x05FF_FFFF => {
@@ -208,27 +179,41 @@ impl Map {
 
     // TODO what if address crosses a boundary?
     pub fn write<T: Data>(s: &mut System, addr: u32, data: T) {
-        let physical_addr = virtual_to_physical_address(addr);
+        if (RDRAM_REG_BROADCAST_START..RDRAM_REG_BROADCAST_END).contains(&addr) {
+            panic!(
+                "Writing to RDRAM registers: {:08X} @ {:08X}",
+                addr, s.cpu.regs.pc
+            );
+        }
 
-        match physical_addr {
-            // RDRAM
-            0..=0x03EF_FFFF => {
-                data.write(&mut s.map.rdram, physical_addr);
+        let addr = virtual_to_physical_address(addr);
+
+        match addr {
+            RDRAM_START..RDRAM_END => {
+                data.write(&mut s.map.rdram, addr - RDRAM_START);
+            }
+
+            RDRAM_REG_START..RDRAM_REG_END => {
+                log::warn!("write RDRAM_REG_0 {:X}", data); // TODO
+            }
+
+            RDRAM_REG_BROADCAST_START..RDRAM_REG_BROADCAST_END => {
+                log::warn!("write RDRAM_REG_BROADCAST {:X}", data); // TODO
             }
 
             // RSP DMEM
             0x0400_0000..=0x0400_0FFF => {
-                data.write(&mut s.map.rspdmem, physical_addr - 0x0400_0000);
+                data.write(&mut s.map.rspdmem, addr - 0x0400_0000);
             }
 
             // RSP IMEM
             0x0400_1000..=0x0400_1FFF => {
-                data.write(&mut s.map.rspimem, physical_addr - 0x0400_1000);
+                data.write(&mut s.map.rspimem, addr - 0x0400_1000);
             }
 
             // RSP registers
             0x0404_0000..=0x040B_FFFF => {
-                let rsp_reg = ((physical_addr >> 2) & 7) as usize;
+                let rsp_reg = ((addr >> 2) & 7) as usize;
 
                 match rsp_reg {
                     0 => {
@@ -261,80 +246,12 @@ impl Map {
                 }
             }
 
-            // MIPS registers
-            0x0430_0000..=0x043F_FFFF => {
-                let mips_reg = ((physical_addr >> 2) & 7) as usize;
+            mi::START..mi::END => Mi::write(s, addr, data),
+            vi::START..vi::END => Vi::write(s, addr, data),
+            ai::START..ai::END => Ai::write(s, addr, data),
 
-                match mips_reg {
-                    0 => {
-                        log::warn!("write MI_MODE {:X}", data);
-                    }
-                    1 => {
-                        log::warn!("write MI_VERSION {:X}", data);
-                    }
-                    2 => {
-                        log::warn!("write MI_INTERRUPT {:X}", data);
-                    }
-                    3 => {
-                        log::warn!("write MI_MASK {:X}", data);
-                    }
-                    _ => panic!("Invalid MIPS register: {:08X}", mips_reg),
-                }
-            }
-
-            // AI registers
-            0x0450_0000..=0x045F_FFFF => {
-                let ai_reg = ((physical_addr >> 2) & 7) as usize;
-
-                match ai_reg {
-                    0 => {
-                        log::warn!("write AI_DRAM_ADDR {:X}", data);
-                    }
-                    1 => {
-                        log::warn!("write AI_LENGTH  {:X}", data);
-                    }
-                    2 => {
-                        log::warn!("write AI_STATUS   {:X}", data);
-                    }
-                    3 => {
-                        log::warn!("write AI_DACRATE  {:X}", data);
-                    }
-                    4 => {
-                        log::warn!("write AI_BITRATE   {:X}", data);
-                    }
-                    _ => panic!("Invalid AI register: {:08X}", ai_reg),
-                }
-            }
-
-            // Peripheral Interface
-            PI_START..PI_END => Pi::write(s, physical_addr, data),
-
-            // SI registers
-            0x0480_0000..=0x048F_FFFF => {
-                let si_reg = ((physical_addr >> 2) & 7) as usize;
-
-                match si_reg {
-                    0 => {
-                        log::warn!("write SI_DRAM_ADDR  {:X}", data);
-                    }
-                    1 => {
-                        log::warn!("write SI_PIF_AD_RD64B   {:X}", data);
-                    }
-                    2 => {
-                        log::warn!("write SI_PIF_AD_WR4B    {:X}", data);
-                    }
-                    4 => {
-                        log::warn!("write SI_PIF_AD_WR64B   {:X}", data);
-                    }
-                    5 => {
-                        log::warn!("write SI_PIF_AD_RD4B    {:X}", data);
-                    }
-                    6 => {
-                        log::warn!("write SI_STATUS     {:X}", data);
-                    }
-                    _ => panic!("Invalid SI register: {:08X}", si_reg),
-                }
-            }
+            pi::START..pi::END => Pi::write(s, addr, data),
+            si::START..si::END => Si::write(s, addr, data),
 
             // PIF RAM
             0x1FC0_07C0..=0x1FC0_07FF => {
@@ -363,6 +280,7 @@ pub fn virtual_to_physical_address(addr: u32) -> u32 {
 pub fn address_info(addr: u32) -> Option<&'static str> {
     let addr = virtual_to_physical_address(addr);
 
+    // TODO delegate!!!!!
     // TODO check masks!
     // TODO normalize strings
 

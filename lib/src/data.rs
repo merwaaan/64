@@ -1,6 +1,6 @@
 use std::fmt::{LowerHex, UpperHex};
 
-pub trait Data: Default + LowerHex + UpperHex {
+pub trait Data: Copy + Default + LowerHex + UpperHex {
     const SIZE: usize;
 
     fn read(buffer: &[u8], offset: u32) -> Self;
@@ -93,7 +93,7 @@ impl Data for u64 {
     fn read(buffer: &[u8], offset: u32) -> Self {
         let offset = offset as usize;
 
-        (buffer[offset as usize] as u64) << 56
+        (buffer[offset] as u64) << 56
             | (buffer[offset + 1] as u64) << 48
             | (buffer[offset + 2] as u64) << 40
             | (buffer[offset + 3] as u64) << 32

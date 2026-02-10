@@ -23,7 +23,7 @@ impl Widget for MemoryWidget<'_> {
 
         let lines: Vec<Line> = (0..16usize)
             .map(|offset| {
-                let address = 0x801FB9A0 + offset * 16;
+                let address = 0x802F41D8 + offset * 16;
 
                 let v0: u32 = self.system.read(address as u32);
                 let v1: u32 = self.system.read((address + 4) as u32);
