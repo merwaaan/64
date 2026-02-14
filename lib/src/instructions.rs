@@ -94,6 +94,7 @@ pub struct DelayedBranching(pub u32);
 // TODO impl delay slot skip here?
 // TODO also eret to avoid offset hack?
 
+#[derive(Clone)]
 pub struct Disassembly {
     pub mnemonics: String,
     pub hint: Option<String>,

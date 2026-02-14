@@ -65,6 +65,7 @@ impl GPReg {
     }
 }
 
+#[derive(Copy, Clone)]
 pub struct Registers {
     pub pc: u32,
 

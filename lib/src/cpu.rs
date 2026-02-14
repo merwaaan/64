@@ -4,7 +4,7 @@ use crate::{
     system::System,
 };
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct CPU {
     pub regs: Registers,
 

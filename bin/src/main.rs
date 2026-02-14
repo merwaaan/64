@@ -1,12 +1,11 @@
-use std::path::Path;
-
 use clap::Parser;
-use color_eyre::eyre::WrapErr;
-use n64::{breakpoints::Breakpoint, cart::Cart, system::System};
+use env_logger::Env;
 
-use crate::tui::{App, RunMode, State};
+use crate::ui::Ui;
 
+mod emu;
 mod tui;
+mod ui;
 
 #[derive(Parser)]
 #[command(name = env!("CARGO_PKG_NAME"), about = "N64 emulator debugger")]
@@ -28,38 +27,14 @@ struct Args {
     log_to: Option<usize>,
 }
 
-fn main() -> color_eyre::Result<()> {
-    color_eyre::install()?;
-
-    tui::logger::init(log::LevelFilter::Trace);
+fn main() -> iced::Result {
+    env_logger::Builder::from_env(Env::default().default_filter_or("bin=info")).init();
 
     let args = Args::parse();
 
-    // Setup the system
-
-    let cart = Cart::load(Path::new(&args.rom)).wrap_err("load ROM")?;
-
-    let mut system = System::new(cart, args.log_from, args.log_to);
-    system.skip_ipl();
-
-    // start: 0xa4000040
-    for addr in &args.breakpoint {
-        system.breakpoints.add(Breakpoint::Address(*addr));
-    }
-
-    // Setup the TUI
-
-    let mut app = App {
-        state: State::Running(RunMode::Loop),
-        system,
-        logs: Vec::new(),
-    };
-
-    let mut terminal = ratatui::try_init().wrap_err("TUI init")?;
-
-    app.run(&mut terminal)?;
-
-    Ok(())
+    iced::application(Ui::new, Ui::update, Ui::view)
+        .subscription(Ui::subscribe)
+        .run()
 }
 
 fn parse_addr(s: &str) -> Result<u32, String> {
