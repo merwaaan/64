@@ -4,8 +4,8 @@ use crate::ui::instructions::InstructionData;
 
 pub enum Event {
     Update {
-        cpu_regs: Registers,
-        memory: Vec<u8>,
-        instructions: Vec<InstructionData>,
+        cpu_regs: Option<Registers>,
+        memory: Option<Vec<u32>>,
+        instructions: Option<Vec<InstructionData>>,
     },
 }

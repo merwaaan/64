@@ -27,14 +27,16 @@ struct Args {
     log_to: Option<usize>,
 }
 
-fn main() -> iced::Result {
+fn main() -> eframe::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("bin=info")).init();
 
-    let args = Args::parse();
+    let _args = Args::parse();
 
-    iced::application(Ui::new, Ui::update, Ui::view)
-        .subscription(Ui::subscribe)
-        .run()
+    eframe::run_native(
+        "N64 Debugger",
+        eframe::NativeOptions::default(),
+        Box::new(|_cc| Ok(Box::new(Ui::new()))),
+    )
 }
 
 fn parse_addr(s: &str) -> Result<u32, String> {

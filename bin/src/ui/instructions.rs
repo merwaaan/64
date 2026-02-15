@@ -1,11 +1,6 @@
-use iced::{
-    Color, Element, Font, Theme,
-    font::{Family, Weight},
-    widget::{Text, column, row, text},
-};
 use n64::instructions::Disassembly;
 
-use crate::{emu::event::Event, ui::UiEvent};
+use crate::emu::event::Event;
 
 #[derive(Clone)]
 pub struct InstructionData {
@@ -20,61 +15,32 @@ pub struct InstructionsWidget {
 
 impl InstructionsWidget {
     pub fn update(&mut self, event: &Event) {
-        match event {
-            Event::Update { instructions, .. } => {
-                self.instructions = instructions.clone();
-            }
+        if let Event::Update {
+            instructions: Some(instructions),
+            ..
+        } = event
+        {
+            self.instructions = instructions.clone();
         }
     }
 
-    pub fn view(&self) -> Element<'_, UiEvent> {
-        let mut col = column![];
-
-        for instruction in &self.instructions {
-            col = col.push(
-                row![
-                    text(format!("{:08X}", instruction.address)).font(Font {
-                        family: Family::Monospace,
-                        weight: Weight::Bold,
-                        ..Default::default()
-                    }),
-                    text(format!(" {}", instruction.disassembly.mnemonics)).font(Font {
-                        family: Family::Monospace,
-                        ..Default::default()
-                    }),
-                ]
-                .spacing(4), //TODO hint
-            );
-        }
-        // for (chunk_index, chunk) in self.memory.chunks(16).enumerate() {
-        //     col = col.push(
-        //         row![
-        //             text(format!("{:08X}", chunk_index * 16)).font(Font {
-        //                 family: Family::Monospace,
-        //                 weight: Weight::Bold,
-        //                 ..Default::default()
-        //             }),
-        //             text(format!("{:08X}", chunk[0])).font(Font {
-        //                 family: Family::Monospace,
-        //                 ..Default::default()
-        //             }),
-        //             text(format!("{:08X}", chunk[1])).font(Font {
-        //                 family: Family::Monospace,
-        //                 ..Default::default()
-        //             }),
-        //             text(format!("{:08X}", chunk[2])).font(Font {
-        //                 family: Family::Monospace,
-        //                 ..Default::default()
-        //             }),
-        //             text(format!("{:08X}", chunk[3])).font(Font {
-        //                 family: Family::Monospace,
-        //                 ..Default::default()
-        //             }),
-        //         ]
-        //         .spacing(4),
-        //     );
-        // }
-
-        col.into()
+    pub fn show(&self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("Instructions")
+            .default_open(true)
+            .show(ui, |ui| {
+                for instruction in &self.instructions {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("{:08X}", instruction.address))
+                                .monospace()
+                                .strong(),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!(" {}", instruction.disassembly.mnemonics))
+                                .monospace(),
+                        );
+                    });
+                }
+            });
     }
 }

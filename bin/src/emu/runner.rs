@@ -8,25 +8,26 @@ use n64::{
 
 use crate::{
     emu::{command::Command, event::Event},
-    ui::instructions::InstructionData,
+    ui::{UiSettings, instructions::InstructionData},
 };
 
 #[derive(Debug)]
 pub enum RunMode {
     Running,
-    Paused,
+    Paused { step_requested: bool },
     Exited,
 }
 
 pub struct State {
     pub system: Option<System>,
     pub run_mode: RunMode,
+    pub ui_settings: UiSettings,
 }
 
 pub struct Runner {
     thread: JoinHandle<()>,
     command_tx: Sender<Command>,
-    pub event_rx: Receiver<Event>, // TODO pub
+    event_rx: Receiver<Event>,
 }
 
 impl Runner {
@@ -41,8 +42,13 @@ impl Runner {
             .spawn(move || {
                 let mut state: State = State {
                     system: None,
-                    run_mode: RunMode::Running,
+                    run_mode: RunMode::Paused {
+                        step_requested: false,
+                    },
+                    ui_settings: UiSettings::default(),
                 };
+
+                let mut xxx = 0;
 
                 loop {
                     // Handle commands
@@ -61,40 +67,66 @@ impl Runner {
                         }
                     }
 
-                    // Update the system
+                    // Update the system (when running, or one step when paused and step requested)
 
-                    if let Some(system) = &mut state.system {
-                        system.step();
+                    let do_step = matches!(state.run_mode, RunMode::Running)
+                        || matches!(
+                            state.run_mode,
+                            RunMode::Paused {
+                                step_requested: true
+                            }
+                        );
 
-                        let instructions = (system.cpu.regs.pc..system.cpu.regs.pc + 16 * 4)
-                            .step_by(4)
-                            .map(|addr| {
-                                let instruction = system.read(addr);
+                    if do_step {
+                        if let Some(system) = &mut state.system {
+                            system.step();
 
-                                let opcode = Opcode(instruction);
-                                let handler = decode(opcode);
-                                let disassembly = handler.disassemble(system, opcode);
+                            if let RunMode::Paused { step_requested } = &mut state.run_mode {
+                                *step_requested = false;
+                            }
 
-                                InstructionData {
-                                    address: addr,
-                                    disassembly,
-                                }
-                            })
-                            .collect();
+                            xxx += 1;
 
-                        let mut memory = vec![];
+                            let send_event = xxx % 1000 == 0;
 
-                        for i in 0..64 {
-                            memory.push(system.read(i));
+                            if send_event {
+                                let instructions =
+                                    state.ui_settings.instructions.as_ref().map(|settings| {
+                                        (settings.address
+                                            ..settings.address + settings.rows as u32 * 4)
+                                            .step_by(4)
+                                            .map(|addr| {
+                                                let instruction = system.read(addr);
+                                                let opcode = Opcode(instruction);
+                                                let handler = decode(opcode);
+                                                let disassembly =
+                                                    handler.disassemble(system, opcode);
+                                                InstructionData {
+                                                    address: addr,
+                                                    disassembly,
+                                                }
+                                            })
+                                            .collect()
+                                    });
+
+                                let cpu_regs =
+                                    state.ui_settings.cpu_regs.map(|_| system.cpu.regs.clone()); // TODO check bool
+
+                                let memory = state.ui_settings.memory.as_ref().map(|settings| {
+                                    (0..settings.rows * 4)
+                                        .map(|i| system.read(settings.address + (i as u32) * 4))
+                                        .collect()
+                                });
+
+                                event_tx
+                                    .send(Event::Update {
+                                        instructions,
+                                        cpu_regs,
+                                        memory,
+                                    })
+                                    .unwrap();
+                            }
                         }
-
-                        event_tx
-                            .send(Event::Update {
-                                instructions,
-                                cpu_regs: system.cpu.regs.clone(),
-                                memory,
-                            })
-                            .unwrap();
                     }
 
                     // Exit?
@@ -113,7 +145,13 @@ impl Runner {
         }
     }
 
+    /// Sends a command to the core thread.
     pub fn send_command(&self, command: Command) {
         self.command_tx.send(command).unwrap();
+    }
+
+    /// Receives one event if available.
+    pub fn poll_event(&self) -> Option<Event> {
+        self.event_rx.try_recv().ok()
     }
 }

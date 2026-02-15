@@ -1,7 +1,4 @@
-use std::{path::PathBuf, time::Duration};
-
-use crossbeam::channel::TryRecvError;
-use iced::{Element, Subscription, Theme, time, widget::column};
+use std::path::PathBuf;
 
 use crate::{
     emu::{command::Command, runner::Runner},
@@ -11,20 +8,48 @@ use crate::{
 pub mod instructions;
 pub mod memory;
 pub mod registers;
-mod theme;
 
-pub enum UiEvent {
-    Refresh,
+#[derive(Clone)]
+pub struct InstructionsSettings {
+    pub address: u32,
+    pub rows: usize,
 }
 
-//pub struct UiState {}
+#[derive(Clone)]
+pub struct MemorySettings {
+    pub address: u32,
+    pub rows: usize, // 16 bytes per row
+}
+
+#[derive(Clone)]
+pub struct UiSettings {
+    pub instructions: Option<InstructionsSettings>,
+    pub cpu_regs: Option<bool>,
+    pub memory: Option<MemorySettings>,
+}
+
+impl Default for UiSettings {
+    fn default() -> Self {
+        Self {
+            instructions: Some(InstructionsSettings {
+                address: 0,
+                rows: 8,
+            }),
+            cpu_regs: Some(true),
+            memory: Some(MemorySettings {
+                address: 0,
+                rows: 4,
+            }),
+        }
+    }
+}
 
 pub struct Ui {
     runner: Option<Runner>,
-    //state: UiState,
-    instructions: InstructionsWidget,
-    registers: RegistersWidget,
-    memory: MemoryWidget,
+    instructions: Option<InstructionsWidget>,
+    registers: Option<RegistersWidget>,
+    memory: Option<MemoryWidget>,
+    paused: bool,
 }
 
 impl Ui {
@@ -38,51 +63,95 @@ impl Ui {
 
         Self {
             runner: Some(runner),
-            //state: UiState {},
-            instructions: InstructionsWidget::default(),
-            registers: RegistersWidget::default(),
-            memory: MemoryWidget::default(),
+            instructions: Some(InstructionsWidget::default()),
+            registers: Some(RegistersWidget::default()),
+            memory: Some(MemoryWidget::default()),
+            paused: true,
         }
     }
 
-    pub fn theme(&self) -> Theme {
-        Theme::CatppuccinMacchiato
-    }
-
-    pub fn subscribe(&self) -> Subscription<UiEvent> {
-        time::every(Duration::from_millis(100)).map(|_| UiEvent::Refresh)
-    }
-
-    pub fn update(&mut self, event: UiEvent) {
-        // TODO poll the runner "manually" for now, iced patterns are a mess
-
-        if let Some(runner) = &mut self.runner {
-            loop {
-                match runner.event_rx.try_recv() {
-                    Ok(event) => {
-                        self.instructions.update(&event);
-                        self.registers.update(&event);
-                        self.memory.update(&event);
-                    }
-                    Err(TryRecvError::Empty) => {
-                        break;
-                    }
-                    Err(error) => {
-                        log::error!("Runner channel error: {:?}", error);
-                        self.runner = None;
-                        break;
-                    }
-                }
+    fn poll_runner(&mut self) {
+        while let Some(event) = self.runner.as_ref().and_then(|r| r.poll_event()) {
+            if let Some(instructions) = self.instructions.as_mut() {
+                instructions.update(&event);
+            }
+            if let Some(registers) = self.registers.as_mut() {
+                registers.update(&event);
+            }
+            if let Some(memory) = self.memory.as_mut() {
+                memory.update(&event);
             }
         }
     }
+}
 
-    pub fn view(&self) -> Element<'_, UiEvent> {
-        column![
-            self.instructions.view(),
-            self.registers.view(),
-            self.memory.view()
-        ]
-        .into()
+impl eframe::App for Ui {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_runner();
+
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Load ROM…").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("ROM files", &["n64", "z64", "v64"])
+                            .pick_file()
+                        {
+                            if let Some(runner) = &self.runner {
+                                runner.send_command(Command::LoadRom { path });
+                            }
+                        }
+
+                        ui.close_kind(egui::UiKind::Menu);
+                    }
+                });
+
+                if ui
+                    .button(if self.paused {
+                        "▶ Resume"
+                    } else {
+                        "⏸ Pause"
+                    })
+                    .clicked()
+                {
+                    if let Some(runner) = &self.runner {
+                        if self.paused {
+                            runner.send_command(Command::Resume);
+                        } else {
+                            runner.send_command(Command::Pause);
+                        }
+                        self.paused = !self.paused;
+                    }
+                }
+
+                if self.paused {
+                    if ui.button("⏭ Step").clicked() {
+                        if let Some(runner) = &self.runner {
+                            runner.send_command(Command::Step);
+                        }
+                    }
+                }
+            });
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.vertical(|ui| {
+                    if let Some(instructions) = self.instructions.as_ref() {
+                        instructions.show(ui);
+                    }
+
+                    if let Some(registers) = self.registers.as_ref() {
+                        registers.show(ui);
+                    }
+
+                    if let Some(memory) = self.memory.as_ref() {
+                        memory.show(ui);
+                    }
+                });
+            });
+        });
+
+        ctx.request_repaint();
     }
 }

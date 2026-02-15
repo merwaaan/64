@@ -2,22 +2,28 @@ use std::path::PathBuf;
 
 use n64::{cart::Cart, system::System};
 
-use crate::emu::runner::{RunMode, State};
+use crate::{
+    emu::runner::{RunMode, State},
+    ui::UiSettings,
+};
 
-#[derive(Debug)]
 pub enum Command {
+    SetSettings { settings: UiSettings },
     LoadRom { path: PathBuf },
     Pause,
     Resume,
+    Step,
     Exit,
 }
 
 impl Command {
     pub fn handle(&self, state: &mut State) {
         match self {
-            Command::LoadRom { path } => {
-                log::info!("Loading ROM {}", path.display());
+            Command::SetSettings { settings } => {
+                state.ui_settings = settings.clone();
+            }
 
+            Command::LoadRom { path } => {
                 let cart = match Cart::load(path) {
                     Ok(c) => c,
                     Err(e) => {
@@ -31,16 +37,24 @@ impl Command {
 
                 state.system = Some(system);
             }
+
             Command::Pause => {
-                log::info!("Pausing emulator");
-                state.run_mode = RunMode::Paused;
+                state.run_mode = RunMode::Paused {
+                    step_requested: false,
+                };
             }
+
             Command::Resume => {
-                log::info!("Resuming emulator");
                 state.run_mode = RunMode::Running;
             }
+
+            Command::Step => {
+                if let RunMode::Paused { step_requested } = &mut state.run_mode {
+                    *step_requested = true;
+                }
+            }
+
             Command::Exit => {
-                log::info!("Exiting emulator");
                 state.run_mode = RunMode::Exited;
             }
         }
