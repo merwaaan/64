@@ -95,23 +95,19 @@ impl Pi {
     }
 
     fn start_dma(s: &mut System) {
-        // Instant DMA transfer!
-        // TODO make it progressive?
+        // Instant DMA transfer
 
         let length = s.map.pi.regs[WRITE_LEN_REG] + 1;
-
-        log::warn!(
-            "PI DMA transfer: {:#X} from {:#X} to {:#X} @ {}",
+        log::info!(
+            "PI DMA transfer: {} bytes from {:08X} to {:08X}",
             length,
             s.map.pi.regs[CART_ADDR_REG],
-            s.map.pi.regs[DRAM_ADDR_REG],
-            s.cpu.step,
+            s.map.pi.regs[DRAM_ADDR_REG]
         );
-
         for offset in 0..length {
-            let data: u32 = s.read(s.map.pi.regs[CART_ADDR_REG] + offset);
+            let data = s.read::<u8>(s.map.pi.regs[CART_ADDR_REG] + offset);
 
-            s.write(s.map.pi.regs[DRAM_ADDR_REG] + offset, data);
+            s.write::<u8>(s.map.pi.regs[DRAM_ADDR_REG] + offset, data);
         }
 
         // Update the status register

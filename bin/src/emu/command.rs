@@ -1,41 +1,66 @@
 use std::path::PathBuf;
 
-use n64::{cart::Cart, system::System};
+use n64::{breakpoints::Breakpoint, cart::Cart, system::System};
 
 use crate::{
-    emu::runner::{RunMode, State},
-    ui::UiSettings,
+    emu::{
+        event::Event,
+        runner::{RunMode, Runner, RunnerState},
+    },
+    ui::SettingUpdate,
 };
 
 pub enum Command {
-    SetSettings { settings: UiSettings },
-    LoadRom { path: PathBuf },
+    SetSetting(SettingUpdate),
+    AddBreakpoint(Breakpoint),
+    RemoveBreakpoint(Breakpoint),
+    LoadRom(PathBuf),
     Pause,
     Resume,
     Step,
-    Exit,
+    //Exit,
 }
 
 impl Command {
-    pub fn handle(&self, state: &mut State) {
+    pub fn handle(&self, state: &mut RunnerState) -> Vec<Event> {
+        let mut events = Vec::new();
+
         match self {
-            Command::SetSettings { settings } => {
-                state.ui_settings = settings.clone();
+            Command::SetSetting(setting) => {
+                match setting {
+                    SettingUpdate::Instructions(settings) => {
+                        state.ui_settings.instructions = *settings;
+                    }
+                    SettingUpdate::Memory(settings) => {
+                        state.ui_settings.memory = *settings;
+                    }
+                    SettingUpdate::Registers(settings) => {
+                        state.ui_settings.registers = *settings;
+                    }
+                    SettingUpdate::Framebuffer(settings) => {
+                        state.ui_settings.framebuffer = *settings;
+                    }
+                }
+
+                events.extend(Runner::update_events(state));
             }
 
-            Command::LoadRom { path } => {
-                let cart = match Cart::load(path) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        log::error!("Failed to load ROM: {}", e);
-                        return;
+            Command::LoadRom(path) => {
+                match Cart::load(path) {
+                    Ok(cart) => {
+                        let mut system = System::new(cart);
+                        system.skip_ipl(); // TODO internalize
+
+                        events.push(Event::BreakpointsUpdate(system.breakpoints().clone()));
+
+                        state.system = Some(system);
+
+                        events.extend(Runner::update_events(state));
                     }
-                };
-
-                let mut system = System::new(cart, None, None);
-                system.skip_ipl(); // TODO internalize
-
-                state.system = Some(system);
+                    Err(e) => {
+                        log::error!("Failed to load cart: {}", e);
+                    }
+                }
             }
 
             Command::Pause => {
@@ -54,9 +79,26 @@ impl Command {
                 }
             }
 
-            Command::Exit => {
-                state.run_mode = RunMode::Exited;
+            // Command::Exit => {
+            //     state.run_mode = RunMode::Exited;
+            // }
+            Command::AddBreakpoint(breakpoint) => {
+                if let Some(system) = &mut state.system {
+                    system.add_breakpoint(*breakpoint);
+
+                    events.push(Event::BreakpointsUpdate(system.breakpoints().clone()));
+                }
+            }
+
+            Command::RemoveBreakpoint(breakpoint) => {
+                if let Some(system) = &mut state.system {
+                    system.remove_breakpoint(*breakpoint);
+
+                    events.push(Event::BreakpointsUpdate(system.breakpoints().clone()));
+                }
             }
         }
+
+        events
     }
 }

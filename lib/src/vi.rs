@@ -11,6 +11,25 @@ pub const END: u32 = START + SIZE;
 
 pub const MASK: u32 = 0x3F;
 
+#[derive(Debug, Clone, Copy)]
+#[repr(u32)]
+pub enum Register {
+    Status,
+    FramebufferAddr,
+    Width,
+    InterruptScanline,
+    CurrentScanline,
+    Burst,
+    VSync,
+    HSync,
+    HSyncLeap,
+    HVideo,
+    VVideo,
+    VBurst,
+    XScale,
+    YScale,
+}
+
 const STATUS_REG: usize = 0;
 const STATUS_LO: u32 = (STATUS_REG as u32) << 2;
 pub const STATUS: u32 = START | STATUS_LO;
@@ -20,14 +39,17 @@ pub const STATUS: u32 = START | STATUS_LO;
 const FRAMEBUFFER_ADDR_REG: usize = 1; // "ORIGIN" in some docs
 const FRAMEBUFFER_ADDR_LO: u32 = (FRAMEBUFFER_ADDR_REG as u32) << 2;
 pub const FRAMEBUFFER_ADDR: u32 = START | FRAMEBUFFER_ADDR_LO;
+const FRAMEBUFFER_ADDR_MASK: u32 = 0x00FF_FFFF;
 
 const WIDTH_REG: usize = 2;
 const WIDTH_LO: u32 = (WIDTH_REG as u32) << 2;
 pub const WIDTH: u32 = START | WIDTH_LO;
+pub const WIDTH_MASK: u32 = 0x0FFF;
 
 const INTERRUPT_SCANLINE_REG: usize = 3;
 const INTERRUPT_SCANLINE_LO: u32 = (INTERRUPT_SCANLINE_REG as u32) << 2;
 pub const INTERRUPT_SCANLINE: u32 = START | INTERRUPT_SCANLINE_LO;
+pub const INTERRUPT_SCANLINE_MASK: u32 = 0x03FF;
 
 const CURRENT_SCANLINE_REG: usize = 4;
 const CURRENT_SCANLINE_LO: u32 = (CURRENT_SCANLINE_REG as u32) << 2;
@@ -72,8 +94,9 @@ pub const Y_SCALE: u32 = START | Y_SCALE_LO;
 // NTSC 59.94 Hz, 262.5 scanlines
 // PAL 50.00 Hz, 312.5 scanlines
 
+#[derive(Debug, Clone, Copy)]
 pub struct Vi {
-    regs: [u32; 13],
+    pub regs: [u32; 14],
 }
 
 impl Default for Vi {
@@ -81,7 +104,7 @@ impl Default for Vi {
         Self {
             regs: [
                 0, 0, 0, 0, 0, 0, 0x271, // TODO PAL = 20D?
-                0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0,
             ],
         }
     }
@@ -110,25 +133,29 @@ impl Vi {
 
         let data = data.to_u32(); // TODO temp hack, should be able to write any size
 
+        // TODO mask on w or r?
+
         match reg {
             STATUS_REG => {
                 // TODO
                 log::warn!("Write VI_STATUS {:X}", data.to_u32());
+
+                s.map.vi.regs[STATUS_REG] = data;
             }
 
             FRAMEBUFFER_ADDR_REG => {
-                // TODO
-                log::warn!("Write VI_FRAMEBUFFER_ADDR {:X}", data.to_u32());
+                s.map.vi.regs[FRAMEBUFFER_ADDR_REG] = data & FRAMEBUFFER_ADDR_MASK;
             }
 
             WIDTH_REG => {
-                // TODO
-                log::warn!("Write VI_WIDTH {:X}", data.to_u32());
+                s.map.vi.regs[WIDTH_REG] = data & WIDTH_MASK;
             }
 
             INTERRUPT_SCANLINE_REG => {
                 // TODO
                 log::warn!("Write VI_INTERRUPT_SCANLINE {:X}", data.to_u32());
+
+                s.map.vi.regs[INTERRUPT_SCANLINE_REG] = data & INTERRUPT_SCANLINE_MASK;
             }
 
             CURRENT_SCANLINE_REG => {
@@ -140,87 +167,68 @@ impl Vi {
             }
 
             BURST_REG => {
-                // TODO
-                log::warn!("Write VI_BURST {:X}", data.to_u32());
+                s.map.vi.regs[BURST_REG] = data;
             }
 
             V_SYNC_REG => {
                 // TODO
                 log::warn!("Write VI_V_SYNC {:X}", data.to_u32());
+
+                s.map.vi.regs[V_SYNC_REG] = data;
             }
 
             H_SYNC_REG => {
                 // TODO
                 log::warn!("Write VI_H_SYNC {:X}", data.to_u32());
+
+                s.map.vi.regs[H_SYNC_REG] = data;
             }
 
             H_SYNC_LEAP_REG => {
                 // TODO
                 log::warn!("Write VI_H_SYNC_LEAP {:X}", data.to_u32());
+
+                s.map.vi.regs[H_SYNC_LEAP_REG] = data;
             }
 
             H_VIDEO_REG => {
                 // TODO
                 log::warn!("Write VI_H_VIDEO {:X}", data.to_u32());
+
+                s.map.vi.regs[H_VIDEO_REG] = data;
             }
 
             V_VIDEO_REG => {
                 // TODO
                 log::warn!("Write VI_V_VIDEO {:X}", data.to_u32());
+
+                s.map.vi.regs[V_VIDEO_REG] = data;
             }
 
             V_BURST_REG => {
                 // TODO
                 log::warn!("Write VI_V_BURST {:X}", data.to_u32());
+
+                s.map.vi.regs[V_BURST_REG] = data;
             }
 
             X_SCALE_REG => {
                 // TODO
                 log::warn!("Write VI_X_SCALE {:X}", data.to_u32());
+
+                s.map.vi.regs[X_SCALE_REG] = data;
             }
 
             Y_SCALE_REG => {
                 // TODO
-                log::warn!("Write VI_Y_SCALE {:X}", data.to_u32());
+                //log::warn!("Write VI_Y_SCALE {:X}", data.to_u32());
+
+                s.map.vi.regs[Y_SCALE_REG] = data;
             }
 
             _ => unimplemented!("Write VI register {:X} @ {:08X}", data.to_u32(), addr),
         }
     }
-
-    // fn start_dma(s: &mut System) {
-    //     // Instant DMA transfer!
-    //     // TODO make it progressive?
-
-    //     let length = s.map.pi.regs[WR_LEN_REG] + 1;
-
-    //     log::warn!(
-    //         "PI DMA transfer: {:#X} from {:#X} to {:#X} @ {}",
-    //         length,
-    //         s.map.pi.regs[CART_ADDR_REG],
-    //         s.map.pi.regs[DRAM_ADDR_REG],
-    //         s.cpu.step,
-    //     );
-
-    //     for offset in 0..length {
-    //         let data: u32 = s.read(s.map.pi.regs[CART_ADDR_REG] + offset);
-
-    //         s.write(s.map.pi.regs[DRAM_ADDR_REG] + offset, data);
-    //     }
-
-    //     // Update the status register
-
-    //     s.map.pi.regs[STATUS_REG] |= STATUS_DMA_BUSY_MASK;
-    //     // TODO IO busy?
-    //     // TODO DMA error? if already busy?
-
-    //     // TODO schedule status update
-
-    //     s.events.push(Event {
-    //         id: EventType::PiDmaTransferComplete,
-    //         cycle: s.cycles + (length / 8 + 100/* TODO temp hack to match pj */) as usize,
-    //     });
-    // }
 
     pub fn scanline_completed(s: &mut System) {
         // Update the status register
@@ -239,7 +247,7 @@ impl Vi {
         }
 
         if s.map.vi.regs[CURRENT_SCANLINE_REG] == s.map.vi.regs[INTERRUPT_SCANLINE_REG] {
-            s.map.mi.set_pending_interrupt(Interrupt::Pi);
+            s.map.mi.set_pending_interrupt(Interrupt::Vi);
         }
 
         s.events.push(Event {
@@ -265,6 +273,18 @@ impl Vi {
 
         // TODO cleaner way to do that?
         if s.is_empty() { None } else { Some(s) }
+    }
+
+    pub fn framebuffer_address(&self) -> u32 {
+        self.regs[FRAMEBUFFER_ADDR_REG]
+    }
+
+    pub fn framebuffer_width(&self) -> usize {
+        self.regs[WIDTH_REG] as usize
+    }
+
+    pub fn framebuffer_height(&self) -> usize {
+        480 // TODOself.regs[V_SYNC_REG] as usize
     }
 }
 

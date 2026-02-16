@@ -80,52 +80,6 @@ impl Si {
         }
     }
 
-    // fn start_dma(s: &mut System) {
-    //     // Instant DMA transfer!
-    //     // TODO make it progressive?
-
-    //     let length = s.map.pi.regs[WR_LEN_REG] + 1;
-
-    //     log::warn!(
-    //         "PI DMA transfer: {:#X} from {:#X} to {:#X} @ {}",
-    //         length,
-    //         s.map.pi.regs[CART_ADDR_REG],
-    //         s.map.pi.regs[DRAM_ADDR_REG],
-    //         s.cpu.step,
-    //     );
-
-    //     for offset in 0..length {
-    //         let data: u32 = s.read(s.map.pi.regs[CART_ADDR_REG] + offset);
-
-    //         s.write(s.map.pi.regs[DRAM_ADDR_REG] + offset, data);
-    //     }
-
-    //     // Update the status register
-
-    //     s.map.pi.regs[STATUS_REG] |= STATUS_DMA_BUSY_MASK;
-    //     // TODO IO busy?
-    //     // TODO DMA error? if already busy?
-
-    //     // TODO schedule status update
-
-    //     s.events.push(Event {
-    //         id: EventType::PiDmaTransferComplete,
-    //         cycle: s.cycles + (length / 8 + 100/* TODO temp hack to match pj */) as usize,
-    //     });
-    // }
-
-    // pub fn dma_completed(s: &mut System) {
-    //     // Update the status register
-
-    //     s.map.pi.regs[STATUS_REG] |= STATUS_DMA_COMPLETED_MASK;
-    //     s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_BUSY_MASK;
-    //     // TODO IO busy?
-
-    //     // Raise the interrupt
-
-    //     s.map.mi.set_pending_interrupt(Interrupt::Pi);
-    // }
-
     pub fn address_info(addr: u32) -> Option<&'static str> {
         assert_range(addr);
 

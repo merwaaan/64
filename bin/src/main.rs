@@ -1,50 +1,33 @@
 use clap::Parser;
+use egui::ViewportBuilder;
 use env_logger::Env;
 
 use crate::ui::Ui;
 
 mod emu;
-mod tui;
 mod ui;
 
-#[derive(Parser)]
+#[derive(clap::Parser)]
 #[command(name = env!("CARGO_PKG_NAME"), about = "N64 emulator debugger")]
-struct Args {
+pub struct Args {
     /// Path to the ROM file (.z64, .n64)
     #[arg()]
-    rom: String,
-
-    /// Breakpoint addresses (decimal or hex with 0x prefix)
-    #[arg(short, long, value_parser = parse_addr)]
-    breakpoint: Vec<u32>,
-
-    /// Start step for logging
-    #[arg(long)]
-    log_from: Option<usize>,
-
-    /// End step for logging
-    #[arg(long)]
-    log_to: Option<usize>,
+    rom: Option<String>,
 }
 
 fn main() -> eframe::Result<()> {
-    env_logger::Builder::from_env(Env::default().default_filter_or("bin=info")).init();
+    env_logger::Builder::from_env(Env::default().default_filter_or("bin=info,n64=info")).init();
 
-    let _args = Args::parse();
+    let args = Args::parse();
 
     eframe::run_native(
         "N64 Debugger",
-        eframe::NativeOptions::default(),
-        Box::new(|_cc| Ok(Box::new(Ui::new()))),
+        eframe::NativeOptions {
+            viewport: ViewportBuilder::default()
+                .with_inner_size([2000.0, 1500.0])
+                .with_drag_and_drop(true),
+            ..Default::default()
+        },
+        Box::new(|_cc| Ok(Box::new(Ui::new(&args)))),
     )
-}
-
-fn parse_addr(s: &str) -> Result<u32, String> {
-    let s = s.trim();
-
-    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        u32::from_str_radix(hex, 16).map_err(|e| e.to_string())
-    } else {
-        s.parse::<u32>().map_err(|e| e.to_string())
-    }
 }

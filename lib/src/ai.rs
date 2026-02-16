@@ -36,7 +36,7 @@ impl Ai {
         }
     }
 
-    pub fn write<T: Data>(s: &mut System, addr: u32, data: T) {
+    pub fn write<T: Data>(_s: &mut System, addr: u32, data: T) {
         assert_range(addr);
 
         let reg = ((addr & MASK) >> 2) as usize;

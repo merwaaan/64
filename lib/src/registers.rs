@@ -3,6 +3,7 @@
 // The Nintendo 64 runs in 32-bit mode and games mostly manipulate 32-bit values.
 // However, some instructions rely on the full 64-bit range of the registers (eg. DSLL, DSRL).
 
+// TODO isn't this just data<u64>?
 #[derive(Default, Copy, Clone)]
 pub struct Reg64(u64);
 

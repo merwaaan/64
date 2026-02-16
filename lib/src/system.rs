@@ -1,11 +1,16 @@
-use std::fs::File;
-use std::io::{BufWriter, Write};
-
-use crate::breakpoints::Breakpoints;
+use crate::breakpoints::{Breakpoint, Breakpoints};
 use crate::cop0::Cop0;
 use crate::data::Data;
 use crate::events::{Cycle, Event, EventType, Events};
 use crate::{cart::Cart, cpu::CPU, map::Map};
+
+#[derive(Debug, thiserror::Error)]
+pub enum LoadError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+}
 
 pub struct System {
     // Components
@@ -20,23 +25,13 @@ pub struct System {
     odd: bool, // TODO temp hack to time CPU
 
     // Debugger
-    // TODO move to external debbuger?
-    pub breakpoints: Breakpoints,
+    breakpoints: Breakpoints,
 
-    // Debug logging
-    pub log_writer: Option<BufWriter<File>>,
-    pub log_from: Option<usize>,
-    pub log_to: Option<usize>,
+    broken: bool,
 }
 
 impl System {
-    pub fn new(cart: Cart, log_from: Option<usize>, log_to: Option<usize>) -> Self {
-        let log_writer = if log_from.is_some() || log_to.is_some() {
-            Some(BufWriter::new(File::create("log1.txt").unwrap()))
-        } else {
-            None
-        };
-
+    pub fn new(cart: Cart) -> Self {
         let mut s = Self {
             cart,
             cpu: CPU::default(),
@@ -49,15 +44,22 @@ impl System {
 
             breakpoints: Breakpoints::default(),
 
-            log_writer,
-            log_from,
-            log_to,
+            broken: false,
         };
 
         s.events.push(Event {
             id: EventType::ViScanlineComplete,
             cycle: 1000, // TODO!!!
         });
+
+        match s.load() {
+            Ok(()) => {
+                log::info!("Breakpoints loaded");
+            }
+            Err(e) => {
+                log::error!("Failed to load breakpoints: {}", e);
+            }
+        }
 
         s
     }
@@ -115,59 +117,19 @@ impl System {
     }
 
     pub fn step(&mut self) -> bool {
-        // TODO temp logging
-
-        if let Some(ref mut w) = self.log_writer {
-            let log_from = self.log_from.unwrap_or(0);
-            let log_to = self.log_to.unwrap_or(usize::MAX);
-
-            if self.cpu.step >= log_from && self.cpu.step <= log_to {
-                let gpr_hex: String = self
-                    .cpu
-                    .regs
-                    .gpr
-                    .iter()
-                    .enumerate()
-                    .map(|(i, r)| format!("{}={:016X}", i, r.get64()))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-
-                let cop0_hex: String = self
-                    .cop0
-                    .regs
-                    .iter()
-                    .enumerate()
-                    .map(|(i, r)| {
-                        format!(
-                            "C{}={:016X}",
-                            i,
-                            if i == 1 || i == 9 { 0 } else { r.get64() }
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-
-                writeln!(
-                    w,
-                    "{:10} {:08X} {} {} H={:016X} L={:016X}",
-                    self.cpu.step,
-                    self.cpu.regs.pc,
-                    gpr_hex,
-                    cop0_hex,
-                    self.cpu.regs.mult_hi.get64(),
-                    self.cpu.regs.mult_lo.get64(),
-                )
-                .unwrap();
-
-                if self.log_to.is_some() && self.cpu.step == self.log_to.unwrap() {
-                    panic!("Reached last log step {}", self.cpu.step);
-                }
-            }
+        if self.broken {
+            return false;
         }
 
         // Step the CPU
 
-        CPU::step(self);
+        let ok = CPU::step(self);
+
+        if !ok {
+            log::warn!("BROKEN at {:08X}", self.cpu.regs.pc);
+            self.broken = true;
+            return false;
+        }
 
         self.cycles += 2; //if self.odd { 2 } else { 1 };
         self.odd = !self.odd;
@@ -179,38 +141,26 @@ impl System {
 
         // Check for pending interrupts
 
-        //self.map.mi.check_interrupts();
-
-        // if self.cpu.step > 5940000 {
-        //     log::info!(
-        //         "pending: {:08X} {:08X}",
-        //         self.map.mi.read::<u32>(0x430_000c).to_u32(),
-        //         self.map.mi.read::<u32>(0x430_0008).to_u32()
-        //     );
-        // }
-        // if self.cpu.step & 0b1111 == 0 {
-        //     log::info!(
-        //         "scanline: {:08X}",
-        //         self.map.vi.read::<u32>(0x440_0004).to_u32()
-        //     );
-        // }
-        // if self.map.mi.has_pending_interrupt() {
-        //     log::info!(
-        //         "ie: {}, exl: {}, erl: {}, pending: {}",
-        //         self.cop0.ie(),
-        //         self.cop0.exl(),
-        //         self.cop0.erl(),
-        //         self.map.mi.has_pending_interrupt()
-        //     );
-        // }
-
         // TODO mask?
         // TODO raise int if cause b0-1 set?
-        if self.cop0.ie()
-            && !self.cop0.exl()
-            && !self.cop0.erl()
-            && self.map.mi.has_pending_interrupt()
-        {
+
+        // if self.map.mi.has_interrupt() {
+        //     log::error!(
+        //         "has_interrupt: {} {} {}",
+        //         self.cop0.ie(),
+        //         self.cop0.exl(),
+        //         self.cop0.erl()
+        //     );
+        // }
+        if self.map.mi.has_interrupt() {
+            log::error!(
+                "has_interrupt: {} {} {}",
+                self.cop0.ie(),
+                self.cop0.exl(),
+                self.cop0.erl()
+            );
+        }
+        if self.cop0.ie() && !self.cop0.exl() && !self.cop0.erl() && self.map.mi.has_interrupt() {
             // EPC
             // Cause (BD/ExcCode)
             self.cop0.regs[13].set(0x400); // TODO tmp
@@ -219,18 +169,6 @@ impl System {
 
             self.cpu.regs.pc = 0x8000_0180; // TODO others?
         }
-
-        // TODO NEXT
-        // - check SI INTERRUPT WHEN?
-        // - impl VI INTERRUPT
-
-        // TODO temp hack
-        // if self.cpu.regs.pc == 0x802F41E0 {
-        //     self.cpu.regs.pc = 0x8000_0180;
-        //     self.cop0.regs[12].set(0xFF03);
-        //     self.cop0.regs[13].set(0x400);
-        //     self.map.mi.regs[2] = 0xA;
-        // }
 
         // Breakpoints
 
@@ -248,5 +186,34 @@ impl System {
 
     pub fn write<T: Data>(&mut self, addr: u32, data: T) {
         Map::write(self, addr, data); // TODO  Map:: really needed???
+    }
+
+    pub fn breakpoints(&self) -> &Breakpoints {
+        &self.breakpoints
+    }
+
+    pub fn add_breakpoint(&mut self, breakpoint: Breakpoint) {
+        self.breakpoints.add(breakpoint);
+
+        self.save().unwrap();
+    }
+
+    pub fn remove_breakpoint(&mut self, breakpoint: Breakpoint) {
+        self.breakpoints.remove(breakpoint);
+
+        self.save().unwrap();
+    }
+
+    fn save(&self) -> Result<(), LoadError> {
+        let breakpoints_json = serde_json::to_string(&self.breakpoints)?;
+        std::fs::write("breakpoints.json", breakpoints_json)?;
+        Ok(())
+    }
+
+    fn load(&mut self) -> Result<(), LoadError> {
+        let breakpoints_json = std::fs::read_to_string("breakpoints.json")?;
+        let breakpoints: Breakpoints = serde_json::from_str(&breakpoints_json)?;
+        self.breakpoints = breakpoints;
+        Ok(())
     }
 }

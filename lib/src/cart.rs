@@ -10,6 +10,7 @@ pub struct Cart {
 }
 
 impl Cart {
+    // TODO return endianness, log outside
     pub fn load(path: &Path) -> Result<Self, std::io::Error> {
         let mut data = Vec::new(); // TODO just store as u32s?
 

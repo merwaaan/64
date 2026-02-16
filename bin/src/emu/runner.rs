@@ -2,13 +2,18 @@ use std::thread::{self, JoinHandle};
 
 use crossbeam::channel::{Receiver, Sender, TryRecvError, unbounded};
 use n64::{
-    instructions::{Opcode, decode},
+    instructions::{Disassembly, Opcode, decode},
     system::System,
 };
 
 use crate::{
     emu::{command::Command, event::Event},
-    ui::{UiSettings, instructions::InstructionData},
+    ui::{
+        framebuffer::FramebufferUpdate,
+        instructions::{InstructionAddress, InstructionData, InstructionsSettings},
+        memory::{MemorySettings, MemoryUpdate},
+        registers::RegistersUpdate,
+    },
 };
 
 #[derive(Debug)]
@@ -18,7 +23,15 @@ pub enum RunMode {
     Exited,
 }
 
-pub struct State {
+#[derive(Default)]
+pub struct UiSettings {
+    pub instructions: Option<InstructionsSettings>,
+    pub registers: Option<()>,
+    pub memory: Option<MemorySettings>,
+    pub framebuffer: Option<()>,
+}
+
+pub struct RunnerState {
     pub system: Option<System>,
     pub run_mode: RunMode,
     pub ui_settings: UiSettings,
@@ -30,6 +43,8 @@ pub struct Runner {
     event_rx: Receiver<Event>,
 }
 
+const UPDATE_INTERVAL: usize = 100_000;
+
 impl Runner {
     pub fn new() -> Self {
         // Setup the core thread
@@ -40,7 +55,7 @@ impl Runner {
         let thread = thread::Builder::new()
             .name("Core".to_string())
             .spawn(move || {
-                let mut state: State = State {
+                let mut state: RunnerState = RunnerState {
                     system: None,
                     run_mode: RunMode::Paused {
                         step_requested: false,
@@ -56,7 +71,11 @@ impl Runner {
                     loop {
                         match command_rx.try_recv() {
                             Ok(command) => {
-                                command.handle(&mut state);
+                                let events = command.handle(&mut state);
+
+                                for event in events {
+                                    event_tx.send(event).unwrap();
+                                }
                             }
                             Err(TryRecvError::Empty) => {
                                 break;
@@ -67,9 +86,9 @@ impl Runner {
                         }
                     }
 
-                    // Update the system (when running, or one step when paused and step requested)
+                    // Update the system
 
-                    let do_step = matches!(state.run_mode, RunMode::Running)
+                    let step = matches!(state.run_mode, RunMode::Running)
                         || matches!(
                             state.run_mode,
                             RunMode::Paused {
@@ -77,54 +96,37 @@ impl Runner {
                             }
                         );
 
-                    if do_step {
-                        if let Some(system) = &mut state.system {
-                            system.step();
+                    if step && let Some(system) = &mut state.system {
+                        let mut send_update = false;
 
+                        let breakpoint_hit = system.step();
+
+                        if breakpoint_hit {
+                            state.run_mode = RunMode::Paused {
+                                step_requested: false,
+                            };
+
+                            event_tx
+                                .send(Event::Pause)
+                                .expect("Failed to send pause event");
+
+                            send_update = true;
+                        } else {
                             if let RunMode::Paused { step_requested } = &mut state.run_mode {
                                 *step_requested = false;
+                                send_update = true;
                             }
 
                             xxx += 1;
 
-                            let send_event = xxx % 1000 == 0;
+                            if xxx % UPDATE_INTERVAL == 0 {
+                                send_update = true;
+                            }
+                        }
 
-                            if send_event {
-                                let instructions =
-                                    state.ui_settings.instructions.as_ref().map(|settings| {
-                                        (settings.address
-                                            ..settings.address + settings.rows as u32 * 4)
-                                            .step_by(4)
-                                            .map(|addr| {
-                                                let instruction = system.read(addr);
-                                                let opcode = Opcode(instruction);
-                                                let handler = decode(opcode);
-                                                let disassembly =
-                                                    handler.disassemble(system, opcode);
-                                                InstructionData {
-                                                    address: addr,
-                                                    disassembly,
-                                                }
-                                            })
-                                            .collect()
-                                    });
-
-                                let cpu_regs =
-                                    state.ui_settings.cpu_regs.map(|_| system.cpu.regs.clone()); // TODO check bool
-
-                                let memory = state.ui_settings.memory.as_ref().map(|settings| {
-                                    (0..settings.rows * 4)
-                                        .map(|i| system.read(settings.address + (i as u32) * 4))
-                                        .collect()
-                                });
-
-                                event_tx
-                                    .send(Event::Update {
-                                        instructions,
-                                        cpu_regs,
-                                        memory,
-                                    })
-                                    .unwrap();
+                        if send_update {
+                            for event in Runner::update_events(&state) {
+                                event_tx.send(event).unwrap();
                             }
                         }
                     }
@@ -135,8 +137,10 @@ impl Runner {
                         break;
                     }
                 }
+
+                log::info!("Core thread exited");
             })
-            .unwrap();
+            .expect("Failed to spawn core thread");
 
         Self {
             thread,
@@ -147,11 +151,105 @@ impl Runner {
 
     /// Sends a command to the core thread.
     pub fn send_command(&self, command: Command) {
-        self.command_tx.send(command).unwrap();
+        self.command_tx
+            .send(command)
+            .expect("Failed to send command");
     }
 
-    /// Receives one event if available.
+    /// Receives an event from the core thread if available.
     pub fn poll_event(&self) -> Option<Event> {
         self.event_rx.try_recv().ok()
+    }
+
+    pub fn update_events(state: &RunnerState) -> Vec<Event> {
+        let mut events = Vec::new();
+
+        if let Some(system) = &state.system {
+            if let Some(instructions_settings) = state.ui_settings.instructions.as_ref() {
+                let base_address = match instructions_settings.base_address {
+                    InstructionAddress::Pc => system.cpu.regs.pc,
+                    InstructionAddress::Address(addr) => addr,
+                };
+
+                let instructions = (base_address
+                    ..base_address + instructions_settings.rows as u32 * 4)
+                    .step_by(4)
+                    .map(|addr| {
+                        let instruction = system.read(addr);
+
+                        let opcode = Opcode(instruction);
+                        let handler = decode(opcode);
+
+                        if let Some(handler) = handler {
+                            let disassembly = handler.disassemble(system, opcode);
+
+                            InstructionData {
+                                address: addr,
+                                disassembly,
+                            }
+                        } else {
+                            InstructionData {
+                                address: addr,
+                                disassembly: Disassembly::new("<UNKNOWN>".to_string()),
+                            }
+                        }
+                    })
+                    .collect();
+
+                events.push(Event::InstructionsUpdate(instructions));
+            }
+
+            if let Some(registers_setting) = state.ui_settings.registers.as_ref() {
+                let registers = RegistersUpdate {
+                    cpu_regs: system.cpu.regs,
+                    cop0_regs: system.cop0.regs,
+                };
+
+                events.push(Event::RegistersUpdate(registers));
+            }
+
+            if let Some(memory_settings) = state.ui_settings.memory.as_ref() {
+                let base_address = memory_settings.address & !0xF;
+
+                let data = (0..memory_settings.rows * 16)
+                    .map(|i| system.read(base_address + i as u32))
+                    .collect();
+
+                events.push(Event::MemoryUpdate(MemoryUpdate { base_address, data }));
+            }
+
+            if let Some(framebuffer_settings) = state.ui_settings.framebuffer.as_ref() {
+                let base_addr = system.map.vi.framebuffer_address();
+                let width = system.map.vi.framebuffer_width();
+                let height = system.map.vi.framebuffer_height();
+
+                let mut data = Vec::with_capacity(width * height * 4);
+
+                let byte: u8 = rand::random();
+
+                for y in 0..height {
+                    for x in 0..width {
+                        let pixel: u32 = system.read(base_addr + ((y * width + x) * 4) as u32);
+
+                        data.push((pixel >> 24) as u8);
+                        data.push((pixel >> 16) as u8);
+                        data.push((pixel >> 8) as u8);
+                        data.push(0xFF); // TODO real val
+                    }
+                }
+
+                events.push(Event::FramebufferUpdate(FramebufferUpdate {
+                    width: width,
+                    height: height,
+                    data,
+                }));
+            }
+
+            // TODO conditional
+            events.push(Event::MiUpdate(system.map.mi));
+            events.push(Event::ViUpdate(system.map.vi));
+        }
+
+        events
     }
 }

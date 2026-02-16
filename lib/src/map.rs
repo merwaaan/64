@@ -54,25 +54,13 @@ const RDRAM_REG_BROADCAST_SIZE: usize = 0x0008_0000;
 const RDRAM_REG_BROADCAST_END: u32 = RDRAM_REG_BROADCAST_START + RDRAM_REG_BROADCAST_SIZE as u32;
 
 impl Map {
-    // fn read_word(addr: u32, buffer: &[u8]) -> u32 {
-    //     let word = buffer[addr as usize] as u32;
-    //     let word = word << 8 | buffer[addr as usize + 1] as u32;
-    //     let word = word << 8 | buffer[addr as usize + 2] as u32;
-    //     word << 8 | buffer[addr as usize + 3] as u32
-    // }
-
-    // // TODO bad?
-    // pub fn read8(s: &mut System, addr: u32) -> u8 {
-    //     let addr32 = addr & !3;
-    //     let value32 = Self::read(s, addr32);
-
-    //     let byte_offset = addr & 3;
-
-    //     (value32 >> ((3 - byte_offset) * 8)) as u8
-    // }
-
     pub fn read<T: Data>(s: &System, addr: u32) -> T {
+        let eee = addr;
         let addr = virtual_to_physical_address(addr);
+
+        if (addr == 0x8030_90FC) {
+            log::warn!("READ {:08X} @ {:08X}", eee, addr);
+        }
 
         match addr {
             // RDRAM
@@ -127,6 +115,11 @@ impl Map {
                 T::from_u32((lo << 16) | lo) // TODO weirddd
             }
 
+            // 0x0800_0000..=0x09FF_FFFF => {
+            //     log::warn!("READ {:08X} @ {:08X}", eee, addr);
+            //     T::from_u32(0)
+            // }
+
             // Cartridge
             0x1000_0000..=0x1FBFFFFF => {
                 T::read(&s.cart.data, addr - 0x1000_0000) // TODO
@@ -144,38 +137,6 @@ impl Map {
             ),
         }
     }
-
-    // fn write_word(offset: u32, data: u32, buffer: &mut [u8]) {
-    //     buffer[offset as usize] = (data >> 24) as u8;
-    //     buffer[offset as usize + 1] = (data >> 16) as u8;
-    //     buffer[offset as usize + 2] = (data >> 8) as u8;
-    //     buffer[offset as usize + 3] = (data & 0xFF) as u8;
-    // }
-
-    // // TODO bad?
-    // pub fn write8(s: &mut System, addr: u32, data: u8) {
-    //     let addr32 = addr & !3;
-    //     let mut value32 = s.read(addr32);
-
-    //     let byte_offset = addr & 3;
-
-    //     value32 = value32 & !(0xFF << ((3 - byte_offset) * 8))
-    //         | ((data as u32) << ((3 - byte_offset) * 8));
-
-    //     s.write(addr32, value32);
-    // }
-
-    // pub fn write16(s: &mut System, addr: u32, data: u16) {
-    //     let addr32 = addr & !3;
-    //     let mut value32 = s.read(addr32);
-
-    //     let byte_offset = addr & 3;
-
-    //     value32 = value32 & !(0xFF << ((3 - byte_offset) * 8))
-    //         | ((data as u32) << ((3 - byte_offset) * 8));
-
-    //     s.write(addr32, value32);
-    // }
 
     // TODO what if address crosses a boundary?
     pub fn write<T: Data>(s: &mut System, addr: u32, data: T) {
