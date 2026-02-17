@@ -2,3 +2,4 @@ Cargo.lock
 target
 *.n64
 *.z64
+_*

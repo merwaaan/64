@@ -286,6 +286,27 @@ impl Vi {
     pub fn framebuffer_height(&self) -> usize {
         480 // TODOself.regs[V_SYNC_REG] as usize
     }
+
+    pub fn extract_framebuffer(s: &System) -> (Vec<u8>, usize, usize) {
+        let base_addr = s.map.vi.framebuffer_address();
+        let width = s.map.vi.framebuffer_width();
+        let height = s.map.vi.framebuffer_height();
+
+        let mut data = Vec::with_capacity(width * height * 4);
+
+        for y in 0..height {
+            for x in 0..width {
+                let pixel: u32 = s.read(base_addr + ((y * width + x) * 4) as u32);
+
+                data.push((pixel >> 24) as u8);
+                data.push((pixel >> 16) as u8);
+                data.push((pixel >> 8) as u8);
+                data.push(0xFF); // TODO real val
+            }
+        }
+
+        (data, width, height)
+    }
 }
 
 fn assert_range(addr: u32) {

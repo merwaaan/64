@@ -4,6 +4,7 @@ use crossbeam::channel::{Receiver, Sender, TryRecvError, unbounded};
 use n64::{
     instructions::{Disassembly, Opcode, decode},
     system::System,
+    vi::Vi,
 };
 
 use crate::{
@@ -199,7 +200,7 @@ impl Runner {
                 events.push(Event::InstructionsUpdate(instructions));
             }
 
-            if let Some(registers_setting) = state.ui_settings.registers.as_ref() {
+            if state.ui_settings.registers.is_some() {
                 let registers = RegistersUpdate {
                     cpu_regs: system.cpu.regs,
                     cop0_regs: system.cop0.regs,
@@ -218,29 +219,12 @@ impl Runner {
                 events.push(Event::MemoryUpdate(MemoryUpdate { base_address, data }));
             }
 
-            if let Some(framebuffer_settings) = state.ui_settings.framebuffer.as_ref() {
-                let base_addr = system.map.vi.framebuffer_address();
-                let width = system.map.vi.framebuffer_width();
-                let height = system.map.vi.framebuffer_height();
-
-                let mut data = Vec::with_capacity(width * height * 4);
-
-                let byte: u8 = rand::random();
-
-                for y in 0..height {
-                    for x in 0..width {
-                        let pixel: u32 = system.read(base_addr + ((y * width + x) * 4) as u32);
-
-                        data.push((pixel >> 24) as u8);
-                        data.push((pixel >> 16) as u8);
-                        data.push((pixel >> 8) as u8);
-                        data.push(0xFF); // TODO real val
-                    }
-                }
+            if let Some(()) = state.ui_settings.framebuffer.as_ref() {
+                let (data, width, height) = Vi::extract_framebuffer(system);
 
                 events.push(Event::FramebufferUpdate(FramebufferUpdate {
-                    width: width,
-                    height: height,
+                    width,
+                    height,
                     data,
                 }));
             }

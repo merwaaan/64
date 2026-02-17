@@ -58,10 +58,6 @@ impl Map {
         let eee = addr;
         let addr = virtual_to_physical_address(addr);
 
-        if (addr == 0x8030_90FC) {
-            log::warn!("READ {:08X} @ {:08X}", eee, addr);
-        }
-
         match addr {
             // RDRAM
             RDRAM_START..RDRAM_END => T::read(&s.map.rdram, addr - RDRAM_START),
