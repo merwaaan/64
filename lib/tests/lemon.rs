@@ -33,7 +33,7 @@ use rstest::rstest;
 #[case::ld("LOADSTORE/LD/CPULD")]
 #[case::lh("LOADSTORE/LH/CPULH")]
 #[case::lw("LOADSTORE/LW/CPULW")]
-// TODO LL_LLD_SC_SCD.N64
+#[case::ll_lld_sc_scd("LOADSTORE/LL_LLD_SC_SCD/LL_LLD_SC_SCD")]
 #[case::sb("LOADSTORE/SB/CPUSB")]
 #[case::sd("LOADSTORE/SD/CPUSD")]
 #[case::sh("LOADSTORE/SH/CPUSH")]
@@ -60,12 +60,42 @@ use rstest::rstest;
 #[case::subu("SUBU/CPUSUBU")]
 //TODO#[case::timingnstc("TIMINGNSTC")]
 #[case::xor("XOR/CPUXOR")]
-fn lemon_cpu(#[case] test_name: &str) {
+fn cpu(#[case] test_name: &str) {
     test(format!("CPUTest/CPU/{test_name}"));
 }
 
 // TODO cop0
 // TODO cop1
+// TODO exceptions
+// TODO DMA
+
+#[rstest]
+#[case::rcp_version("RCP/Version/RCPVersion")]
+fn rcp(#[case] test_name: &str) {
+    test(format!("RCP/CPU/{test_name}"));
+}
+
+#[rstest]
+#[case::rcp_version("16BPP/FrameBufferCPU320x240/FrameBufferCPU16BPP320X240")]
+#[case::rcp_version("16BPP/FrameBufferDMA320x240/FrameBufferDMA16BPP320X240")]
+#[case::rcp_version("32BPP/FrameBufferCPU640x480/FrameBufferCPU32BPP640X480")]
+#[case::rcp_version("32BPP/FrameBufferDMA640x480/FrameBufferDMA32BPP640X480")]
+fn framebuffer(#[case] test_name: &str) {
+    test(format!("FrameBuffer/{test_name}"));
+}
+
+#[rstest]
+#[case::rcp_version("16BPP/HelloWorldCPU320x240/HelloWorldCPU16BPP320X240")]
+#[case::rcp_version("16BPP/HelloWorldRDP320x240/HelloWorldRDP16BPP320X240")]
+#[case::rcp_version("32BPP/HelloWorldCPU320x240/HelloWorldCPU32BPP320X240")]
+#[case::rcp_version("32BPP/HelloWorldRDP320x240/HelloWorldRDP32BPP320X240")]
+fn hello_world(#[case] test_name: &str) {
+    test(format!("HelloWorld/{test_name}"));
+}
+
+// TODO fractals
+// TODO rsp
+// TODO rdp
 
 fn test(test_name: impl AsRef<str>) {
     // Download the ROM and reference output
@@ -80,7 +110,7 @@ fn test(test_name: impl AsRef<str>) {
     let mut system = System::new(cart);
     system.skip_ipl();
 
-    for _ in 0..10_000_000 {
+    for _ in 0..100_000_000 {
         system.step();
     }
 

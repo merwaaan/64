@@ -40,6 +40,10 @@ impl Opcode {
         cpu.regs.gpr[self.rs()].get()
     }
 
+    fn rsv64(&self, cpu: &CPU) -> u64 {
+        cpu.regs.gpr[self.rs()].get64()
+    }
+
     fn rsn(&self) -> &'static str {
         Registers::gpr_name(self.rs())
     }
@@ -50,6 +54,10 @@ impl Opcode {
 
     fn rtv(&self, cpu: &CPU) -> u32 {
         cpu.regs.gpr[self.rt()].get()
+    }
+
+    fn rtv64(&self, cpu: &CPU) -> u64 {
+        cpu.regs.gpr[self.rt()].get64()
     }
 
     fn rtn(&self) -> &'static str {
@@ -155,6 +163,7 @@ pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
             0x1A => &DIV_,
             0x1B => &DIVU_,
             0x1D => &DMULTU_,
+            0x1E => &DDIV_,
             0x1F => &DDIVU_,
             0x20 => &ADD_,
             0x21 => &ADDU_,
@@ -166,6 +175,7 @@ pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
             0x27 => &NOR_,
             0x2A => &SLT_,
             0x2B => &SLTU_,
+            0x2D => &DADDU_,
             0x3C => &DSLL32_,
             0x3F => &DSRA32_,
             _ => &UNKNOWN_,
@@ -217,16 +227,22 @@ pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
         0x14 => &BEQL_,
         0x15 => &BNEL_,
         0x16 => &BLEZL_,
+        0x19 => &DADDIU_,
         0x20 => &LB_,
         0x21 => &LH_,
+        0x22 => &LWL_,
         0x23 => &LW_,
         0x24 => &LBU_,
         0x25 => &LHU_,
+        0x26 => &LWR_,
+        0x27 => &LWU_,
         0x28 => &SB_,
         0x29 => &SH_,
+        0x2A => &SWL_,
         0x2B => &SW_,
         0x2C => &SDL_,
         0x2D => &SDR_,
+        0x2E => &SWR_,
         0x2F => &CACHE_,
         0x30 => &LL_,
         0x31 => &LWC1_,
@@ -337,7 +353,7 @@ instruction_struct!(AND);
 
 impl Instruction for AND {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        s.cpu.regs.gpr[op.rd()].set(op.rsv(&s.cpu) & op.rtv(&s.cpu));
+        s.cpu.regs.gpr[op.rd()].set64(op.rsv64(&s.cpu) & op.rtv64(&s.cpu));
 
         None
     }
@@ -351,7 +367,7 @@ instruction_struct!(ANDI);
 
 impl Instruction for ANDI {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        s.cpu.regs.gpr[op.rt()].set(op.rsv(&s.cpu) & (op.imm16() as u32));
+        s.cpu.regs.gpr[op.rt()].set64(op.rsv64(&s.cpu) & (op.imm16() as u64));
 
         None
     }
@@ -596,6 +612,7 @@ impl Instruction for CACHE {
     }
 }
 
+// TODO mvoe down
 instruction_struct!(LWC1);
 
 impl Instruction for LWC1 {
@@ -631,20 +648,59 @@ impl Instruction for CFC1 {
     }
 }
 
+instruction_struct!(DADDIU);
+
+impl Instruction for DADDIU {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let data = op.imm16() as i16 as i64 as u64;
+
+        s.cpu.regs.gpr[op.rt()].set64(op.rsv64(&s.cpu).wrapping_add(data));
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("DADDIU {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+    }
+}
+
+instruction_struct!(DADDU);
+
+impl Instruction for DADDU {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rd()].set64(op.rsv64(&s.cpu).wrapping_add(op.rtv64(&s.cpu)));
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("DADDU {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+    }
+}
+
 // TODO div by zero?
 
 instruction_struct!(DIV);
 
 impl Instruction for DIV {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let rsv = s.cpu.regs.gpr[op.rs()].get() as i32; // TODO sure about sign??
-        let rtv = s.cpu.regs.gpr[op.rt()].get() as i32;
+        let rsvs = s.cpu.regs.gpr[op.rs()].get() as i32;
+        let rtvs = s.cpu.regs.gpr[op.rt()].get() as i32;
 
-        let quotient = rsv / rtv;
-        let remainder = rsv % rtv;
-
-        s.cpu.regs.mult_hi.set(remainder as u32);
-        s.cpu.regs.mult_lo.set(quotient as u32);
+        if rtvs == 0 {
+            s.cpu.regs.mult_hi.set(rsvs as u32);
+            s.cpu.regs.mult_lo.set(if rsvs >= 0 { u32::MAX } else { 1 });
+            // TODO really? matches lemon tests
+        } else {
+            s.cpu
+                .regs
+                .mult_hi
+                .set((rsvs).overflowing_rem(rtvs).0 as u32);
+            s.cpu
+                .regs
+                .mult_lo
+                .set((rsvs).overflowing_div(rtvs).0 as u32);
+        }
 
         None
     }
@@ -661,17 +717,51 @@ impl Instruction for DIVU {
         let rsv = s.cpu.regs.gpr[op.rs()].get();
         let rtv = s.cpu.regs.gpr[op.rt()].get();
 
-        let quotient = rsv / rtv;
-        let remainder = rsv % rtv;
-
-        s.cpu.regs.mult_hi.set(remainder as u32);
-        s.cpu.regs.mult_lo.set(quotient as u32);
+        if rtv == 0 {
+            s.cpu.regs.mult_hi.set(rsv as u32);
+            s.cpu.regs.mult_lo.set(u32::MAX);
+        } else {
+            s.cpu.regs.mult_hi.set((rsv).overflowing_rem(rtv).0);
+            s.cpu.regs.mult_lo.set((rsv).overflowing_div(rtv).0);
+        }
 
         None
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
         Disassembly::new(format!("DIVU {}, {}", op.rsn(), op.rtn()))
+    }
+}
+
+instruction_struct!(DDIV);
+
+impl Instruction for DDIV {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let rsv = s.cpu.regs.gpr[op.rs()].get64() as i64;
+        let rtv = s.cpu.regs.gpr[op.rt()].get64() as i64;
+
+        if rtv == 0 {
+            s.cpu.regs.mult_hi.set64(rsv as u64);
+            s.cpu
+                .regs
+                .mult_lo
+                .set64(if rsv >= 0 { u64::MAX } else { 1 }); // TODO????
+        } else {
+            s.cpu
+                .regs
+                .mult_hi
+                .set64((rsv).overflowing_rem(rtv).0 as u64);
+            s.cpu
+                .regs
+                .mult_lo
+                .set64((rsv).overflowing_div(rtv).0 as u64);
+        }
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("DDIV {}, {}", op.rsn(), op.rtn()))
     }
 }
 
@@ -682,11 +772,27 @@ impl Instruction for DDIVU {
         let rsv = s.cpu.regs.gpr[op.rs()].get64();
         let rtv = s.cpu.regs.gpr[op.rt()].get64();
 
-        let quotient = rsv / rtv;
-        let remainder = rsv % rtv;
+        if rtv == 0 {
+            s.cpu.regs.mult_hi.set64(rsv as u64);
+            s.cpu.regs.mult_lo.set64(u64::MAX);
+        } else {
+            s.cpu.regs.mult_hi.set64((rsv).overflowing_rem(rtv).0);
+            s.cpu.regs.mult_lo.set64((rsv).overflowing_div(rtv).0);
 
-        s.cpu.regs.mult_hi.set64(remainder);
-        s.cpu.regs.mult_lo.set64(quotient);
+            println!(
+                "DDIVU {:X}, {:X}, {:X}, {:X}",
+                rsv,
+                rtv,
+                (rsv).overflowing_div(rtv).0,
+                (rsv).overflowing_rem(rtv).0
+            );
+
+            println!(
+                "mult_hi: {:X}, mult_lo: {:X}",
+                s.cpu.regs.mult_hi.get64(),
+                s.cpu.regs.mult_lo.get64()
+            );
+        }
 
         None
     }
@@ -1152,6 +1258,122 @@ impl Instruction for LW {
     }
 }
 
+instruction_struct!(LWL);
+
+impl Instruction for LWL {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        let addr_base = addr & !3;
+        let addr_offset = addr & 3;
+
+        let data = s.read::<u32>(addr_base);
+
+        let word = if addr_offset == 0 {
+            data
+        } else {
+            let mut word = s.cpu.regs.gpr[op.rt()].get();
+            word &= 0xFFFF_FFFF >> (32 - 8 * addr_offset);
+            word |= data << (8 * addr_offset);
+            word
+        };
+
+        s.cpu.regs.gpr[op.rt()].set(word);
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        Disassembly::new(format!(
+            "LWL {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(addr)
+    }
+}
+
+// TODO move partial shift stuff to helpers!
+
+instruction_struct!(LWR);
+
+impl Instruction for LWR {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        let addr_base = addr & !3;
+        let addr_offset = addr & 3;
+
+        let data = s.read::<u32>(addr_base);
+
+        let word = if addr_offset == 3 {
+            data
+        } else {
+            let mut word = s.cpu.regs.gpr[op.rt()].get();
+            word &= !(0xFFFF_FFFF >> (24 - 8 * addr_offset));
+            word |= data >> (24 - 8 * addr_offset);
+            word
+        };
+
+        s.cpu.regs.gpr[op.rt()].set(word);
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        Disassembly::new(format!(
+            "LWR {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(addr)
+    }
+}
+
+instruction_struct!(LWU);
+
+impl Instruction for LWU {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        s.cpu.regs.gpr[op.rt()].set64(s.read::<u32>(addr) as u64);
+
+        // TODO exception?
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        Disassembly::new(format!(
+            "LWU {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(addr)
+    }
+}
+
 instruction_struct!(MFHI);
 
 impl Instruction for MFHI {
@@ -1246,7 +1468,7 @@ instruction_struct!(NOR);
 
 impl Instruction for NOR {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        s.cpu.regs.gpr[op.rd()].set(!(op.rsv(&s.cpu) | op.rtv(&s.cpu)));
+        s.cpu.regs.gpr[op.rd()].set64(!(op.rsv64(&s.cpu) | op.rtv64(&s.cpu)));
         None
     }
 
@@ -1259,7 +1481,7 @@ instruction_struct!(OR);
 
 impl Instruction for OR {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        s.cpu.regs.gpr[op.rd()].set(op.rsv(&s.cpu) | op.rtv(&s.cpu));
+        s.cpu.regs.gpr[op.rd()].set64(op.rsv64(&s.cpu) | op.rtv64(&s.cpu));
         None
     }
 
@@ -1272,7 +1494,7 @@ instruction_struct!(ORI);
 
 impl Instruction for ORI {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        s.cpu.regs.gpr[op.rt()].set(op.rsv(&s.cpu) | op.imm16() as u32);
+        s.cpu.regs.gpr[op.rt()].set64(op.rsv64(&s.cpu) | op.imm16() as u64);
         None
     }
 
@@ -1294,7 +1516,7 @@ impl Instruction for SB {
             .basev(&s.cpu)
             .wrapping_add(op.imm16() as i16 as i32 as u32); // TODO helper!!!
 
-        let data = op.rtv(&s.cpu) as i8 as i32 as u32;
+        let data = op.rtv(&s.cpu) as u8;
 
         s.write(addr, data);
 
@@ -1362,6 +1584,8 @@ impl Instruction for SD {
 
         s.write(addr, s.cpu.regs.gpr[op.rt()].get64());
 
+        // TODO addr exception?
+
         None
     }
 
@@ -1380,25 +1604,27 @@ impl Instruction for SD {
     }
 }
 
-// TODO debug lol
-// TODO 64
 instruction_struct!(SDL);
 
 impl Instruction for SDL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let value = op.rtv(&s.cpu);
         let addr = op
             .basev(&s.cpu)
             .wrapping_add(op.imm16() as i16 as i32 as u32);
 
-        let byte_offset = addr & 7;
+        let base = addr & !7;
+        let offset = addr & 7;
 
-        for i in 0..8 - byte_offset {
-            let byte_addr = addr + i;
-            let byte = (value >> (7 - i)) as u8;
+        let dword = if offset == 0 {
+            op.rtv64(&s.cpu)
+        } else {
+            let mut dword = s.read::<u64>(base);
+            dword &= 0xFFFFFFFF_FFFFFFFF << (64 - 8 * offset);
+            dword |= op.rtv64(&s.cpu) >> (8 * offset);
+            dword
+        };
 
-            s.write(byte_addr, byte);
-        }
+        s.write::<u64>(base, dword);
 
         None
     }
@@ -1413,25 +1639,27 @@ impl Instruction for SDL {
     }
 }
 
-// TODO debug lol
-// TODO 64
 instruction_struct!(SDR);
 
 impl Instruction for SDR {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let value = op.rtv(&s.cpu);
         let addr = op
             .basev(&s.cpu)
             .wrapping_add(op.imm16() as i16 as i32 as u32);
 
-        let byte_offset = addr & 7;
+        let base = addr & !7;
+        let offset = addr & 7;
 
-        for i in 0..=byte_offset {
-            let byte_addr = addr + i;
-            let byte = (value >> (byte_offset + i)) as u8;
+        let dword = if offset == 7 {
+            op.rtv64(&s.cpu)
+        } else {
+            let mut dword = s.read::<u64>(base);
+            dword &= 0xFFFFFFFF_FFFFFFFF >> (8 * (offset + 1));
+            dword |= op.rtv64(&s.cpu) << (56 - 8 * offset);
+            dword
+        };
 
-            s.write(byte_addr, byte);
-        }
+        s.write(base, dword);
 
         None
     }
@@ -1649,7 +1877,11 @@ impl Instruction for SW {
         let addr = op
             .basev(&s.cpu)
             .wrapping_add(op.imm16() as i16 as i32 as u32);
+
         s.write(addr, op.rtv(&s.cpu));
+
+        // TODO addr exception if 2bits != 0?
+
         None
     }
 
@@ -1699,6 +1931,86 @@ impl Instruction for SYNC {
 
     fn disassemble(&self, _s: &System, _op: Opcode) -> Disassembly {
         Disassembly::new("SYNC".to_string())
+    }
+}
+
+instruction_struct!(SWL);
+
+impl Instruction for SWL {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        let base = addr & !3;
+        let offset = addr & 3;
+
+        let word = if offset == 0 {
+            op.rtv(&s.cpu)
+        } else {
+            let mut word = s.read::<u32>(base);
+            word &= 0xFFFF_FFFF << (32 - 8 * offset);
+            word |= op.rtv(&s.cpu) >> (8 * offset);
+            word
+        };
+
+        s.write(base, word);
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        Disassembly::new(format!(
+            "SWL {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(addr)
+    }
+}
+
+instruction_struct!(SWR);
+
+impl Instruction for SWR {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        let base = addr & !3;
+        let offset = addr & 3;
+
+        let word = if offset == 3 {
+            op.rtv(&s.cpu)
+        } else {
+            let mut word = s.read::<u32>(base);
+            word &= 0xFFFF_FFFF >> (8 * (offset + 1));
+            word |= op.rtv(&s.cpu) << (24 - 8 * offset);
+            word
+        };
+
+        s.write(base, word);
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        let addr = op
+            .basev(&s.cpu)
+            .wrapping_add(op.imm16() as i16 as i32 as u32);
+
+        Disassembly::new(format!(
+            "SWR {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(addr)
     }
 }
 
@@ -1756,7 +2068,7 @@ instruction_struct!(XOR);
 
 impl Instruction for XOR {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        s.cpu.regs.gpr[op.rd()].set(op.rsv(&s.cpu) ^ op.rtv(&s.cpu));
+        s.cpu.regs.gpr[op.rd()].set64(op.rsv64(&s.cpu) ^ op.rtv64(&s.cpu));
         None
     }
 
@@ -1769,7 +2081,7 @@ instruction_struct!(XORI);
 
 impl Instruction for XORI {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        s.cpu.regs.gpr[op.rt()].set(op.rsv(&s.cpu) ^ op.imm16() as u32);
+        s.cpu.regs.gpr[op.rt()].set64(op.rsv64(&s.cpu) ^ op.imm16() as u64);
         None
     }
 
