@@ -6,35 +6,29 @@ use crate::{
     system::System,
 };
 
-pub const START: u32 = 0x0460_0000;
-pub const SIZE: u32 = 0x10_0000;
-pub const END: u32 = START + SIZE;
+const START: u32 = 0x0460_0000;
+const END: u32 = 0x0470_0000;
 
 pub type PiLocation = Location<START, END>;
 
-pub const MASK: u32 = 0x1F;
+const MASK: u32 = 0x1F;
 
 // TODO macro?
 
 const DRAM_ADDR_REG: usize = 0;
 const DRAM_ADDR_LO: u32 = (DRAM_ADDR_REG as u32) << 2;
-pub const DRAM_ADDR: u32 = START | DRAM_ADDR_LO;
 
 const CART_ADDR_REG: usize = 1;
 const CART_ADDR_LO: u32 = (CART_ADDR_REG as u32) << 2;
-pub const CART_ADDR: u32 = START | CART_ADDR_LO;
 
 const READ_LEN_REG: usize = 2;
 const READ_LEN_LO: u32 = (READ_LEN_REG as u32) << 2;
-pub const READ_LEN: u32 = START | READ_LEN_LO;
 
 const WRITE_LEN_REG: usize = 3;
-pub const WRITE_LEN_LO: u32 = (WRITE_LEN_REG as u32) << 2;
-const WRITE_LEN: u32 = START | WRITE_LEN_LO;
+const WRITE_LEN_LO: u32 = (WRITE_LEN_REG as u32) << 2;
 
 const STATUS_REG: usize = 4;
 const STATUS_LO: u32 = (STATUS_REG as u32) << 2;
-pub const STATUS: u32 = START | STATUS_LO;
 
 const STATUS_DMA_BUSY_MASK: u32 = 1;
 const STATUS_IO_BUSY_MASK: u32 = 1 << 1;
@@ -62,17 +56,21 @@ impl Pi {
 
         match reg {
             DRAM_ADDR_REG => {
+                log::warn!("Write PI_DRAM_ADDR {:X}", data);
                 s.map.pi.regs[DRAM_ADDR_REG] = data & 0x00FF_FFFE;
             }
             CART_ADDR_REG => {
+                log::warn!("Write PI_CART_ADDR {:X}", data);
                 s.map.pi.regs[CART_ADDR_REG] = data & 0xFFFF_FFFE; // TODO auto updated after DMA transfer
             }
             READ_LEN_REG => {
+                log::warn!("Write PI_READ_LEN {:X}", data);
                 s.map.pi.regs[READ_LEN_REG] = data & 0x00FF_FFFF;
 
                 unimplemented!("Write to READ_LEN");
             }
             WRITE_LEN_REG => {
+                log::warn!("Write PI_WRITE_LEN {:X}", data);
                 s.map.pi.regs[WRITE_LEN_REG] = data & 0x00FF_FFFF;
 
                 Self::start_dma(s);
@@ -99,7 +97,7 @@ impl Pi {
         let length = s.map.pi.regs[WRITE_LEN_REG] + 1;
 
         log::info!(
-            "PI DMA transfer: {} bytes from {:08X} to {:08X}",
+            "PI DMA transfer: {} bytes from CART {:08X} to DRAM {:08X}",
             length,
             s.map.pi.regs[CART_ADDR_REG],
             s.map.pi.regs[DRAM_ADDR_REG]
@@ -149,7 +147,7 @@ impl Pi {
         s.map.mi.set_pending_interrupt(Interrupt::Pi);
     }
 
-    pub fn address_info(addr: PiLocation) -> Option<&'static str> {
+    pub fn reg_info(addr: PiLocation) -> Option<&'static str> {
         // TODO check masks!
         // TODO normalize strings
 

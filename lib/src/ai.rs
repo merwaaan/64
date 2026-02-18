@@ -1,12 +1,11 @@
 use crate::{data::Data, map::Location, system::System};
 
-pub const START: u32 = 0x0450_0000;
-pub const SIZE: u32 = 0x10_0000;
-pub const END: u32 = START + SIZE;
+const START: u32 = 0x0450_0000;
+const END: u32 = 0x0460_0000;
 
 pub type AiLocation = Location<START, END>;
 
-pub const MASK: u32 = 0x1F;
+const MASK: u32 = 0x1F;
 
 const DRAM_ADDR_REG: usize = 0;
 const LENGTH_REG: usize = 1;

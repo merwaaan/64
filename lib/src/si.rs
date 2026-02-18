@@ -1,38 +1,31 @@
 use crate::{data::Data, map::Location, mi::Interrupt, system::System};
 
-pub const START: u32 = 0x0480_0000;
-pub const SIZE: u32 = 0x10_0000;
-pub const END: u32 = START + SIZE;
+const START: u32 = 0x0480_0000;
+const END: u32 = 0x0490_0000;
 
 pub type SiLocation = Location<START, END>;
 
-pub const MASK: u32 = 0x1F; // TODO?
+const MASK: u32 = 0x1F; // TODO?
 
 // TODO macro?
 
 const DRAM_ADDR_REG: usize = 0;
 const DRAM_ADDR_LO: u32 = (DRAM_ADDR_REG as u32) << 2;
-pub const DRAM_ADDR: u32 = START | DRAM_ADDR_LO;
 
 const PIF_ADDR_READ64_REG: usize = 1;
 const PIF_ADDR_READ64_LO: u32 = (PIF_ADDR_READ64_REG as u32) << 2;
-pub const PIF_ADDR_READ64: u32 = START | PIF_ADDR_READ64_LO;
 
 const PIF_ADDR_READ4_REG: usize = 2;
 const PIF_ADDR_READ4_LO: u32 = (PIF_ADDR_READ4_REG as u32) << 2;
-pub const PIF_ADDR_READ4: u32 = START | PIF_ADDR_READ4_LO;
 
 const PIF_ADDR_WRITE64_REG: usize = 3;
 const PIF_ADDR_WRITE64_LO: u32 = (PIF_ADDR_WRITE64_REG as u32) << 2;
-pub const PIF_ADDR_WRITE64: u32 = START | PIF_ADDR_WRITE64_LO;
 
 const PIF_ADDR_WRITE4_REG: usize = 5;
 const PIF_ADDR_WRITE4_LO: u32 = (PIF_ADDR_WRITE4_REG as u32) << 2;
-pub const PIF_ADDR_WRITE4: u32 = START | PIF_ADDR_WRITE4_LO;
 
 const STATUS_REG: usize = 6;
 const STATUS_LO: u32 = (STATUS_REG as u32) << 2;
-pub const STATUS: u32 = START | STATUS_LO;
 
 const STATUS_DMA_BUSY_MASK: u32 = 1;
 const STATUS_IO_BUSY_MASK: u32 = 1 << 1;
@@ -73,7 +66,7 @@ impl Si {
         }
     }
 
-    pub fn address_info(addr: SiLocation) -> Option<&'static str> {
+    pub fn reg_info(addr: SiLocation) -> Option<&'static str> {
         // TODO check masks!
         // TODO normalize strings
 

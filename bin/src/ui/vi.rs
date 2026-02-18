@@ -1,10 +1,4 @@
-use egui::{Color32, RichText};
-use n64::{
-    cop0::Cop0,
-    mi::{Interrupt, Mi},
-    registers::{Reg64, Registers},
-    vi::{Register, Vi},
-};
+use n64::vi::{Register, Vi};
 
 use crate::emu::event::Event;
 

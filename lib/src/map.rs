@@ -1,21 +1,34 @@
 use crate::{
-    ai::{self, Ai, AiLocation},
-    cart::{self, Cart, CartLocation},
+    ai::{Ai, AiLocation},
+    cart::{Cart, CartLocation},
     data::Data,
-    mi::{self, Mi, MiLocation},
-    pi::{self, Pi, PiLocation},
-    rdram::{self, Rdram, RdramInterfaceLocation, RdramLocation, RdramRegsLocation},
-    rsp::{self, Rsp, RspDmemLocation, RspImemLocation, RspRegsLocation},
-    si::{self, Si, SiLocation},
+    dd::Dd,
+    mi::{Mi, MiLocation},
+    openbus,
+    pi::{Pi, PiLocation},
+    pif::{Pif, PifRamLocation},
+    rdram::{Rdram, RdramInterfaceLocation, RdramLocation, RdramRegsLocation},
+    rsp::{Rsp, RspDmemLocation, RspImemLocation, RspRegsLocation},
+    si::{Si, SiLocation},
     system::System,
-    vi::{self, Vi, ViLocation},
+    vi::{Vi, ViLocation},
 };
 
 /// Location in the memory map.
+/// Bound by start and end addresses (exclusive).
+///
+/// Memory map section can define their own location:
+///
+/// ```
+/// pub type RspDmemLocation = Location<0x0000_0000, 0x0401_0000>;
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct Location<const START: u32, const END: u32>(u32);
 
 impl<const START: u32, const END: u32> Location<START, END> {
+    pub const START: u32 = START;
+    pub const END: u32 = END;
+
     pub fn from_relative(addr: u32) -> Self {
         debug_assert!(
             (0..END - START).contains(&addr),
@@ -64,9 +77,10 @@ pub enum MapLocation {
     Pi(PiLocation),
     RdramInterface(RdramInterfaceLocation),
     Si(SiLocation),
-    //TODODD(u32)
+    //Dd(DdLocation),
     Cart(CartLocation),
-    //Pif(u32),
+    Pif(PifRamLocation),
+    OpenBus(u32),
 }
 
 pub struct Map {
@@ -77,7 +91,9 @@ pub struct Map {
     pub ai: Ai,
     pub pi: Pi,
     pub si: Si,
+    pub dd: Dd,
     pub cart: Cart,
+    pub pif: Pif,
 }
 
 impl Map {
@@ -90,7 +106,9 @@ impl Map {
             ai: Ai::default(),
             pi: Pi::default(),
             si: Si::default(),
+            dd: Dd::default(),
             cart,
+            pif: Pif::default(),
         }
     }
 
@@ -100,32 +118,50 @@ impl Map {
         let addr = virtual_to_physical_address(addr);
 
         match addr {
-            rdram::DATA_START..rdram::DATA_END => {
+            RdramLocation::START..RdramLocation::END => {
                 Some(MapLocation::Rdram(RdramLocation::from_absolute(addr)))
             }
-            rdram::REG_START..rdram::REG_END => Some(MapLocation::RdramRegs(
+            RdramRegsLocation::START..RdramRegsLocation::END => Some(MapLocation::RdramRegs(
                 RdramRegsLocation::from_absolute(addr),
             )),
-            rsp::DMEM_START..rsp::DMEM_END => {
+            RspDmemLocation::START..RspDmemLocation::END => {
                 Some(MapLocation::RspDmem(RspDmemLocation::from_absolute(addr)))
             }
-            rsp::IMEM_START..rsp::IMEM_END => {
+            RspImemLocation::START..RspImemLocation::END => {
                 Some(MapLocation::RspImem(RspImemLocation::from_absolute(addr)))
             }
-            rsp::REG_START..rsp::REG_END => {
+            RspRegsLocation::START..RspRegsLocation::END => {
                 Some(MapLocation::RspRegs(RspRegsLocation::from_absolute(addr)))
             }
-            mi::START..mi::END => Some(MapLocation::Mi(MiLocation::from_absolute(addr))),
-            vi::START..vi::END => Some(MapLocation::Vi(ViLocation::from_absolute(addr))),
-            ai::START..ai::END => Some(MapLocation::Ai(AiLocation::from_absolute(addr))),
-            pi::START..pi::END => Some(MapLocation::Pi(PiLocation::from_absolute(addr))),
-            rdram::INTERFACE_START..rdram::INTERFACE_END => Some(MapLocation::RdramInterface(
-                RdramInterfaceLocation::from_absolute(addr),
-            )),
-            si::START..si::END => Some(MapLocation::Si(SiLocation::from_absolute(addr))),
-            cart::ROM_START..cart::ROM_END => {
+            MiLocation::START..MiLocation::END => {
+                Some(MapLocation::Mi(MiLocation::from_absolute(addr)))
+            }
+            ViLocation::START..ViLocation::END => {
+                Some(MapLocation::Vi(ViLocation::from_absolute(addr)))
+            }
+            AiLocation::START..AiLocation::END => {
+                Some(MapLocation::Ai(AiLocation::from_absolute(addr)))
+            }
+            PiLocation::START..PiLocation::END => {
+                Some(MapLocation::Pi(PiLocation::from_absolute(addr)))
+            }
+            RdramInterfaceLocation::START..RdramInterfaceLocation::END => Some(
+                MapLocation::RdramInterface(RdramInterfaceLocation::from_absolute(addr)),
+            ),
+            SiLocation::START..SiLocation::END => {
+                Some(MapLocation::Si(SiLocation::from_absolute(addr)))
+            }
+            // DdLocation::START..DdLocation::END => {
+            //     Some(MapLocation::Dd(DdLocation::from_absolute(addr)))
+            // }
+            0x0500_0000..0x0600_0000 => Some(MapLocation::OpenBus(addr)),
+            CartLocation::START..CartLocation::END => {
                 Some(MapLocation::Cart(CartLocation::from_absolute(addr)))
             }
+            PifRamLocation::START..PifRamLocation::END => {
+                Some(MapLocation::Pif(PifRamLocation::from_absolute(addr)))
+            }
+            0x1FD00000..0x80000000 => Some(MapLocation::OpenBus(addr)),
             _ => None,
         }
     }
@@ -145,23 +181,18 @@ impl Map {
             Some(MapLocation::Pi(addr)) => s.map.pi.read(addr),
             Some(MapLocation::RdramInterface(addr)) => s.map.rdram.read_interface(addr),
             Some(MapLocation::Si(addr)) => s.map.si.read(addr),
+            //Some(MapLocation::Dd(addr)) => s.map.dd.read(addr),
             Some(MapLocation::Cart(addr)) => s.map.cart.read(addr),
+            Some(MapLocation::Pif(addr)) => s.map.pif.read(addr),
+            Some(MapLocation::OpenBus(addr)) => openbus::read(addr),
             None => panic!("Invalid read address: {:08X}", addr),
         }
-
-        // DD
-        // 0x0500_0000..=0x05FF_FFFF => {
-        //     // Open bus: https://n64brew.dev/wiki/Parallel_Interface#Open_bus_behavior
-
-        //     let lo = addr & 0xFFFF;
-        //     T::from_u32((lo << 16) | lo) // TODO weirddd
-        // }
     }
 
     // TODO what if address crosses a boundary?
     pub fn write<T: Data>(s: &mut System, addr: u32, data: T) {
         let location = Self::decode(addr);
-
+        //log::warn!("write {:08X} {:X}", addr, data.to_u32());
         match location {
             Some(MapLocation::Rdram(addr)) => Rdram::write(s, addr, data),
             Some(MapLocation::RdramRegs(addr)) => Rdram::write_reg(s, addr, data),
@@ -174,6 +205,9 @@ impl Map {
             Some(MapLocation::Pi(addr)) => Pi::write(s, addr, data),
             Some(MapLocation::RdramInterface(addr)) => Rdram::write_interface(s, addr, data),
             Some(MapLocation::Si(addr)) => Si::write(s, addr, data),
+            Some(MapLocation::Cart(addr)) => Cart::write(s, addr, data),
+            Some(MapLocation::Pif(addr)) => Pif::write(s, addr, data),
+            Some(MapLocation::OpenBus(addr)) => openbus::write(addr, data),
             _ => panic!("Invalid write address: {:08X}", addr),
         }
     }
@@ -193,19 +227,16 @@ pub fn virtual_to_physical_address(addr: u32) -> u32 {
     }
 }
 
-// TODO clean up
 pub fn address_info(addr: u32) -> Option<&'static str> {
-    let location = Map::decode(addr);
-
-    match location {
+    match Map::decode(addr) {
         Some(MapLocation::RdramRegs(addr)) => Rdram::reg_info(addr),
         Some(MapLocation::RspRegs(addr)) => Rsp::reg_info(addr),
         Some(MapLocation::Mi(addr)) => Mi::reg_info(addr),
         Some(MapLocation::Vi(addr)) => Vi::reg_info(addr),
         Some(MapLocation::Ai(addr)) => Ai::reg_info(addr),
-        Some(MapLocation::Pi(addr)) => Pi::address_info(addr),
+        Some(MapLocation::Pi(addr)) => Pi::reg_info(addr),
         Some(MapLocation::RdramInterface(addr)) => Rdram::interface_info(addr),
-        Some(MapLocation::Si(addr)) => Si::address_info(addr),
+        Some(MapLocation::Si(addr)) => Si::reg_info(addr),
         _ => None,
     }
 }

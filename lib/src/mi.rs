@@ -11,18 +11,20 @@ pub enum Interrupt {
     Dp = 1 << 5,
 }
 
-pub const START: u32 = 0x0430_0000;
-pub const SIZE: u32 = 0x10_0000;
-pub const END: u32 = START + SIZE;
+const START: u32 = 0x0430_0000;
+const END: u32 = 0x0440_0000;
 
 pub type MiLocation = Location<START, END>;
 
-pub const MASK: u32 = 0xF;
+const MASK: u32 = 0xF;
 
-const MODE_REG: usize = 0;
-const VERSION_REG: usize = 1;
-const INTERRUPT_REG: usize = 2;
-const MASK_REG: usize = 3;
+#[repr(u32)]
+pub enum Register {
+    Mode,
+    Version,
+    Interrupt,
+    Mask,
+}
 
 const MODE_READ_REPEAT_COUNT_MASK: u32 = 0x7F;
 const MODE_READ_REPEAT_MASK: u32 = 1 << 7;
@@ -115,8 +117,12 @@ impl Mi {
                     *reg |= MODE_WRITE_UPPER_SET_MASK;
                 }
             }
-            VERSION_REG => {}
-            INTERRUPT_REG => {}
+            VERSION_REG => {
+                log::warn!("Write MI_VERSION {:X}", data.to_u32());
+            }
+            INTERRUPT_REG => {
+                log::warn!("Write MI_INTERRUPT {:X}", data.to_u32());
+            }
             MASK_REG => {
                 log::error!("Write MI_MASK {:X}", data.to_u32());
                 let data = data.to_u32();
@@ -187,57 +193,60 @@ impl Mi {
     // MODE
 
     pub fn upper_mode(&self) -> bool {
-        self.regs[MODE_REG] & MODE_READ_UPPER_MASK != 0
+        self.regs[Register::Mode as usize] & MODE_READ_UPPER_MASK != 0
     }
 
     pub fn ebus_mode(&self) -> bool {
-        self.regs[MODE_REG] & MODE_READ_EBUS_MASK != 0
+        self.regs[Register::Mode as usize] & MODE_READ_EBUS_MASK != 0
     }
 
     pub fn repeat_mode(&self) -> bool {
-        self.regs[MODE_REG] & MODE_READ_REPEAT_MASK != 0
+        self.regs[Register::Mode as usize] & MODE_READ_REPEAT_MASK != 0
     }
 
     pub fn repeat_count(&self) -> u32 {
-        self.regs[MODE_REG] & MODE_READ_REPEAT_COUNT_MASK
+        self.regs[Register::Mode as usize] & MODE_READ_REPEAT_COUNT_MASK
     }
 
     // VERSION
 
     pub fn version(&self) -> Versions {
+        let version = self.regs[Register::Version as usize];
+
         Versions {
-            rsp: (self.regs[VERSION_REG] >> 24) as u8,
-            rdp: (self.regs[VERSION_REG] >> 16) as u8,
-            rac: (self.regs[VERSION_REG] >> 8) as u8,
-            io: self.regs[VERSION_REG] as u8,
+            rsp: (version >> 24) as u8,
+            rdp: (version >> 16) as u8,
+            rac: (version >> 8) as u8,
+            io: version as u8,
         }
     }
 
     // INT_PENDING
 
     pub fn set_pending_interrupt(&mut self, interrupt: Interrupt) {
-        self.regs[INTERRUPT_REG] |= interrupt as u32;
+        self.regs[Register::Interrupt as usize] |= interrupt as u32;
     }
 
     pub fn clear_pending_interrupt(&mut self, interrupt: Interrupt) {
-        self.regs[INTERRUPT_REG] &= !(interrupt as u32);
+        self.regs[Register::Interrupt as usize] &= !(interrupt as u32);
     }
 
     pub fn has_pending_interrupt(&self, interrupt: Interrupt) -> bool {
-        self.regs[INTERRUPT_REG] & (interrupt as u32) != 0
+        self.regs[Register::Interrupt as usize] & (interrupt as u32) != 0
     }
 
     // INT_MASK
 
     pub fn is_interrupt_masked(&self, interrupt: Interrupt) -> bool {
-        self.regs[MASK_REG] & (interrupt as u32) == 0
+        self.regs[Register::Mask as usize] & (interrupt as u32) == 0
     }
 
     // TODO rename
     pub fn has_interrupt(&self) -> bool {
-        self.regs[INTERRUPT_REG] & self.regs[MASK_REG] != 0
+        self.regs[Register::Interrupt as usize] & self.regs[Register::Mask as usize] != 0
     }
 
+    // TODO useless with enum?
     pub fn reg_name(index: usize) -> &'static str {
         const NAMES: [&str; 4] = ["MODE", "VERSION", "INT_PENDING", "INT_MASK"];
 

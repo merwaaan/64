@@ -21,12 +21,12 @@ use rstest::rstest;
 #[case::addu("ADDU/CPUADDU")]
 #[case::and("AND/CPUAND")]
 #[case::daddu("DADDU/CPUDADDU")]
-#[case::ddiv("DDIV/CPUDDIV")]
-#[case::ddivu("DDIVU/CPUDDIVU")]
+#[case::ddiv("DDIV/CPUDDIV")] // TODO pass but wrong values?
+#[case::ddivu("DDIVU/CPUDDIVU")] // TODO pass but wrong values?
 #[case::div("DIV/CPUDIV")]
 #[case::divu("DIVU/CPUDIVU")]
-#[case::dmult("DMULT/CPUDMULT")]
-#[case::dmultu("DMULTU/CPUDMULTU")]
+#[case::dmult("DMULT/CPUDMULT")] // TODO pass but wrong values?
+#[case::dmultu("DMULTU/CPUDMULTU")] // TODO pass but wrong values?
 #[case::dsub("DSUB/CPUDSUB")]
 #[case::dsubu("DSUBU/CPUDSUBU")]
 #[case::lb("LOADSTORE/LB/CPULB")]
@@ -34,9 +34,9 @@ use rstest::rstest;
 #[case::lh("LOADSTORE/LH/CPULH")]
 #[case::lw("LOADSTORE/LW/CPULW")]
 #[case::ll_lld_sc_scd("LOADSTORE/LL_LLD_SC_SCD/LL_LLD_SC_SCD")]
-#[case::sb("LOADSTORE/SB/CPUSB")]
+#[case::sb("LOADSTORE/SB/CPUSB")] // TODO ref image has weird line
 #[case::sd("LOADSTORE/SD/CPUSD")]
-#[case::sh("LOADSTORE/SH/CPUSH")]
+#[case::sh("LOADSTORE/SH/CPUSH")] // TODO ref image has weird line
 #[case::sw("LOADSTORE/SW/CPUSW")]
 #[case::mult("MULT/CPUMULT")]
 #[case::multu("MULTU/CPUMULTU")]
@@ -244,8 +244,7 @@ fn download(file_name: impl AsRef<str>) -> PathBuf {
             .expect("Failed to read file");
 
         let file = File::create(&file_path).expect("Failed to create file");
-        let mut writer = BufWriter::new(file);
-        writer.write_all(&data).unwrap();
+        BufWriter::new(file).write_all(&data).unwrap();
     }
 
     file_path

@@ -1,10 +1,10 @@
 use crate::breakpoints::{Breakpoint, Breakpoints};
-use crate::cart::{self, CartLocation};
+use crate::cart::CartLocation;
 use crate::cop0::Cop0;
 use crate::data::Data;
 use crate::events::{Cycle, Event, EventType, Events};
 use crate::map::Location;
-use crate::rsp::{self, Rsp};
+use crate::rsp::Rsp;
 use crate::{cart::Cart, cpu::CPU, map::Map};
 
 #[derive(Debug, thiserror::Error)]
@@ -160,14 +160,14 @@ impl System {
         //         self.cop0.erl()
         //     );
         // }
-        if self.map.mi.has_interrupt() {
-            log::error!(
-                "has_interrupt: {} {} {}",
-                self.cop0.ie(),
-                self.cop0.exl(),
-                self.cop0.erl()
-            );
-        }
+        // if self.map.mi.has_interrupt() {
+        //     log::error!(
+        //         "has_interrupt: {} {} {}",
+        //         self.cop0.ie(),
+        //         self.cop0.exl(),
+        //         self.cop0.erl()
+        //     );
+        // }
         if self.cop0.ie() && !self.cop0.exl() && !self.cop0.erl() && self.map.mi.has_interrupt() {
             // EPC
             // Cause (BD/ExcCode)
@@ -176,6 +176,8 @@ impl System {
             self.cop0.set_exl();
 
             self.cpu.regs.pc = 0x8000_0180; // TODO others?
+
+            log::warn!("TODOOOOOO INTERRUPT")
         }
 
         // Breakpoints

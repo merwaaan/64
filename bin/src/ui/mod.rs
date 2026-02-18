@@ -178,13 +178,12 @@ impl eframe::App for Ui {
                     if let Some(runner) = &self.runner
                         && ui.button("Load ROM…").clicked()
                         && let Some(path) = rfd::FileDialog::new()
-                            .add_filter("ROM files", &["n64", "z64", "v64"])
+                            .add_filter("ROM files", &["n64", "z64", "v64", "zip"])
                             .pick_file()
                     {
                         runner.send_command(Command::LoadRom(path));
+                        ui.close_kind(UiKind::Menu);
                     }
-
-                    ui.close_kind(UiKind::Menu);
                 });
 
                 if let Some(runner) = &self.runner

@@ -6,13 +6,12 @@ use crate::{
     system::System,
 };
 
-pub const START: u32 = 0x0440_0000;
-pub const SIZE: u32 = 0x10_0000;
-pub const END: u32 = START + SIZE;
+const START: u32 = 0x0440_0000;
+const END: u32 = 0x0450_0000;
 
 pub type ViLocation = Location<START, END>;
 
-pub const MASK: u32 = 0x3F;
+const MASK: u32 = 0x3F;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u32)]
@@ -35,64 +34,50 @@ pub enum Register {
 
 const STATUS_REG: usize = 0;
 const STATUS_LO: u32 = (STATUS_REG as u32) << 2;
-pub const STATUS: u32 = START | STATUS_LO;
 
 // TODO flags
 
 const FRAMEBUFFER_ADDR_REG: usize = 1; // "ORIGIN" in some docs
 const FRAMEBUFFER_ADDR_LO: u32 = (FRAMEBUFFER_ADDR_REG as u32) << 2;
-pub const FRAMEBUFFER_ADDR: u32 = START | FRAMEBUFFER_ADDR_LO;
 const FRAMEBUFFER_ADDR_MASK: u32 = 0x00FF_FFFF;
 
 const WIDTH_REG: usize = 2;
 const WIDTH_LO: u32 = (WIDTH_REG as u32) << 2;
-pub const WIDTH: u32 = START | WIDTH_LO;
 pub const WIDTH_MASK: u32 = 0x0FFF;
 
 const INTERRUPT_SCANLINE_REG: usize = 3;
 const INTERRUPT_SCANLINE_LO: u32 = (INTERRUPT_SCANLINE_REG as u32) << 2;
-pub const INTERRUPT_SCANLINE: u32 = START | INTERRUPT_SCANLINE_LO;
 pub const INTERRUPT_SCANLINE_MASK: u32 = 0x03FF;
 
 const CURRENT_SCANLINE_REG: usize = 4;
 const CURRENT_SCANLINE_LO: u32 = (CURRENT_SCANLINE_REG as u32) << 2;
-pub const CURRENT_SCANLINE: u32 = START | CURRENT_SCANLINE_LO;
 
 const BURST_REG: usize = 5;
 const BURST_LO: u32 = (BURST_REG as u32) << 2;
-pub const BURST: u32 = START | BURST_LO;
 
 const V_SYNC_REG: usize = 6;
 const V_SYNC_LO: u32 = (V_SYNC_REG as u32) << 2;
-pub const V_SYNC: u32 = START | V_SYNC_LO;
 
 const H_SYNC_REG: usize = 7;
 const H_SYNC_LO: u32 = (H_SYNC_REG as u32) << 2;
-pub const H_SYNC: u32 = START | H_SYNC_LO;
 
 const H_SYNC_LEAP_REG: usize = 8;
 const H_SYNC_LEAP_LO: u32 = (H_SYNC_LEAP_REG as u32) << 2;
-pub const H_SYNC_LEAP: u32 = START | H_SYNC_LEAP_LO;
 
 const H_VIDEO_REG: usize = 9;
 const H_VIDEO_LO: u32 = (H_VIDEO_REG as u32) << 2;
-pub const H_VIDEO: u32 = START | H_VIDEO_LO;
 
 const V_VIDEO_REG: usize = 10;
 const V_VIDEO_LO: u32 = (V_VIDEO_REG as u32) << 2;
-pub const V_VIDEO: u32 = START | V_VIDEO_LO;
 
 const V_BURST_REG: usize = 11;
 const V_BURST_LO: u32 = (V_BURST_REG as u32) << 2;
-pub const V_BURST: u32 = START | V_BURST_LO;
 
 const X_SCALE_REG: usize = 12;
 const X_SCALE_LO: u32 = (X_SCALE_REG as u32) << 2;
-pub const X_SCALE: u32 = START | X_SCALE_LO;
 
 const Y_SCALE_REG: usize = 13;
 const Y_SCALE_LO: u32 = (Y_SCALE_REG as u32) << 2;
-pub const Y_SCALE: u32 = START | Y_SCALE_LO;
 
 // NTSC 59.94 Hz, 262.5 scanlines
 // PAL 50.00 Hz, 312.5 scanlines

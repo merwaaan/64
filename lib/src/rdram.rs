@@ -1,32 +1,33 @@
 use crate::{data::Data, map::Location, system::System};
 
-pub const DATA_START: u32 = 0x0000_0000;
-pub const DATA_END: u32 = 0x03F0_0000;
-pub const DATA_MAPPED_SIZE: u32 = 0x003F_0000; // TODO more with exp pack
+const DATA_START: u32 = 0x0000_0000;
+const DATA_END: u32 = 0x03F0_0000;
+
+const DATA_MAPPED_SIZE: u32 = 0x080_0000; // TODO more with exp pack
 
 pub type RdramLocation = Location<DATA_START, DATA_END>;
 
-pub const REG_START: u32 = DATA_END;
-pub const REG_END: u32 = 0x0400_0000;
+const REG_START: u32 = DATA_END;
+const REG_END: u32 = 0x0400_0000;
 // TODO diff first/second halves? "broadcast" registers?
 
 pub type RdramRegsLocation = Location<REG_START, REG_END>;
 
-pub const INTERFACE_START: u32 = 0x0470_0000;
-pub const INTERFACE_END: u32 = 0x0480_0000;
+const INTERFACE_START: u32 = 0x0470_0000;
+const INTERFACE_END: u32 = 0x0480_0000;
 
 pub type RdramInterfaceLocation = Location<INTERFACE_START, INTERFACE_END>;
 
 pub struct Rdram {
     data: Vec<u8>,
-    regs: [u32; 13],
+    //regs: [u32; 13],
 }
 
 impl Default for Rdram {
     fn default() -> Self {
         Self {
             data: vec![0; DATA_MAPPED_SIZE as usize],
-            regs: [0; 13],
+            //regs: [0; 13],
         }
     }
 }
@@ -36,7 +37,7 @@ impl Rdram {
         match addr.relative() {
             0..DATA_MAPPED_SIZE => T::read(&self.data, addr.relative()),
             _ => {
-                log::debug!("Invalid RDRAM data read: {:08X}", addr.relative());
+                log::warn!("Invalid RDRAM data read: {:08X}", addr.relative());
                 T::default()
             }
         }
@@ -45,7 +46,7 @@ impl Rdram {
     pub fn write<T: Data>(s: &mut System, addr: RdramLocation, data: T) {
         match addr.relative() {
             0..DATA_MAPPED_SIZE => data.write(&mut s.map.rdram.data, addr.relative()),
-            _ => log::debug!(
+            _ => log::warn!(
                 "Invalid RDRAM data write: {:08X} {:X}",
                 addr.relative(),
                 data.to_u32()
@@ -69,16 +70,19 @@ impl Rdram {
 
     pub fn read_interface<T: Data>(&self, addr: RdramInterfaceLocation) -> T {
         if addr.relative() == 0x0C {
+            // TODO temp
             log::warn!(
                 "Reading from RDRAM interface 0x14 RI_SELECT: {:08X}",
                 addr.relative()
             );
+
             T::from_u32(0x14)
         } else {
             log::warn!(
                 "Read RDRAM interface UNIMPLEMENTED: {:08X}",
                 addr.relative()
             );
+
             T::default()
         }
     }
