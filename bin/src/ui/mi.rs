@@ -1,9 +1,5 @@
 use egui::{Color32, RichText};
-use n64::{
-    cop0::Cop0,
-    mi::{Interrupt, Mi},
-    registers::{Reg64, Registers},
-};
+use n64::mi::{Interrupt, Mi};
 
 use crate::emu::event::Event;
 

@@ -1,8 +1,10 @@
-use crate::{data::Data, system::System};
+use crate::{data::Data, map::Location, system::System};
 
 pub const START: u32 = 0x0450_0000;
 pub const SIZE: u32 = 0x10_0000;
 pub const END: u32 = START + SIZE;
+
+pub type AiLocation = Location<START, END>;
 
 pub const MASK: u32 = 0x1F;
 
@@ -26,20 +28,16 @@ impl Default for Ai {
 }
 
 impl Ai {
-    pub fn read<T: Data>(&self, addr: u32) -> T {
-        assert_range(addr);
-
-        let reg = ((addr & MASK) >> 2) as usize;
+    pub fn read<T: Data>(&self, addr: AiLocation) -> T {
+        let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         match reg {
             _ => panic!("Invalid AI register read: {:08X}", reg),
         }
     }
 
-    pub fn write<T: Data>(_s: &mut System, addr: u32, data: T) {
-        assert_range(addr);
-
-        let reg = ((addr & MASK) >> 2) as usize;
+    pub fn write<T: Data>(_s: &mut System, addr: AiLocation, data: T) {
+        let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         match reg {
             CONTROL_REG => {
@@ -60,12 +58,23 @@ impl Ai {
             }
             _ => panic!(
                 "Invalid AI register write: {:08X} {:X} {:X}",
-                addr, data, reg
+                addr.relative(),
+                data,
+                reg
             ),
         }
     }
-}
 
-fn assert_range(addr: u32) {
-    debug_assert!((START..END).contains(&addr));
+    pub fn reg_info(addr: AiLocation) -> Option<&'static str> {
+        // TODO mask?
+        match addr.relative() >> 2 {
+            0 => Some("AI_DRAM_ADDR"),
+            1 => Some("AI_LENGTH"),
+            2 => Some("AI_CONTROL"),
+            3 => Some("AI_STATUS"),
+            4 => Some("AI_DACRATE"),
+            5 => Some("AI_BITRATE"),
+            _ => None,
+        }
+    }
 }

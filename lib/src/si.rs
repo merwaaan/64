@@ -1,13 +1,10 @@
-use crate::{
-    data::Data,
-    events::{Event, EventType},
-    mi::Interrupt,
-    system::System,
-};
+use crate::{data::Data, map::Location, mi::Interrupt, system::System};
 
 pub const START: u32 = 0x0480_0000;
 pub const SIZE: u32 = 0x10_0000;
 pub const END: u32 = START + SIZE;
+
+pub type SiLocation = Location<START, END>;
 
 pub const MASK: u32 = 0x1F; // TODO?
 
@@ -49,20 +46,16 @@ pub struct Si {
 }
 
 impl Si {
-    pub fn read<T: Data>(&self, addr: u32) -> T {
-        assert_range(addr);
-
-        let reg = (addr & MASK) >> 2;
+    pub fn read<T: Data>(&self, addr: SiLocation) -> T {
+        let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         // TODO depends???
 
         T::from_u32(self.regs[reg as usize]) // TOD0 weirddd
     }
 
-    pub fn write<T: Data>(s: &mut System, addr: u32, data: T) {
-        assert_range(addr);
-
-        let reg = ((addr & MASK) >> 2) as usize;
+    pub fn write<T: Data>(s: &mut System, addr: SiLocation, data: T) {
+        let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         let data = data.to_u32(); // TODO temp hack, should be able to write any size
 
@@ -76,17 +69,15 @@ impl Si {
 
                 s.map.mi.clear_pending_interrupt(Interrupt::Si);
             }
-            _ => unimplemented!("Write SI register @ {:08X}", addr),
+            _ => unimplemented!("Write SI register @ {:08X}", addr.relative()),
         }
     }
 
-    pub fn address_info(addr: u32) -> Option<&'static str> {
-        assert_range(addr);
-
+    pub fn address_info(addr: SiLocation) -> Option<&'static str> {
         // TODO check masks!
         // TODO normalize strings
 
-        let s = match addr & MASK {
+        let s = match addr.relative() & MASK {
             DRAM_ADDR_LO => "SI_DRAM_ADDR",
             PIF_ADDR_READ64_LO => "SI_PIF_ADDR_READ64",
             PIF_ADDR_READ4_LO => "SI_PIF_ADDR_READ4",
@@ -99,8 +90,4 @@ impl Si {
         // TODO cleaner way to do that?
         if s.is_empty() { None } else { Some(s) }
     }
-}
-
-fn assert_range(addr: u32) {
-    debug_assert!((START..END).contains(&addr));
 }

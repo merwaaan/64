@@ -1,7 +1,10 @@
 use crate::breakpoints::{Breakpoint, Breakpoints};
+use crate::cart::{self, CartLocation};
 use crate::cop0::Cop0;
 use crate::data::Data;
 use crate::events::{Cycle, Event, EventType, Events};
+use crate::map::Location;
+use crate::rsp::{self, Rsp};
 use crate::{cart::Cart, cpu::CPU, map::Map};
 
 #[derive(Debug, thiserror::Error)]
@@ -14,7 +17,6 @@ pub enum LoadError {
 
 pub struct System {
     // Components
-    pub cart: Cart,
     pub cpu: CPU,
     pub cop0: Cop0,
     pub map: Map,
@@ -33,10 +35,9 @@ pub struct System {
 impl System {
     pub fn new(cart: Cart) -> Self {
         let mut s = Self {
-            cart,
             cpu: CPU::default(),
             cop0: Cop0::default(),
-            map: Map::default(),
+            map: Map::new(cart),
 
             cycles: 0,
             events: Events::default(),
@@ -113,7 +114,14 @@ impl System {
         // Copy the cart's boot code to memory
 
         // TODO which size?
-        self.map.rspdmem[0..0x1000].copy_from_slice(&self.cart.data[0..0x1000]);
+        // TODO rel???
+        for i in 0..0x1000u32 {
+            Rsp::write_dmem(
+                self,
+                Location::from_relative(i),
+                self.map.cart.read::<u8>(CartLocation::from_relative(i)),
+            );
+        }
     }
 
     pub fn step(&mut self) -> bool {

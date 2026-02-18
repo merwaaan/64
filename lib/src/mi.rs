@@ -1,4 +1,4 @@
-use crate::{data::Data, system::System};
+use crate::{data::Data, map::Location, system::System};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u32)]
@@ -14,6 +14,8 @@ pub enum Interrupt {
 pub const START: u32 = 0x0430_0000;
 pub const SIZE: u32 = 0x10_0000;
 pub const END: u32 = START + SIZE;
+
+pub type MiLocation = Location<START, END>;
 
 pub const MASK: u32 = 0xF;
 
@@ -64,10 +66,8 @@ impl Default for Mi {
 }
 
 impl Mi {
-    pub fn read<T: Data>(&self, addr: u32) -> T {
-        assert_range(addr);
-
-        let reg = ((addr & MASK) >> 2) as usize;
+    pub fn read<T: Data>(&self, addr: MiLocation) -> T {
+        let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         // TODO mask stuff? or jsut access directly w/o match?
         match reg {
@@ -79,10 +79,8 @@ impl Mi {
         }
     }
 
-    pub fn write<T: Data>(s: &mut System, addr: u32, data: T) {
-        assert_range(addr);
-
-        let reg = ((addr & MASK) >> 2) as usize;
+    pub fn write<T: Data>(s: &mut System, addr: MiLocation, data: T) {
+        let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         match reg {
             MODE_REG => {
@@ -166,7 +164,23 @@ impl Mi {
                     s.map.mi.regs[MASK_REG] |= Interrupt::Dp as u32;
                 }
             }
-            _ => panic!("Invalid MI register write: {:08X} {:X}", addr, data),
+            _ => panic!(
+                "Invalid MI register write: {:08X} {:X} {:X}",
+                addr.relative(),
+                data,
+                reg
+            ),
+        }
+    }
+
+    pub fn reg_info(addr: MiLocation) -> Option<&'static str> {
+        // TODO mask?
+        match addr.relative() >> 2 {
+            0 => Some("MI_MODE"),
+            1 => Some("MI_VERSION"),
+            2 => Some("MI_INTERRUPT"),
+            3 => Some("MI_MASK"),
+            _ => None,
         }
     }
 
@@ -236,8 +250,4 @@ pub struct Versions {
     pub rdp: u8,
     pub rac: u8,
     pub io: u8,
-}
-
-fn assert_range(addr: u32) {
-    debug_assert!((START..END).contains(&addr));
 }

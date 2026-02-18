@@ -4,13 +4,19 @@ use std::{
     path::Path,
 };
 
+use crate::{data::Data, map::Location};
+
+pub const ROM_START: u32 = 0x1000_0000;
+pub const ROM_END: u32 = 0x1FC0_0000;
+
+pub type CartLocation = Location<ROM_START, ROM_END>;
+
 #[derive(Debug)]
 pub struct Cart {
-    pub data: Vec<u8>,
+    data: Vec<u8>,
 }
 
 impl Cart {
-    // TODO return endianness, log outside
     pub fn load(path: &Path) -> Result<Self, std::io::Error> {
         let mut data = Vec::new(); // TODO just store as u32s?
 
@@ -74,5 +80,9 @@ impl Cart {
 
     pub fn version(&self) -> u8 {
         self.data[0x3F]
+    }
+
+    pub fn read<T: Data>(&self, loc: CartLocation) -> T {
+        T::read(&self.data, loc.relative())
     }
 }

@@ -1,9 +1,6 @@
-use egui::{ColorImage, Context, RichText, TextureFilter, TextureHandle, TextureOptions};
+use egui::{ColorImage, Context, TextureFilter, TextureHandle, TextureOptions};
 
-use crate::{
-    emu::{command::Command, event::Event, runner::Runner},
-    ui::{SettingUpdate, parse_hex},
-};
+use crate::emu::event::Event;
 
 #[derive(Clone)]
 pub struct FramebufferUpdate {

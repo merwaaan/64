@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use egui::{Context, MenuBar, TopBottomPanel, UiKind, Window};
+use egui::{Context, Key, MenuBar, TopBottomPanel, UiKind, Window};
 
 use crate::{
     Args,
@@ -54,6 +54,8 @@ impl Ui {
         let instructions_widget = InstructionsWidget::default();
         let memory_widget = MemoryWidget::default();
 
+        // Send the initial settings to the runner
+
         // TODO just send from inside the widget???
         runner.send_command(Command::SetSetting(SettingUpdate::Instructions(Some(
             instructions_widget.settings,
@@ -67,13 +69,27 @@ impl Ui {
 
         runner.send_command(Command::SetSetting(SettingUpdate::Framebuffer(Some(()))));
 
+        // Start paused or not
+
+        let paused = true;
+
+        if paused {
+            runner.send_command(if paused {
+                Command::Pause
+            } else {
+                Command::Resume
+            });
+        }
+
+        // Load the ROM
+
         if let Some(path) = &args.rom {
             runner.send_command(Command::LoadRom(PathBuf::from(path)));
         }
 
         Self {
             runner: Some(runner),
-            paused: true,
+            paused,
             instructions: Some(instructions_widget),
             registers: Some(RegistersWidget::default()),
             memory: Some(memory_widget),
@@ -127,6 +143,31 @@ impl Ui {
 impl eframe::App for Ui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_runner(ctx);
+
+        // Handle events
+
+        ctx.input(|input| {
+            if let Some(runner) = self.runner.as_ref() {
+                if input.key_pressed(Key::Enter) {
+                    if self.paused {
+                        runner.send_command(Command::Resume);
+                    } else {
+                        runner.send_command(Command::Pause);
+                    }
+
+                    self.paused = !self.paused;
+                }
+
+                if self.paused && input.key_pressed(Key::Space) {
+                    runner.send_command(Command::Step);
+                }
+            }
+
+            // TODO clean exit
+            if input.key_pressed(Key::Escape) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        });
 
         // Render widgets
 

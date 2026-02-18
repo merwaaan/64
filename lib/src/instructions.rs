@@ -84,6 +84,11 @@ impl Opcode {
         self.0 as u16
     }
 
+    fn offset_addr(&self, s: &System) -> u32 {
+        self.basev(&s.cpu)
+            .wrapping_add(self.imm16() as i16 as i32 as u32)
+    }
+
     fn branch_offset(&self) -> u32 {
         (self.imm16() as i16 as i32 as u32) << 2
     }
@@ -228,6 +233,8 @@ pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
         0x15 => &BNEL_,
         0x16 => &BLEZL_,
         0x19 => &DADDIU_,
+        0x1A => &LDL_,
+        0x1B => &LDR_,
         0x20 => &LB_,
         0x21 => &LH_,
         0x22 => &LWL_,
@@ -617,9 +624,7 @@ instruction_struct!(LWC1);
 
 impl Instruction for LWC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         s.cpu.regs.fpr[op.rt()] = s.read::<u32>(addr) as f64;
 
@@ -881,9 +886,9 @@ instruction_struct!(MTC0);
 
 impl Instruction for MTC0 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let mut data = s.cpu.regs.gpr[op.rt()].get64();
+        let data = s.cpu.regs.gpr[op.rt()].get64();
 
-        log::error!("MTC0 {}, {:08X}", op.rd0n(), data);
+        log::warn!("MTC0 {}, {:08X} unsure?", op.rd0n(), data);
         // TODO cause: only two last bits can be written! move to reg implem ???
         // TODO not b0-1 but 8-9???? 0x0000_0300
         // if op.rd() == 13 {
@@ -1041,9 +1046,7 @@ instruction_struct!(LB);
 
 impl Instruction for LB {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         let data = s.read::<u8>(addr) as i8 as i32 as u32;
 
@@ -1053,17 +1056,13 @@ impl Instruction for LB {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "LB {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1071,9 +1070,7 @@ instruction_struct!(LBU);
 
 impl Instruction for LBU {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         let data = s.read::<u8>(addr) as u32;
 
@@ -1083,17 +1080,13 @@ impl Instruction for LBU {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "LBU {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1101,9 +1094,7 @@ instruction_struct!(LD);
 
 impl Instruction for LD {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         s.cpu.regs.gpr[op.rt()].set64(s.read::<u64>(addr));
 
@@ -1111,17 +1102,75 @@ impl Instruction for LD {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "LD {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
+    }
+}
+
+instruction_struct!(LDL);
+
+impl Instruction for LDL {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op.offset_addr(s);
+        let base = addr & !7;
+        let offset = addr & 7;
+
+        let mut dword = s.read::<u64>(base);
+
+        if offset != 0 {
+            dword <<= offset * 8;
+            dword |= op.rtv64(&s.cpu) & !(u64::MAX << (8 * offset));
+        }
+
+        s.cpu.regs.gpr[op.rt()].set64(dword);
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "LDL {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(op.offset_addr(s))
+    }
+}
+
+instruction_struct!(LDR);
+
+impl Instruction for LDR {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op.offset_addr(s);
+        let base = addr & !7;
+        let offset = addr & 7;
+
+        let mut dword = s.read::<u64>(base);
+
+        if offset != 7 {
+            dword >>= (7 - offset) * 8;
+            dword |= op.rtv64(&s.cpu) & (u64::MAX << (8 * (offset + 1)));
+        }
+
+        s.cpu.regs.gpr[op.rt()].set64(dword);
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "LDR {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1129,9 +1178,7 @@ instruction_struct!(LH);
 
 impl Instruction for LH {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         let data = s.read::<u16>(addr) as i16 as i32 as u32;
 
@@ -1141,17 +1188,13 @@ impl Instruction for LH {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "LH {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1160,9 +1203,7 @@ instruction_struct!(LHU);
 // TODOM LHU @ 802efaa4 not working!
 impl Instruction for LHU {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         let data = s.read::<u16>(addr).to_u32();
 
@@ -1172,26 +1213,20 @@ impl Instruction for LHU {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "LHU {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 instruction_struct!(LL);
 
 impl Instruction for LL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         s.cpu.regs.load_linked_bit = true;
         s.cpu.regs.load_linked_addr = addr;
@@ -1202,17 +1237,13 @@ impl Instruction for LL {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "LL {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1234,9 +1265,7 @@ instruction_struct!(LW);
 
 impl Instruction for LW {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         s.cpu.regs.gpr[op.rt()].set(s.read(addr));
 
@@ -1244,17 +1273,13 @@ impl Instruction for LW {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "LW {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1262,10 +1287,7 @@ instruction_struct!(LWL);
 
 impl Instruction for LWL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
+        let addr = op.offset_addr(s);
         let addr_base = addr & !3;
         let addr_offset = addr & 3;
 
@@ -1286,17 +1308,13 @@ impl Instruction for LWL {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "LWL {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1306,9 +1324,7 @@ instruction_struct!(LWR);
 
 impl Instruction for LWR {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         let addr_base = addr & !3;
         let addr_offset = addr & 3;
@@ -1330,17 +1346,13 @@ impl Instruction for LWR {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "LWR {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1348,9 +1360,7 @@ instruction_struct!(LWU);
 
 impl Instruction for LWU {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         s.cpu.regs.gpr[op.rt()].set64(s.read::<u32>(addr) as u64);
 
@@ -1360,17 +1370,13 @@ impl Instruction for LWU {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "LWU {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1512,10 +1518,7 @@ instruction_struct!(SB);
 
 impl Instruction for SB {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32); // TODO helper!!!
-
+        let addr = op.offset_addr(s);
         let data = op.rtv(&s.cpu) as u8;
 
         s.write(addr, data);
@@ -1524,17 +1527,13 @@ impl Instruction for SB {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "SB {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1542,13 +1541,10 @@ instruction_struct!(SC);
 
 impl Instruction for SC {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         s.cpu.regs.gpr[op.rt()].set(s.cpu.regs.load_linked_bit as u32);
 
         if s.cpu.regs.load_linked_bit {
+            let addr = op.offset_addr(s);
             s.write(addr, op.rtv(&s.cpu));
         }
 
@@ -1560,17 +1556,13 @@ impl Instruction for SC {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "SC {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.basen()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1578,9 +1570,7 @@ instruction_struct!(SD);
 
 impl Instruction for SD {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         s.write(addr, s.cpu.regs.gpr[op.rt()].get64());
 
@@ -1590,17 +1580,13 @@ impl Instruction for SD {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "SD {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1608,9 +1594,7 @@ instruction_struct!(SDL);
 
 impl Instruction for SDL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         let base = addr & !7;
         let offset = addr & 7;
@@ -1643,9 +1627,7 @@ instruction_struct!(SDR);
 
 impl Instruction for SDR {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         let base = addr & !7;
         let offset = addr & 7;
@@ -1678,10 +1660,7 @@ instruction_struct!(SH);
 
 impl Instruction for SH {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
+        let addr = op.offset_addr(s);
         let data = op.rtv(&s.cpu) as u16;
 
         s.write(addr, data);
@@ -1690,17 +1669,13 @@ impl Instruction for SH {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "SH {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1773,7 +1748,9 @@ instruction_struct!(SLTIU);
 impl Instruction for SLTIU {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
         let imm = op.imm16() as i16 as i32 as u32;
+
         s.cpu.regs.gpr[op.rt()].set((op.rsv(&s.cpu) < imm) as u32);
+
         None
     }
 
@@ -1874,9 +1851,7 @@ instruction_struct!(SW);
 
 impl Instruction for SW {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         s.write(addr, op.rtv(&s.cpu));
 
@@ -1886,17 +1861,13 @@ impl Instruction for SW {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "SW {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1904,10 +1875,9 @@ instruction_struct!(SWC1);
 
 impl Instruction for SWC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
         // TODO!
+        log::warn!("SWC1 unsure");
         s.write(addr, 0u32);
         None
     }
@@ -1938,39 +1908,32 @@ instruction_struct!(SWL);
 
 impl Instruction for SWL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
+        let addr_base = addr & !3;
+        let addr_offset = addr & 3;
 
-        let base = addr & !3;
-        let offset = addr & 3;
-
-        let word = if offset == 0 {
+        let word = if addr_offset == 0 {
             op.rtv(&s.cpu)
         } else {
-            let mut word = s.read::<u32>(base);
-            word &= 0xFFFF_FFFF << (32 - 8 * offset);
-            word |= op.rtv(&s.cpu) >> (8 * offset);
+            let mut word = s.read::<u32>(addr_base);
+            word &= 0xFFFF_FFFF << (32 - 8 * addr_offset);
+            word |= op.rtv(&s.cpu) >> (8 * addr_offset);
             word
         };
 
-        s.write(base, word);
+        s.write(addr_base, word);
 
         None
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "SWL {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 
@@ -1978,9 +1941,7 @@ instruction_struct!(SWR);
 
 impl Instruction for SWR {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
+        let addr = op.offset_addr(s);
 
         let base = addr & !3;
         let offset = addr & 3;
@@ -2000,17 +1961,13 @@ impl Instruction for SWR {
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
-        let addr = op
-            .basev(&s.cpu)
-            .wrapping_add(op.imm16() as i16 as i32 as u32);
-
         Disassembly::new(format!(
             "SWR {}, {:#06X}({})",
             op.rtn(),
             op.imm16(),
             op.rsn()
         ))
-        .with_address_hint(addr)
+        .with_address_hint(op.offset_addr(s))
     }
 }
 

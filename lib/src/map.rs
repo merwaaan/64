@@ -1,221 +1,180 @@
 use crate::{
-    ai::{self, Ai},
+    ai::{self, Ai, AiLocation},
+    cart::{self, Cart, CartLocation},
     data::Data,
-    mi::{self, Mi},
-    pi::{self, Pi},
-    si::{self, Si},
+    mi::{self, Mi, MiLocation},
+    pi::{self, Pi, PiLocation},
+    rdram::{self, Rdram, RdramInterfaceLocation, RdramLocation, RdramRegsLocation},
+    rsp::{self, Rsp, RspDmemLocation, RspImemLocation, RspRegsLocation},
+    si::{self, Si, SiLocation},
     system::System,
-    vi::{self, Vi},
+    vi::{self, Vi, ViLocation},
 };
 
+/// Location in the memory map.
+#[derive(Debug, Clone, Copy)]
+pub struct Location<const START: u32, const END: u32>(u32);
+
+impl<const START: u32, const END: u32> Location<START, END> {
+    pub fn from_relative(addr: u32) -> Self {
+        debug_assert!(
+            (0..END - START).contains(&addr),
+            "Address {:08X} is out of relative range ({}..{})",
+            addr,
+            START,
+            END
+        );
+
+        Self(addr)
+    }
+
+    pub fn relative(self) -> u32 {
+        self.0
+    }
+
+    pub fn from_absolute(addr: u32) -> Self {
+        debug_assert!(
+            (START..END).contains(&addr),
+            "Address {:08X} is out of absolute range ({}..{})",
+            addr,
+            START,
+            END
+        );
+
+        Self(addr - START)
+    }
+
+    pub fn absolute(self) -> u32 {
+        START + self.0
+    }
+}
+
+// TODO store relative addr?
+// TODO component should only accept their location?
+#[derive(Debug)]
+pub enum MapLocation {
+    Rdram(RdramLocation),
+    RdramRegs(RdramRegsLocation),
+    RspDmem(RspDmemLocation),
+    RspImem(RspImemLocation),
+    RspRegs(RspRegsLocation),
+    Mi(MiLocation),
+    Vi(ViLocation),
+    Ai(AiLocation),
+    Pi(PiLocation),
+    RdramInterface(RdramInterfaceLocation),
+    Si(SiLocation),
+    //TODODD(u32)
+    Cart(CartLocation),
+    //Pif(u32),
+}
+
 pub struct Map {
-    pub rdram: Vec<u8>, // TODO to struct
-
-    // TODO to rsp struct
-    pub rspdmem: Vec<u8>,
-    pub rspimem: Vec<u8>,
-    pub rsp_regs: [u32; 8],
-
+    pub rdram: Rdram,
+    pub rsp: Rsp,
     pub mi: Mi,
     pub vi: Vi,
     pub ai: Ai,
     pub pi: Pi,
     pub si: Si,
+    pub cart: Cart,
 }
 
-impl Default for Map {
-    fn default() -> Self {
+impl Map {
+    pub fn new(cart: Cart) -> Self {
         Self {
-            rdram: vec![0; RDRAM_SIZE],
-
-            rspdmem: vec![0; 0x1000],
-            rspimem: vec![0; 0x1000],
-            rsp_regs: [0; 8],
-
+            rdram: Rdram::default(),
+            rsp: Rsp::default(),
             mi: Mi::default(),
             vi: Vi::default(),
             ai: Ai::default(),
             pi: Pi::default(),
             si: Si::default(),
+            cart,
         }
     }
-}
 
-const RDRAM_START: u32 = 0x0000_0000;
-const RDRAM_SIZE: usize = 0x03F0_0000;
-const RDRAM_END: u32 = RDRAM_START + RDRAM_SIZE as u32;
+    pub fn decode(addr: u32) -> Option<MapLocation> {
+        // TODO future optim: page table?
 
-const RDRAM_REG_START: u32 = 0x03F0_0000;
-const RDRAM_REG_SIZE: usize = 0x0008_0000;
-const RDRAM_REG_END: u32 = RDRAM_REG_START + RDRAM_REG_SIZE as u32;
-
-const RDRAM_REG_BROADCAST_START: u32 = 0x03F8_0000;
-const RDRAM_REG_BROADCAST_SIZE: usize = 0x0008_0000;
-const RDRAM_REG_BROADCAST_END: u32 = RDRAM_REG_BROADCAST_START + RDRAM_REG_BROADCAST_SIZE as u32;
-
-impl Map {
-    pub fn read<T: Data>(s: &System, addr: u32) -> T {
-        let eee = addr;
         let addr = virtual_to_physical_address(addr);
 
         match addr {
-            // RDRAM
-            RDRAM_START..RDRAM_END => T::read(&s.map.rdram, addr - RDRAM_START),
-
-            // RDRAM registers
-            RDRAM_REG_START..RDRAM_REG_END => {
-                panic!("Reading from RDRAM registers: {:08X}", addr);
-                log::warn!("Reading from RDRAM registers: {:08X}", addr);
-                T::default()
+            rdram::DATA_START..rdram::DATA_END => {
+                Some(MapLocation::Rdram(RdramLocation::from_absolute(addr)))
             }
-
-            // TODO RDRAM registers broadcast?
-
-            // RSP DMEM
-            0x0400_0000..=0x0400_0FFF => T::read(&s.map.rspdmem, addr - 0x0400_0000),
-
-            // RSP IMEM
-            0x0400_1000..=0x0400_1FFF => T::read(&s.map.rspimem, addr - 0x0400_1000),
-
-            // RSP registers
-            0x0404_0000..=0x040B_FFFF => {
-                log::warn!("Read RSP REGS: {:08X}", addr);
-                let rsp_reg = (addr >> 2) & 3;
-                T::from_u32(s.map.rsp_regs[rsp_reg as usize]) // TODO weirddd
+            rdram::REG_START..rdram::REG_END => Some(MapLocation::RdramRegs(
+                RdramRegsLocation::from_absolute(addr),
+            )),
+            rsp::DMEM_START..rsp::DMEM_END => {
+                Some(MapLocation::RspDmem(RspDmemLocation::from_absolute(addr)))
             }
-
-            mi::START..mi::END => s.map.mi.read(addr),
-            vi::START..vi::END => s.map.vi.read(addr),
-            ai::START..ai::END => s.map.ai.read(addr),
-            pi::START..pi::END => s.map.pi.read(addr),
-
-            // RDRAM interface
-            0x0470_0000..=0x047D_DFFF => {
-                log::warn!("Reading from RDRAM interface: {:08X}", addr);
-
-                if addr == 0x0470_000C {
-                    log::warn!("Reading from RDRAM interface 0x14: {:08X}", addr);
-                    T::from_u32(0x14)
-                } else {
-                    T::default()
-                }
+            rsp::IMEM_START..rsp::IMEM_END => {
+                Some(MapLocation::RspImem(RspImemLocation::from_absolute(addr)))
             }
-
-            si::START..si::END => s.map.si.read(addr),
-
-            // DD
-            0x0500_0000..=0x05FF_FFFF => {
-                // Open bus: https://n64brew.dev/wiki/Parallel_Interface#Open_bus_behavior
-
-                let lo = addr & 0xFFFF;
-                T::from_u32((lo << 16) | lo) // TODO weirddd
+            rsp::REG_START..rsp::REG_END => {
+                Some(MapLocation::RspRegs(RspRegsLocation::from_absolute(addr)))
             }
-
-            // 0x0800_0000..=0x09FF_FFFF => {
-            //     log::warn!("READ {:08X} @ {:08X}", eee, addr);
-            //     T::from_u32(0)
-            // }
-
-            // Cartridge
-            0x1000_0000..=0x1FBFFFFF => {
-                T::read(&s.cart.data, addr - 0x1000_0000) // TODO
+            mi::START..mi::END => Some(MapLocation::Mi(MiLocation::from_absolute(addr))),
+            vi::START..vi::END => Some(MapLocation::Vi(ViLocation::from_absolute(addr))),
+            ai::START..ai::END => Some(MapLocation::Ai(AiLocation::from_absolute(addr))),
+            pi::START..pi::END => Some(MapLocation::Pi(PiLocation::from_absolute(addr))),
+            rdram::INTERFACE_START..rdram::INTERFACE_END => Some(MapLocation::RdramInterface(
+                RdramInterfaceLocation::from_absolute(addr),
+            )),
+            si::START..si::END => Some(MapLocation::Si(SiLocation::from_absolute(addr))),
+            cart::ROM_START..cart::ROM_END => {
+                Some(MapLocation::Cart(CartLocation::from_absolute(addr)))
             }
-
-            // PIF RAM
-            0x1FC0_07C0..=0x1FC0_07FF => {
-                log::warn!("read PIF RAM: {:08X}", addr);
-                T::default()
-            }
-
-            _ => panic!(
-                "Invalid read address: {:032X} @ {:08X}",
-                addr, s.cpu.regs.pc
-            ),
+            _ => None,
         }
+    }
+
+    pub fn read<T: Data>(s: &System, addr: u32) -> T {
+        let location = Self::decode(addr);
+
+        match location {
+            Some(MapLocation::Rdram(addr)) => s.map.rdram.read(addr),
+            Some(MapLocation::RdramRegs(addr)) => s.map.rdram.read_reg(addr),
+            Some(MapLocation::RspDmem(addr)) => s.map.rsp.read_dmem(addr),
+            Some(MapLocation::RspImem(addr)) => s.map.rsp.read_imem(addr),
+            Some(MapLocation::RspRegs(addr)) => s.map.rsp.read_reg(addr),
+            Some(MapLocation::Mi(addr)) => s.map.mi.read(addr),
+            Some(MapLocation::Vi(addr)) => s.map.vi.read(addr),
+            Some(MapLocation::Ai(addr)) => s.map.ai.read(addr),
+            Some(MapLocation::Pi(addr)) => s.map.pi.read(addr),
+            Some(MapLocation::RdramInterface(addr)) => s.map.rdram.read_interface(addr),
+            Some(MapLocation::Si(addr)) => s.map.si.read(addr),
+            Some(MapLocation::Cart(addr)) => s.map.cart.read(addr),
+            None => panic!("Invalid read address: {:08X}", addr),
+        }
+
+        // DD
+        // 0x0500_0000..=0x05FF_FFFF => {
+        //     // Open bus: https://n64brew.dev/wiki/Parallel_Interface#Open_bus_behavior
+
+        //     let lo = addr & 0xFFFF;
+        //     T::from_u32((lo << 16) | lo) // TODO weirddd
+        // }
     }
 
     // TODO what if address crosses a boundary?
     pub fn write<T: Data>(s: &mut System, addr: u32, data: T) {
-        if (RDRAM_REG_BROADCAST_START..RDRAM_REG_BROADCAST_END).contains(&addr) {
-            panic!(
-                "Writing to RDRAM registers: {:08X} @ {:08X}",
-                addr, s.cpu.regs.pc
-            );
-        }
+        let location = Self::decode(addr);
 
-        let addr = virtual_to_physical_address(addr);
-
-        match addr {
-            RDRAM_START..RDRAM_END => {
-                data.write(&mut s.map.rdram, addr - RDRAM_START);
-            }
-
-            RDRAM_REG_START..RDRAM_REG_END => {
-                log::warn!("write RDRAM_REG_0 {:X}", data); // TODO
-            }
-
-            RDRAM_REG_BROADCAST_START..RDRAM_REG_BROADCAST_END => {
-                log::warn!("write RDRAM_REG_BROADCAST {:X}", data); // TODO
-            }
-
-            // RSP DMEM
-            0x0400_0000..=0x0400_0FFF => {
-                data.write(&mut s.map.rspdmem, addr - 0x0400_0000);
-            }
-
-            // RSP IMEM
-            0x0400_1000..=0x0400_1FFF => {
-                data.write(&mut s.map.rspimem, addr - 0x0400_1000);
-            }
-
-            // RSP registers
-            0x0404_0000..=0x040B_FFFF => {
-                let rsp_reg = ((addr >> 2) & 7) as usize;
-
-                match rsp_reg {
-                    0 => {
-                        log::warn!("write SP_DMA_SPADDR {:X}", data);
-                    }
-                    1 => {
-                        log::warn!("write SP_DMA_RAMADDR {:X}", data);
-                    }
-                    2 => {
-                        log::warn!("write SP_DMA_RDLEN {:X}", data);
-                        log::warn!("SP DMA------------------------------------------");
-                    }
-                    3 => {
-                        log::warn!("write SP_DMA_WRLEN {:X}", data);
-                        log::warn!("SP DMA------------------------------------------");
-                    }
-                    4 => {
-                        log::warn!("write SP_STATUS {:X}", data);
-                    }
-                    5 => {
-                        log::warn!("write SP_DMA_FULL {:X}", data);
-                    }
-                    6 => {
-                        log::warn!("write SP_DMA_BUSY {:X}", data);
-                    }
-                    7 => {
-                        log::warn!("write SP_SEMAPHORE {:X}", data);
-                    }
-                    _ => panic!("Invalid RSP register: {:08X}", rsp_reg),
-                }
-            }
-
-            mi::START..mi::END => Mi::write(s, addr, data),
-            vi::START..vi::END => Vi::write(s, addr, data),
-            ai::START..ai::END => Ai::write(s, addr, data),
-
-            pi::START..pi::END => Pi::write(s, addr, data),
-            si::START..si::END => Si::write(s, addr, data),
-
-            // PIF RAM
-            0x1FC0_07C0..=0x1FC0_07FF => {
-                log::warn!("write PIF RAM: {:X}", data);
-            }
-
-            _ => panic!("Invalid write address: {:032X}", addr),
+        match location {
+            Some(MapLocation::Rdram(addr)) => Rdram::write(s, addr, data),
+            Some(MapLocation::RdramRegs(addr)) => Rdram::write_reg(s, addr, data),
+            Some(MapLocation::RspDmem(addr)) => Rsp::write_dmem(s, addr, data),
+            Some(MapLocation::RspImem(addr)) => Rsp::write_imem(s, addr, data),
+            Some(MapLocation::RspRegs(addr)) => Rsp::write_reg(s, addr, data),
+            Some(MapLocation::Mi(addr)) => Mi::write(s, addr, data),
+            Some(MapLocation::Vi(addr)) => Vi::write(s, addr, data),
+            Some(MapLocation::Ai(addr)) => Ai::write(s, addr, data),
+            Some(MapLocation::Pi(addr)) => Pi::write(s, addr, data),
+            Some(MapLocation::RdramInterface(addr)) => Rdram::write_interface(s, addr, data),
+            Some(MapLocation::Si(addr)) => Si::write(s, addr, data),
+            _ => panic!("Invalid write address: {:08X}", addr),
         }
     }
 }
@@ -234,103 +193,19 @@ pub fn virtual_to_physical_address(addr: u32) -> u32 {
     }
 }
 
+// TODO clean up
 pub fn address_info(addr: u32) -> Option<&'static str> {
-    let addr = virtual_to_physical_address(addr);
+    let location = Map::decode(addr);
 
-    // TODO delegate!!!!!
-    // TODO check masks!
-    // TODO normalize strings
-
-    let s = match addr {
-        0x03F0_0000..=0x03F7_FFFF => match addr & 0x3F {
-            0x00 => "RDRAM device type",
-            0x04 => "RDRAM device ID",
-            0x08 => "RDRAM delay",
-            0x0C => "RDRAM mode",
-            0x10 => "RDRAM RefInterval",
-            0x14 => "RDRAM RefRow",
-            0x18 => "RDRAM RasInterval",
-            0x1C => "RDRAM MinInterval ",
-            0x20 => "RDRAM AddressSelect  ",
-            0x24 => "RDRAM DeviceManufacturer  ",
-            _ => "",
-        },
-
-        // TODO rdram write only?
-        0x0400_0000..=0x048F_FFFF => match addr {
-            0x0400_0000..=0x0400_0FFF => "RSP DMEM",
-            0x0400_1000..=0x0400_1FFF => "RSP IMEM",
-            0x0404_0000..=0x040B_FFFF => match addr & 0x3F {
-                0x00 => "SP_DMA_SPADDR",
-                0x04 => "SP_DMA_RAMADDR",
-                0x08 => "SP_DMA_RDLEN",
-                0x0C => "SP_DMA_WRLEN",
-                0x10 => "SP_STATUS",
-                0x14 => "SP_DMA_FULL",
-                0x18 => "SP_DMA_BUSY",
-                0x1C => "SP_SEMAPHORE",
-                _ => "",
-            },
-
-            0x0410_0000..=0x042F_FFFF => "RDP command registers TODO",
-
-            0x0430_0000..=0x043F_FFFF => match addr & 0x3F {
-                0x00 => "MI_MODE",
-                0x04 => "MI_VERSION",
-                0x08 => "MI_INTERRUPT",
-                0x0C => "MI_MASK",
-                _ => "",
-            },
-
-            0x0440_0000..=0x044F_FFFF => "VI TODO",
-
-            0x0450_0000..=0x045F_FFFF => "AI TODO",
-
-            0x0460_0000..=0x046F_FFFF => match addr & 0x3F {
-                0x00 => "PI_DRAM_ADDR",
-                0x04 => "PI_CART_ADDR",
-                0x08 => "PI_RD_LEN",
-                0x0C => "PI_WR_LEN",
-                0x10 => "PI_STATUS",
-                0x14 => "PI_BSD_DOM1_LAT",
-                0x18 => "PI_BSD_DOM1_PWD",
-                0x20 => "PI_BSD_DOM1_RLS",
-                0x24 => "PI_BSD_DOM2_LAT",
-                0x28 => "PI_BSD_DOM2_PWD",
-                0x1C => "PI_BSD_DOM1_PGS",
-                0x2C => "PI_BSD_DOM2_PGS",
-                0x30 => "PI_BSD_DOM2_RLS",
-                _ => "",
-            },
-
-            0x0470_0000..=0x047F_FFFF => match addr & 0x3F {
-                0x00 => "RI_MODE",
-                0x04 => "RI_CONFIG",
-                0x08 => "RI_CURRENT_LOAD",
-                0x0C => "RI_SELECT",
-                0x10 => "RI_REFRESH",
-                0x14 => "RI_LATENCY",
-                0x18 => "RI_ERROR",
-                0x1C => "RI_BANK_STATUS",
-                _ => "",
-            },
-
-            0x0480_0000..=0x048F_FFFF => match addr & 0x3F {
-                0x00 => "SI_DRAM_ADDR",
-                0x04 => "SI_PIF_AD_RD64B",
-                0x08 => "SI_PIF_AD_WR4B",
-                0x10 => "SI_PIF_AD_WR64B",
-                0x14 => "SI_PIF_AD_RD4B",
-                0x18 => "SI_STATUS",
-                _ => "",
-            },
-
-            _ => "",
-        },
-
-        // TODO others
-        _ => "",
-    };
-
-    if s.is_empty() { None } else { Some(s) }
+    match location {
+        Some(MapLocation::RdramRegs(addr)) => Rdram::reg_info(addr),
+        Some(MapLocation::RspRegs(addr)) => Rsp::reg_info(addr),
+        Some(MapLocation::Mi(addr)) => Mi::reg_info(addr),
+        Some(MapLocation::Vi(addr)) => Vi::reg_info(addr),
+        Some(MapLocation::Ai(addr)) => Ai::reg_info(addr),
+        Some(MapLocation::Pi(addr)) => Pi::address_info(addr),
+        Some(MapLocation::RdramInterface(addr)) => Rdram::interface_info(addr),
+        Some(MapLocation::Si(addr)) => Si::address_info(addr),
+        _ => None,
+    }
 }

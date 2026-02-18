@@ -1,6 +1,7 @@
 use crate::{
     data::Data,
     events::{Event, EventType},
+    map::Location,
     mi::Interrupt,
     system::System,
 };
@@ -8,6 +9,8 @@ use crate::{
 pub const START: u32 = 0x0440_0000;
 pub const SIZE: u32 = 0x10_0000;
 pub const END: u32 = START + SIZE;
+
+pub type ViLocation = Location<START, END>;
 
 pub const MASK: u32 = 0x3F;
 
@@ -111,10 +114,8 @@ impl Default for Vi {
 }
 
 impl Vi {
-    pub fn read<T: Data>(&self, addr: u32) -> T {
-        assert_range(addr);
-
-        let reg = ((addr & MASK) >> 2) as usize;
+    pub fn read<T: Data>(&self, addr: ViLocation) -> T {
+        let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         match reg {
             FRAMEBUFFER_ADDR_REG => T::from_u32(self.regs[FRAMEBUFFER_ADDR_REG]),
@@ -122,14 +123,12 @@ impl Vi {
             // TODO half scanlines???
             CURRENT_SCANLINE_REG => T::from_u32(self.regs[CURRENT_SCANLINE_REG]),
 
-            _ => unimplemented!("Read VI register @ {:08X}", addr),
+            _ => unimplemented!("Read VI register @ {:08X}", addr.relative()),
         }
     }
 
-    pub fn write<T: Data>(s: &mut System, addr: u32, data: T) {
-        assert_range(addr);
-
-        let reg = ((addr & MASK) >> 2) as usize;
+    pub fn write<T: Data>(s: &mut System, addr: ViLocation, data: T) {
+        let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         let data = data.to_u32(); // TODO temp hack, should be able to write any size
 
@@ -226,7 +225,21 @@ impl Vi {
                 s.map.vi.regs[Y_SCALE_REG] = data;
             }
 
-            _ => unimplemented!("Write VI register {:X} @ {:08X}", data.to_u32(), addr),
+            _ => unimplemented!(
+                "Write VI register {:X} @ {:08X}",
+                data.to_u32(),
+                addr.relative()
+            ),
+        }
+    }
+
+    pub fn reg_info(addr: ViLocation) -> Option<&'static str> {
+        match addr.relative() & MASK {
+            STATUS_LO => Some("VI_STATUS"),
+            FRAMEBUFFER_ADDR_LO => Some("VI_FRAMEBUFFER_ADDR"),
+            WIDTH_LO => Some("VI_WIDTH"),
+            INTERRUPT_SCANLINE_LO => Some("VI_INTERRUPT_SCANLINE"),
+            _ => None,
         }
     }
 
@@ -256,23 +269,18 @@ impl Vi {
         });
     }
 
-    pub fn address_info(addr: u32) -> Option<&'static str> {
-        assert_range(addr);
-
+    pub fn address_info(addr: ViLocation) -> Option<&'static str> {
         // TODO check masks!
         // TODO normalize strings
 
-        let s = match addr & MASK {
-            STATUS_LO => "VI_STATUS",
-            FRAMEBUFFER_ADDR_LO => "VI_FRAMEBUFFER_ADDR",
-            WIDTH_LO => "VI_WIDTH",
-            INTERRUPT_SCANLINE_LO => "VI_INTERRUPT_SCANLINE",
+        match addr.relative() & MASK {
+            STATUS_LO => Some("VI_STATUS"),
+            FRAMEBUFFER_ADDR_LO => Some("VI_FRAMEBUFFER_ADDR"),
+            WIDTH_LO => Some("VI_WIDTH"),
+            INTERRUPT_SCANLINE_LO => Some("VI_INTERRUPT_SCANLINE"),
             // TODO others
-            _ => "???", // TODO
-        };
-
-        // TODO cleaner way to do that?
-        if s.is_empty() { None } else { Some(s) }
+            _ => None,
+        }
     }
 
     pub fn framebuffer_address(&self) -> u32 {
@@ -307,8 +315,4 @@ impl Vi {
 
         (data, width, height)
     }
-}
-
-fn assert_range(addr: u32) {
-    debug_assert!((START..END).contains(&addr));
 }

@@ -1,6 +1,7 @@
 use crate::{
     data::Data,
     events::{Event, EventType},
+    map::Location,
     mi::Interrupt,
     system::System,
 };
@@ -8,6 +9,8 @@ use crate::{
 pub const START: u32 = 0x0460_0000;
 pub const SIZE: u32 = 0x10_0000;
 pub const END: u32 = START + SIZE;
+
+pub type PiLocation = Location<START, END>;
 
 pub const MASK: u32 = 0x1F;
 
@@ -44,20 +47,16 @@ pub struct Pi {
 }
 
 impl Pi {
-    pub fn read<T: Data>(&self, addr: u32) -> T {
-        assert_range(addr);
-
-        let reg = (addr & MASK) >> 2;
+    pub fn read<T: Data>(&self, addr: PiLocation) -> T {
+        let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         // TODO depends???
 
-        T::from_u32(self.regs[reg as usize]) // TOD0 weirddd
+        T::from_u32(self.regs[reg]) // TOD0 weirddd
     }
 
-    pub fn write<T: Data>(s: &mut System, addr: u32, data: T) {
-        assert_range(addr);
-
-        let reg = ((addr & MASK) >> 2) as usize;
+    pub fn write<T: Data>(s: &mut System, addr: PiLocation, data: T) {
+        let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         let data = data.to_u32(); // TODO temp hack, should be able to write any size
 
@@ -90,7 +89,7 @@ impl Pi {
                     s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_ERROR_MASK;
                 }
             }
-            _ => unimplemented!("Write PI register @ {:08X}", addr),
+            _ => unimplemented!("Write PI register @ {:08X}", addr.relative()),
         }
     }
 
@@ -98,16 +97,26 @@ impl Pi {
         // Instant DMA transfer
 
         let length = s.map.pi.regs[WRITE_LEN_REG] + 1;
+
         log::info!(
             "PI DMA transfer: {} bytes from {:08X} to {:08X}",
             length,
             s.map.pi.regs[CART_ADDR_REG],
             s.map.pi.regs[DRAM_ADDR_REG]
         );
+
+        let dest_base = s.map.pi.regs[DRAM_ADDR_REG];
+
         for offset in 0..length {
             let data = s.read::<u8>(s.map.pi.regs[CART_ADDR_REG] + offset);
 
-            s.write::<u8>(s.map.pi.regs[DRAM_ADDR_REG] + offset, data);
+            // log::info!(
+            //     "PI DMA transfer: offset {:08X} data {:02X}",
+            //     dest_base + offset,
+            //     data
+            // );
+
+            s.write::<u8>(dest_base + offset, data);
         }
 
         // Update the status register
@@ -140,13 +149,11 @@ impl Pi {
         s.map.mi.set_pending_interrupt(Interrupt::Pi);
     }
 
-    pub fn address_info(addr: u32) -> Option<&'static str> {
-        assert_range(addr);
-
+    pub fn address_info(addr: PiLocation) -> Option<&'static str> {
         // TODO check masks!
         // TODO normalize strings
 
-        let s = match addr & MASK {
+        let s = match addr.relative() & MASK {
             DRAM_ADDR_LO => "PI_DRAM_ADDR",
             CART_ADDR_LO => "PI_CART_ADDR",
             READ_LEN_LO => "PI_READ_LEN",
@@ -166,8 +173,4 @@ impl Pi {
         // TODO cleaner way to do that?
         if s.is_empty() { None } else { Some(s) }
     }
-}
-
-fn assert_range(addr: u32) {
-    debug_assert!((START..END).contains(&addr));
 }
