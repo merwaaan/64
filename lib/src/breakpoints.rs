@@ -1,42 +1,40 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum Breakpoint {
-    Address(u32),
+struct Breakpoint {
+    enabled: bool,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Breakpoints {
-    pub breakpoints: Vec<Breakpoint>, // TODO priv
+    breakpoints: HashMap<u32, Breakpoint>,
 }
 
 impl Breakpoints {
-    pub fn add(&mut self, breakpoint: Breakpoint) {
-        let address = match breakpoint {
-            Breakpoint::Address(addr) => addr,
-        };
-
-        if !self.contains(address) {
-            self.breakpoints.push(breakpoint);
-        }
+    pub fn add(&mut self, address: u32) {
+        self.breakpoints
+            .insert(address, Breakpoint { enabled: true });
     }
 
-    pub fn remove(&mut self, breakpoint: Breakpoint) {
-        self.breakpoints.retain(|bp| bp != &breakpoint);
+    pub fn remove(&mut self, address: u32) {
+        self.breakpoints.remove(&address);
     }
 
-    pub fn contains(&self, address: u32) -> bool {
-        self.breakpoints.iter().any(|breakpoint| match breakpoint {
-            Breakpoint::Address(bp_address) => *bp_address == address,
-        })
+    pub fn toggle(&mut self, address: u32) {
+        self.breakpoints
+            .get_mut(&address)
+            .map(|breakpoint| breakpoint.enabled = !breakpoint.enabled);
     }
-}
 
-impl<'a> IntoIterator for &'a Breakpoints {
-    type Item = &'a Breakpoint;
-    type IntoIter = std::slice::Iter<'a, Breakpoint>;
+    pub fn should_break(&self, address: u32) -> bool {
+        self.breakpoints.get(&address).is_some_and(|b| b.enabled) // TODO if None, return true?b
+    }
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.breakpoints.iter()
+    pub fn iter(&self) -> impl Iterator<Item = (u32, bool)> {
+        self.breakpoints
+            .iter()
+            .map(|(address, breakpoint)| (*address, breakpoint.enabled))
     }
 }

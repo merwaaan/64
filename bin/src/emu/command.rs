@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use n64::{breakpoints::Breakpoint, cart::Cart, system::System};
+use n64::{cart::Cart, system::System};
 
 use crate::{
     emu::{
@@ -12,8 +12,9 @@ use crate::{
 
 pub enum Command {
     SetSetting(SettingUpdate),
-    AddBreakpoint(Breakpoint),
-    RemoveBreakpoint(Breakpoint),
+    AddBreakpoint(u32),
+    ToggleBreakpoint(u32),
+    RemoveBreakpoint(u32),
     LoadRom(PathBuf),
     Pause,
     Resume,
@@ -93,6 +94,14 @@ impl Command {
             Command::RemoveBreakpoint(breakpoint) => {
                 if let Some(system) = &mut state.system {
                     system.remove_breakpoint(*breakpoint);
+
+                    events.push(Event::BreakpointsUpdate(system.breakpoints().clone()));
+                }
+            }
+
+            Command::ToggleBreakpoint(address) => {
+                if let Some(system) = &mut state.system {
+                    system.toggle_breakpoint(*address);
 
                     events.push(Event::BreakpointsUpdate(system.breakpoints().clone()));
                 }

@@ -232,6 +232,9 @@ impl Runner {
             // TODO conditional
             events.push(Event::MiUpdate(system.map.mi));
             events.push(Event::ViUpdate(system.map.vi));
+            events.push(Event::AiUpdate(system.map.ai));
+            events.push(Event::RspUpdate(system.map.rsp.regs));
+            events.push(Event::SiUpdate(system.map.si));
         }
 
         events

@@ -1,3 +1,5 @@
+use strum::{Display, EnumIter};
+
 use crate::{data::Data, map::Location, mi::Interrupt, system::System};
 
 const START: u32 = 0x0480_0000;
@@ -6,6 +8,16 @@ const END: u32 = 0x0490_0000;
 pub type SiLocation = Location<START, END>;
 
 const MASK: u32 = 0x1F; // TODO?
+
+#[derive(Debug, Display, Clone, Copy, EnumIter)]
+#[repr(u32)]
+pub enum Register {
+    DramAddr,
+    PifAddrRead64,
+    PifAddrRead4,
+    PifAddrWrite64,
+    PifAddrWrite4,
+}
 
 // TODO macro?
 
@@ -33,9 +45,9 @@ const STATUS_READ_PENDING_MASK: u32 = 1 << 2;
 const STATUS_DMA_ERROR_MASK: u32 = 1 << 3;
 // TODO others
 
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub struct Si {
-    regs: [u32; 13],
+    pub regs: [u32; 13],
 }
 
 impl Si {

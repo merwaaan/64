@@ -56,10 +56,10 @@ pub trait Instruction {
 
 pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
     match opcode.group() {
-        0x00 => instructions_cpu::decode_special(opcode),
-        0x01 => instructions_cpu::decode_regimm(opcode),
-        0x10 => instructions_cop0::decode(opcode),
-        0x11 => instructions_cop1::decode(opcode),
+        0b000000 => instructions_cpu::decode_special(opcode),
+        0b000001 => instructions_cpu::decode_regimm(opcode),
+        0b010000 => instructions_cop0::decode(opcode),
+        0b010001 => instructions_cop1::decode(opcode),
         _ => instructions_cpu::decode_standard(opcode),
     }
 }

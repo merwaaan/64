@@ -1,3 +1,5 @@
+use strum::{Display, EnumIter};
+
 use crate::{data::Data, map::Location, system::System};
 
 const START: u32 = 0x0450_0000;
@@ -7,6 +9,16 @@ pub type AiLocation = Location<START, END>;
 
 const MASK: u32 = 0x1F;
 
+#[derive(Debug, Display, Clone, Copy, EnumIter)]
+#[repr(u32)]
+pub enum Register {
+    DramAddr,
+    Length,
+    Control,
+    Dacrate,
+    Bitrate,
+}
+
 const DRAM_ADDR_REG: usize = 0;
 const LENGTH_REG: usize = 1;
 const CONTROL_REG: usize = 2;
@@ -14,6 +26,7 @@ const STATUS_REG: usize = 3;
 const DACRATE_REG: usize = 4;
 const BITRATE_REG: usize = 5;
 
+#[derive(Clone, Copy)]
 pub struct Ai {
     pub regs: [u32; 6], // TODO not pub
 }

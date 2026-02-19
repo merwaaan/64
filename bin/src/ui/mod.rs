@@ -1,29 +1,42 @@
 use std::path::PathBuf;
 
-use egui::{Context, Key, MenuBar, TopBottomPanel, UiKind, Window};
+use egui::{Context, Key, MenuBar, TopBottomPanel, UiKind};
 
 use crate::{
     Args,
     emu::{command::Command, event::Event, runner::Runner},
     ui::{
+        ai::AiWidget,
         breakpoints::BreakpointsWidget,
+        colors::Color,
         framebuffer::FramebufferWidget,
         instructions::{InstructionsSettings, InstructionsWidget},
         memory::{MemorySettings, MemoryWidget},
         mi::MiWidget,
         registers::RegistersWidget,
+        rsp::RspWidget,
+        si::SiWidget,
+        text::Text,
         vi::ViWidget,
     },
 };
 
+pub mod ai;
 pub mod breakpoints;
+pub mod colors;
 pub mod framebuffer;
 pub mod instructions;
 pub mod memory;
 pub mod mi;
 pub mod registers;
+pub mod rsp;
+pub mod si;
+pub mod text;
 pub mod vi;
 
+/// Main UI state
+///
+/// Widget are displayed when their settings have a value
 #[derive(Clone, Copy)]
 pub enum SettingUpdate {
     Instructions(Option<InstructionsSettings>),
@@ -32,42 +45,54 @@ pub enum SettingUpdate {
     Framebuffer(Option<()>),
 }
 
+pub trait Widget {
+    fn init(&mut self) -> Vec<Command> {
+        vec![]
+    }
+
+    fn update(&mut self, ctx: &Context, event: &Event);
+
+    fn show(&mut self, ctx: &Context) -> Vec<Command>;
+}
+
 pub struct Ui {
     runner: Option<Runner>,
 
     paused: bool,
 
-    // Widgets
-    instructions: Option<InstructionsWidget>,
-    registers: Option<RegistersWidget>,
-    memory: Option<MemoryWidget>,
-    mi: Option<MiWidget>,
-    vi: Option<ViWidget>,
-    framebuffer: Option<FramebufferWidget>,
-    breakpoints: Option<BreakpointsWidget>,
+    widgets: Vec<Box<dyn Widget>>,
 }
 
 impl Ui {
     pub fn new(args: &Args) -> Self {
+        // Setup the widgets
+
+        let mut widgets: Vec<Box<dyn Widget>> = vec![
+            Box::new(InstructionsWidget::default()),
+            Box::new(MemoryWidget::default()),
+            Box::new(RegistersWidget::default()),
+            Box::new(MiWidget::default()),
+            Box::new(ViWidget::default()),
+            Box::new(SiWidget::default()),
+            Box::new(AiWidget::default()),
+            Box::new(RspWidget::default()),
+            Box::new(FramebufferWidget::default()),
+            Box::new(BreakpointsWidget::default()),
+        ];
+
+        // Initialize the runner
+
         let runner = Runner::new();
 
-        let instructions_widget = InstructionsWidget::default();
-        let memory_widget = MemoryWidget::default();
+        // Send the initialstartup commands
 
-        // Send the initial settings to the runner
+        for widget in widgets.iter_mut() {
+            let commands = widget.init();
 
-        // TODO just send from inside the widget???
-        runner.send_command(Command::SetSetting(SettingUpdate::Instructions(Some(
-            instructions_widget.settings,
-        ))));
-
-        runner.send_command(Command::SetSetting(SettingUpdate::Memory(Some(
-            memory_widget.settings,
-        ))));
-
-        runner.send_command(Command::SetSetting(SettingUpdate::Registers(Some(()))));
-
-        runner.send_command(Command::SetSetting(SettingUpdate::Framebuffer(Some(()))));
+            for command in commands {
+                runner.send_command(command);
+            }
+        }
 
         // Start paused or not
 
@@ -90,13 +115,7 @@ impl Ui {
         Self {
             runner: Some(runner),
             paused,
-            instructions: Some(instructions_widget),
-            registers: Some(RegistersWidget::default()),
-            memory: Some(memory_widget),
-            mi: Some(MiWidget::default()),
-            vi: Some(ViWidget::default()),
-            framebuffer: Some(FramebufferWidget::default()),
-            breakpoints: Some(BreakpointsWidget::default()),
+            widgets,
         }
     }
 
@@ -109,32 +128,8 @@ impl Ui {
                 _ => {}
             }
 
-            if let Some(instructions) = self.instructions.as_mut() {
-                instructions.update(&event);
-            }
-
-            if let Some(registers) = self.registers.as_mut() {
-                registers.update(&event);
-            }
-
-            if let Some(memory) = self.memory.as_mut() {
-                memory.update(&event);
-            }
-
-            if let Some(mi) = self.mi.as_mut() {
-                mi.update(&event);
-            }
-
-            if let Some(vi) = self.vi.as_mut() {
-                vi.update(&event);
-            }
-
-            if let Some(framebuffer) = self.framebuffer.as_mut() {
-                framebuffer.update(ctx, &event);
-            }
-
-            if let Some(breakpoints) = self.breakpoints.as_mut() {
-                breakpoints.update(&event);
+            for widget in self.widgets.iter_mut() {
+                widget.update(ctx, &event);
             }
         }
     }
@@ -174,17 +169,15 @@ impl eframe::App for Ui {
         //TODO to widget
         TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if let Some(runner) = &self.runner
-                        && ui.button("Load ROM…").clicked()
-                        && let Some(path) = rfd::FileDialog::new()
-                            .add_filter("ROM files", &["n64", "z64", "v64", "zip"])
-                            .pick_file()
-                    {
-                        runner.send_command(Command::LoadRom(path));
-                        ui.close_kind(UiKind::Menu);
-                    }
-                });
+                if let Some(runner) = &self.runner
+                    && ui.button("Load ROM…").clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .add_filter("ROM files", &["n64", "z64", "v64", "zip"])
+                        .pick_file()
+                {
+                    runner.send_command(Command::LoadRom(path));
+                    ui.close_kind(UiKind::Menu);
+                }
 
                 if let Some(runner) = &self.runner
                     && ui
@@ -213,59 +206,15 @@ impl eframe::App for Ui {
             });
         });
 
-        Window::new("Instructions")
-            .default_pos([0.0, 100.0])
-            .show(ctx, |ui| {
-                if let Some(instructions) = self.instructions.as_ref() {
-                    instructions.show(ui);
-                }
-            });
+        for widget in self.widgets.iter_mut() {
+            let commands = widget.show(ctx);
 
-        Window::new("Registers")
-            .default_pos([800.0, 100.0])
-            .show(ctx, |ui| {
-                if let Some(registers) = self.registers.as_ref() {
-                    registers.show(ui);
+            if let Some(runner) = &self.runner {
+                for command in commands {
+                    runner.send_command(command);
                 }
-            });
-
-        Window::new("Memory")
-            .default_pos([1600.0, 100.0])
-            .show(ctx, |ui| {
-                if let Some(memory) = self.memory.as_mut() {
-                    memory.show(ui, &mut self.runner);
-                }
-            });
-
-        Window::new("MI")
-            .default_pos([400.0, 600.0])
-            .show(ctx, |ui| {
-                if let Some(mi) = self.mi.as_mut() {
-                    mi.show(ui);
-                }
-            });
-
-        Window::new("VI").default_pos([0.0, 800.0]).show(ctx, |ui| {
-            if let Some(vi) = self.vi.as_mut() {
-                vi.show(ui);
             }
-        });
-
-        Window::new("Framebuffer")
-            .default_pos([400.0, 1000.0])
-            .show(ctx, |ui| {
-                if let Some(framebuffer) = self.framebuffer.as_mut() {
-                    framebuffer.show(ui);
-                }
-            });
-
-        Window::new("Breakpoints")
-            .default_pos([900.0, 1000.0])
-            .show(ctx, |ui| {
-                if let Some(breakpoints) = self.breakpoints.as_mut() {
-                    breakpoints.show(ui, &mut self.runner);
-                }
-            });
+        }
 
         ctx.request_repaint(); // TODO???
     }
@@ -279,4 +228,18 @@ pub fn parse_hex(s: &str) -> Option<u64> {
     }
 
     u64::from_str_radix(s, 16).ok()
+}
+
+pub fn reg32(ui: &mut egui::Ui, name: impl AsRef<str>, value: u32) {
+    ui.horizontal(|ui| {
+        Text::new(name).color(Color::Light).show(ui);
+        Text::new(format!("{:08X}", value)).show(ui);
+    });
+}
+
+pub fn reg64(ui: &mut egui::Ui, name: impl AsRef<str>, value: u64) {
+    ui.horizontal(|ui| {
+        Text::new(name).color(Color::Light).show(ui);
+        Text::new(format!("{:08X} {:08X}", (value >> 32) as u32, value as u32)).show(ui);
+    });
 }

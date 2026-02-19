@@ -1,3 +1,5 @@
+use strum::{Display, EnumIter};
+
 use crate::{
     data::Data,
     events::{Event, EventType},
@@ -24,8 +26,9 @@ const REG_MASK: u32 = 0x1F;
 
 pub type RspRegsLocation = Location<REG_START, REG_END>;
 
+#[derive(Debug, Display, Clone, Copy, EnumIter)]
 #[repr(u32)]
-enum Register {
+pub enum Register {
     DmaSpAddr,
     DmaRamAddr,
     DmaRdLen,
@@ -36,6 +39,7 @@ enum Register {
     Semaphore,
 }
 
+// TODOrm
 const STATUS_HALTED_MASK: u32 = 1;
 const STATUS_BROKE: u32 = 1 << 1;
 const STATUS_DMA_BUSY: u32 = 1 << 2;
@@ -45,11 +49,13 @@ const STATUS_SINGLE_STEP_MODE: u32 = 1 << 5;
 const STATUS_INTERRUPT_ON_BREAK: u32 = 1 << 6;
 // TODO others?
 
+#[derive(Clone)]
 pub struct Rsp {
     // DMEM: 0x0000 - 0x0FFF
     // IMEM: 0x1000 - 0x1FFF
     mem: Vec<u8>,
-    regs: [u32; 8],
+
+    pub regs: [u32; 8],
 }
 
 impl Default for Rsp {

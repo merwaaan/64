@@ -1,3 +1,5 @@
+use strum::{Display, EnumIter};
+
 use crate::{
     data::Data,
     events::{Event, EventType},
@@ -13,8 +15,20 @@ pub type PiLocation = Location<START, END>;
 
 const MASK: u32 = 0x1F;
 
-// TODO macro?
+#[derive(Debug, Display, Clone, Copy, EnumIter)]
+#[repr(u32)]
+pub enum Register {
+    DramAddr,
+    CartAddr,
+    ReadLen,
+    WriteLen,
+    Status,
+    DmaBusy,
+    DmaError,
+    DmaCompleted,
+}
 
+// TODO rm?
 const DRAM_ADDR_REG: usize = 0;
 const DRAM_ADDR_LO: u32 = (DRAM_ADDR_REG as u32) << 2;
 

@@ -6,6 +6,7 @@ pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
 
     let instruction: &'static dyn Instruction = match opcode.0 & 0x03E0_0000 {
         0x000_0000 => &MFC0_,
+        0x020_0000 => &DMFC0_,
         0x080_0000 => &MTC0_,
         // C0 sub-group
         0x200_0000 => match opcode.0 & 0x3F {
@@ -22,6 +23,20 @@ pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
         None
     } else {
         Some(instruction)
+    }
+}
+
+instruction_struct!(DMFC0);
+
+impl Instruction for DMFC0 {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cpu.regs.gpr[op.rt()].set64(op.rdv64(s));
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("DMFC0 {}, {}", op.rtn(), op.rd0n()))
     }
 }
 
@@ -82,7 +97,7 @@ instruction_struct!(MFC0);
 impl Instruction for MFC0 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
         s.cpu.regs.gpr[op.rt()].set64(s.cop0.regs[op.rd()].get64());
-        log::warn!("MFC0 {}, {:08X}", op.rd0n(), s.cop0.regs[op.rd()].get64());
+
         None
     }
 

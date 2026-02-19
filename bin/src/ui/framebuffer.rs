@@ -1,6 +1,9 @@
-use egui::{ColorImage, Context, TextureFilter, TextureHandle, TextureOptions};
+use egui::{ColorImage, Context, TextureFilter, TextureHandle, TextureOptions, Window};
 
-use crate::emu::event::Event;
+use crate::{
+    emu::{command::Command, event::Event},
+    ui::{SettingUpdate, Widget, colors::Color, text::Text},
+};
 
 #[derive(Clone)]
 pub struct FramebufferUpdate {
@@ -16,8 +19,12 @@ pub struct FramebufferWidget {
     texture: Option<TextureHandle>,
 }
 
-impl FramebufferWidget {
-    pub fn update(&mut self, ctx: &Context, event: &Event) {
+impl Widget for FramebufferWidget {
+    fn init(&mut self) -> Vec<Command> {
+        vec![Command::SetSetting(SettingUpdate::Framebuffer(Some(())))]
+    }
+
+    fn update(&mut self, ctx: &Context, event: &Event) {
         if let Event::FramebufferUpdate(update) = event {
             self.last_update = Some(update.clone());
 
@@ -42,13 +49,21 @@ impl FramebufferWidget {
         }
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui) {
-        if let Some(last_update) = &self.last_update {
-            ui.label(format!("{}x{}", last_update.width, last_update.height));
-        }
+    fn show(&mut self, ctx: &Context) -> Vec<Command> {
+        Window::new("Framebuffer")
+            .default_pos([400.0, 1000.0])
+            .show(ctx, |ui| {
+                if let Some(last_update) = &self.last_update {
+                    Text::new(format!("{}x{}", last_update.width, last_update.height))
+                        .color(Color::Light)
+                        .show(ui);
+                }
 
-        if let Some(texture) = &self.texture {
-            ui.image((texture.id(), texture.size_vec2()));
-        }
+                if let Some(texture) = &self.texture {
+                    ui.image((texture.id(), texture.size_vec2()));
+                }
+            });
+
+        vec![]
     }
 }

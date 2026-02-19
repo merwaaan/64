@@ -1,7 +1,10 @@
-use egui::{Color32, RichText};
+use egui::{Context, Window};
 use n64::instructions::Disassembly;
 
-use crate::emu::event::Event;
+use crate::{
+    emu::{command::Command, event::Event},
+    ui::{SettingUpdate, Widget, colors::Color, text::Text},
+};
 
 #[derive(Clone, Copy)]
 pub enum InstructionAddress {
@@ -28,10 +31,8 @@ pub struct InstructionsWidget {
     pc: u32,
 }
 
-// TODO InstructionsUpdate
-
-impl InstructionsWidget {
-    pub fn default() -> Self {
+impl Default for InstructionsWidget {
+    fn default() -> Self {
         Self {
             settings: InstructionsSettings {
                 base_address: InstructionAddress::Pc,
@@ -41,8 +42,16 @@ impl InstructionsWidget {
             pc: 0,
         }
     }
+}
 
-    pub fn update(&mut self, event: &Event) {
+impl Widget for InstructionsWidget {
+    fn init(&mut self) -> Vec<Command> {
+        vec![Command::SetSetting(SettingUpdate::Instructions(Some(
+            self.settings,
+        )))]
+    }
+
+    fn update(&mut self, _ctx: &Context, event: &Event) {
         match event {
             Event::InstructionsUpdate(instructions) => {
                 self.instructions = instructions.clone();
@@ -54,24 +63,24 @@ impl InstructionsWidget {
         }
     }
 
-    pub fn show(&self, ui: &mut egui::Ui) {
-        for instruction in &self.instructions {
-            ui.horizontal(|ui| {
-                ui.label({
-                    let mut text = RichText::new(format!("{:08X}", instruction.address))
-                        .monospace()
-                        .strong();
+    fn show(&mut self, ctx: &Context) -> Vec<Command> {
+        Window::new("Instructions")
+            .default_pos([0.0, 100.0])
+            .show(ctx, |ui| {
+                for instruction in &self.instructions {
+                    ui.horizontal(|ui| {
+                        Text::new("•").color(Color::Light).show(ui);
 
-                    if instruction.address == self.pc {
-                        text = text.color(Color32::from_rgb(0, 255, 0));
-                    }
-                    text
-                });
+                        Text::new(format!("{:08X}", instruction.address))
+                            .color(Color::Active)
+                            .reverse(instruction.address == self.pc)
+                            .show(ui);
 
-                ui.label(
-                    RichText::new(format!(" {}", instruction.disassembly.mnemonics)).monospace(),
-                );
+                        Text::new(format!(" {}", instruction.disassembly.mnemonics)).show(ui);
+                    });
+                }
             });
-        }
+
+        vec![]
     }
 }

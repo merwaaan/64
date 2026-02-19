@@ -46,9 +46,13 @@ pub struct Cop0 {
 }
 
 impl Cop0 {
+    //
+
     pub fn ie(&self) -> bool {
         self.regs[Register::Status as usize].get() & STATUS_IE_MASK != 0
     }
+
+    //
 
     pub fn erl(&self) -> bool {
         self.regs[Register::Status as usize].get() & STATUS_ERL_MASK != 0
@@ -58,6 +62,8 @@ impl Cop0 {
         self.regs[Register::Status as usize]
             .set(self.regs[Register::Status as usize].get() & !STATUS_ERL_MASK);
     }
+
+    //
 
     pub fn exl(&self) -> bool {
         self.regs[Register::Status as usize].get() & STATUS_EXL_MASK != 0
@@ -73,12 +79,22 @@ impl Cop0 {
             .set(self.regs[Register::Status as usize].get() & !STATUS_EXL_MASK);
     }
 
+    //
+
     pub fn epc(&self) -> u32 {
         self.regs[Register::EPC as usize].get() // TODO 64/32?
     }
 
+    //
+
     pub fn error_epc(&self) -> u32 {
         self.regs[Register::ErrorEPC as usize].get() // TODO 64/32?
+    }
+
+    //
+
+    pub fn f_64(&self) -> bool {
+        self.regs[Register::Status as usize].get() & 0x4000_0000 != 0
     }
 
     // TODO just to_string enum?

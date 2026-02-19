@@ -72,7 +72,9 @@ pub struct Registers {
 
     pub gpr: [GPReg; 32],
 
-    pub fpr: [f64; 32], // TODO to struct?
+    // TODO move out?
+    pub fpr: [Reg64; 32],
+    pub fcr: u32,
 
     pub mult_hi: Reg64,
     pub mult_lo: Reg64,
@@ -100,7 +102,8 @@ impl Registers {
                 }
             }),
 
-            fpr: [0.0; 32],
+            fpr: [Reg64::default(); 32],
+            fcr: 0,
 
             mult_hi: Reg64::default(),
             mult_lo: Reg64::default(),
@@ -109,6 +112,27 @@ impl Registers {
             load_linked_addr: 0,
         }
     }
+
+    pub fn f_rounding_mode(&self) -> RoundingMode {
+        match self.fcr & 0x3 {
+            0 => RoundingMode::Nearest,
+            1 => RoundingMode::Zero,
+            2 => RoundingMode::Infinity,
+            _ => RoundingMode::NegativeInfinity,
+        }
+    }
+
+    pub fn f_64(&self) -> bool {
+        self.fcr & 0x40 != 0
+    }
+}
+
+#[repr(u32)]
+enum RoundingMode {
+    Nearest,
+    Zero,
+    Infinity,
+    NegativeInfinity,
 }
 
 impl Registers {

@@ -1,4 +1,4 @@
-use crate::breakpoints::{Breakpoint, Breakpoints};
+use crate::breakpoints::Breakpoints;
 use crate::cart::CartLocation;
 use crate::cop0::Cop0;
 use crate::data::Data;
@@ -182,7 +182,7 @@ impl System {
 
         // Breakpoints
 
-        if self.breakpoints.contains(self.cpu.regs.pc) {
+        if self.breakpoints.should_break(self.cpu.regs.pc) {
             log::info!("Breakpoint hit at {:08X}", self.cpu.regs.pc);
             true
         } else {
@@ -202,14 +202,20 @@ impl System {
         &self.breakpoints
     }
 
-    pub fn add_breakpoint(&mut self, breakpoint: Breakpoint) {
-        self.breakpoints.add(breakpoint);
+    pub fn add_breakpoint(&mut self, address: u32) {
+        self.breakpoints.add(address);
 
         self.save().unwrap();
     }
 
-    pub fn remove_breakpoint(&mut self, breakpoint: Breakpoint) {
-        self.breakpoints.remove(breakpoint);
+    pub fn remove_breakpoint(&mut self, address: u32) {
+        self.breakpoints.remove(address);
+
+        self.save().unwrap();
+    }
+
+    pub fn toggle_breakpoint(&mut self, address: u32) {
+        self.breakpoints.toggle(address);
 
         self.save().unwrap();
     }
@@ -221,9 +227,14 @@ impl System {
     }
 
     fn load(&mut self) -> Result<(), LoadError> {
-        let breakpoints_json = std::fs::read_to_string("breakpoints.json")?;
-        let breakpoints: Breakpoints = serde_json::from_str(&breakpoints_json)?;
-        self.breakpoints = breakpoints;
+        let path = std::path::Path::new("breakpoints.json");
+
+        if path.exists() {
+            let breakpoints_json = std::fs::read_to_string(path)?;
+            let breakpoints: Breakpoints = serde_json::from_str(&breakpoints_json)?;
+            self.breakpoints = breakpoints;
+        }
+
         Ok(())
     }
 }

@@ -1,6 +1,8 @@
+use strum::{Display, EnumIter};
+
 use crate::{data::Data, map::Location, system::System};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Display, Clone, Copy, EnumIter)]
 #[repr(u32)]
 pub enum Interrupt {
     Sp = 1,
@@ -18,6 +20,7 @@ pub type MiLocation = Location<START, END>;
 
 const MASK: u32 = 0xF;
 
+#[derive(Display, EnumIter)]
 #[repr(u32)]
 pub enum Register {
     Mode,

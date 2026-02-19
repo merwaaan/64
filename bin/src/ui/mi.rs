@@ -1,67 +1,62 @@
-use egui::{Color32, RichText};
-use n64::mi::{Interrupt, Mi};
+use egui::{Context, Window};
+use n64::mi::Interrupt;
+use n64::mi::Mi;
+use n64::mi::Register;
+use strum::IntoEnumIterator;
 
-use crate::emu::event::Event;
+use crate::emu::command::Command;
+use crate::ui::colors::Color;
+use crate::ui::text::Text;
+use crate::{
+    emu::event::Event,
+    ui::{Widget, reg32},
+};
 
 #[derive(Default)]
 pub struct MiWidget {
     last_update: Option<Mi>,
 }
 
-impl MiWidget {
-    pub fn update(&mut self, event: &Event) {
+impl Widget for MiWidget {
+    fn update(&mut self, _ctx: &Context, event: &Event) {
         if let Event::MiUpdate(mi) = event {
             self.last_update = Some(*mi);
         }
     }
 
-    pub fn show(&self, ui: &mut egui::Ui) {
-        if let Some(mi) = &self.last_update {
-            let mut reg = |reg: usize| {
-                ui.horizontal(|ui| {
-                    ui.monospace(format!("{:>11}", Mi::reg_name(reg)));
-                    ui.monospace(format!("{:08X}", mi.regs[reg]));
-                });
-            };
+    fn show(&mut self, ctx: &Context) -> Vec<Command> {
+        Window::new("MI")
+            .default_pos([400.0, 600.0])
+            .show(ctx, |ui| {
+                if let Some(mi) = &self.last_update {
+                    let mut show_reg = |reg: Register| {
+                        reg32(ui, format!("{:>9}", reg), mi.regs[reg as usize]);
+                    };
 
-            reg(0);
-            reg(1);
-            reg(2);
-            reg(3);
+                    Register::iter().for_each(|reg| {
+                        show_reg(reg);
+                    });
 
-            // ui.label("Upper mode");
-            // ui.label(format!("{}", mi.upper_mode()));
-            // ui.label("EBus mode");
-            // ui.label(format!("{}", mi.ebus_mode()));
-            // ui.label("Repeat mode");
-            // ui.label(format!("{}", mi.repeat_mode()));
-            // ui.label("Repeat count");
-            // ui.label(format!("{}", mi.repeat_count()));
-
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                let mut int = |interrupt: Interrupt| {
-                    ui.monospace(RichText::new(format!("{:?}", interrupt)).color(
-                        if mi.has_pending_interrupt(interrupt) {
-                            if mi.is_interrupt_masked(interrupt) {
-                                Color32::YELLOW
-                            } else {
-                                Color32::GREEN
-                            }
-                        } else {
-                            Color32::RED
-                        },
-                    ));
-                };
-
-                int(Interrupt::Sp);
-                int(Interrupt::Si);
-                int(Interrupt::Ai);
-                int(Interrupt::Vi);
-                int(Interrupt::Pi);
-                int(Interrupt::Dp);
+                    ui.horizontal(|ui| {
+                        for interrupt in Interrupt::iter() {
+                            ui.horizontal(|ui| {
+                                Text::new(format!("{}", interrupt))
+                                    .color(if mi.has_pending_interrupt(interrupt) {
+                                        if mi.is_interrupt_masked(interrupt) {
+                                            Color::Success
+                                        } else {
+                                            Color::Warning
+                                        }
+                                    } else {
+                                        Color::Error
+                                    })
+                                    .show(ui);
+                            });
+                        }
+                    });
+                }
             });
-        }
+
+        vec![]
     }
 }

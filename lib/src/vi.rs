@@ -1,3 +1,5 @@
+use strum::{Display, EnumIter};
+
 use crate::{
     data::Data,
     events::{Event, EventType},
@@ -13,7 +15,7 @@ pub type ViLocation = Location<START, END>;
 
 const MASK: u32 = 0x3F;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Display, Clone, Copy, EnumIter)]
 #[repr(u32)]
 pub enum Register {
     Status,

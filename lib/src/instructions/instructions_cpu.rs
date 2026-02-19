@@ -124,6 +124,7 @@ pub fn decode_standard(opcode: Opcode) -> Option<&'static dyn Instruction> {
         0x37 => &LD_,
         0x38 => &SC_,
         0x39 => &SWC1_, // TODO generalize?
+        0x3D => &SDC1_,
         0x3F => &SD_,
         _ => &UNKNOWN_,
     };
@@ -471,12 +472,16 @@ instruction_struct!(LWC1);
 impl Instruction for LWC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
         let addr = op.offset_addr(s);
+        let data = s.read::<u32>(addr);
 
-        s.cpu.regs.fpr[op.rt()] = s.read::<u32>(addr) as f64;
+        if s.cop0.f_64() {
+            s.cpu.regs.fpr[op.rt()].set64(data as u64);
+        } else {
+            s.cpu.regs.fpr[op.rt() & !1].set64(data as u64);
+        }
 
-        log::debug!("LWC1 unsure");
-
-        // TODO other rules!!!!
+        // TODO exceptions
+        // TODO COP1 enabled?
 
         None
     }
@@ -1467,6 +1472,35 @@ impl Instruction for SD {
     }
 }
 
+instruction_struct!(SDC1);
+
+impl Instruction for SDC1 {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op.offset_addr(s);
+
+        if s.cop0.f_64() {
+            s.write(addr, s.cpu.regs.fpr[op.rt()].get64());
+        } else {
+            s.write(addr + 4, s.cpu.regs.fpr[op.rt() + 1].get());
+            s.write(addr, s.cpu.regs.fpr[op.rt()].get());
+        }
+
+        // TODO addr exception?
+
+        None
+    }
+
+    fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!(
+            "SDC1 {}, {:#06X}({})",
+            op.rtn(),
+            op.imm16(),
+            op.rsn()
+        ))
+        .with_address_hint(op.offset_addr(s))
+    }
+}
+
 instruction_struct!(SDL);
 
 impl Instruction for SDL {
@@ -1769,9 +1803,16 @@ instruction_struct!(SWC1);
 impl Instruction for SWC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
         let addr = op.offset_addr(s);
-        // TODO!
-        log::warn!("SWC1 unsure");
-        s.write(addr, 0u32);
+
+        if s.cop0.f_64() {
+            s.write(addr, s.cpu.regs.fpr[op.rt()].get());
+        } else {
+            s.write(addr, s.cpu.regs.fpr[op.rt() & !1].get());
+        }
+
+        // TODO exceptions
+        // TODO COP1 enabled?
+
         None
     }
 
