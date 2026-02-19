@@ -9,7 +9,7 @@ use crate::{
 #[derive(Clone, Copy)]
 pub enum InstructionAddress {
     Pc,
-    Address(u32),
+    //Address(u32),
 }
 
 #[derive(Clone, Copy)]

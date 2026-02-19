@@ -33,7 +33,7 @@ impl Widget for BreakpointsWidget {
         let mut commands = Vec::new();
 
         Window::new("Breakpoints")
-            .default_pos([900.0, 1000.0])
+            .default_pos([900.0, 1400.0])
             .show(ctx, |ui| {
                 Grid::new("breakpoints").show(ui, |ui| {
                     // Input

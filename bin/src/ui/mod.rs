@@ -3,8 +3,7 @@ use std::path::PathBuf;
 use egui::{Context, Key, MenuBar, TopBottomPanel, UiKind};
 
 use crate::{
-    Args,
-    emu::{command::Command, event::Event, runner::Runner},
+    emu::{command::Command, core_thread::CoreThread, event::Event},
     ui::{
         ai::AiWidget,
         breakpoints::BreakpointsWidget,
@@ -36,13 +35,14 @@ pub mod vi;
 
 /// Main UI state
 ///
-/// Widget are displayed when their settings have a value
+/// Widget are displayed if their settings are set
 #[derive(Clone, Copy)]
 pub enum SettingUpdate {
     Instructions(Option<InstructionsSettings>),
     Registers(Option<()>),
     Memory(Option<MemorySettings>),
     Framebuffer(Option<()>),
+    // TODO others?
 }
 
 pub trait Widget {
@@ -50,81 +50,72 @@ pub trait Widget {
         vec![]
     }
 
+    /// Update the widget in response to events from the core thread
     fn update(&mut self, ctx: &Context, event: &Event);
 
+    /// Show the widget in the UI and produce commands to send to the core thread
     fn show(&mut self, ctx: &Context) -> Vec<Command>;
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Status {
+    Running,
+    Paused,
+    Panicked,
+}
+
 pub struct Ui {
-    runner: Option<Runner>,
-
-    paused: bool,
-
     widgets: Vec<Box<dyn Widget>>,
+
+    core_thread: CoreThread,
+    status: Status,
+
+    // Last ROM loaded, for restarting after a panic
+    last_rom_path: Option<PathBuf>,
 }
 
 impl Ui {
-    pub fn new(args: &Args) -> Self {
-        // Setup the widgets
-
-        let mut widgets: Vec<Box<dyn Widget>> = vec![
-            Box::new(InstructionsWidget::default()),
-            Box::new(MemoryWidget::default()),
-            Box::new(RegistersWidget::default()),
-            Box::new(MiWidget::default()),
-            Box::new(ViWidget::default()),
-            Box::new(SiWidget::default()),
-            Box::new(AiWidget::default()),
-            Box::new(RspWidget::default()),
-            Box::new(FramebufferWidget::default()),
-            Box::new(BreakpointsWidget::default()),
-        ];
-
-        // Initialize the runner
-
-        let runner = Runner::new();
-
-        // Send the initialstartup commands
-
-        for widget in widgets.iter_mut() {
-            let commands = widget.init();
-
-            for command in commands {
-                runner.send_command(command);
-            }
-        }
-
-        // Start paused or not
-
-        let paused = true;
-
-        if paused {
-            runner.send_command(if paused {
-                Command::Pause
-            } else {
-                Command::Resume
-            });
-        }
-
-        // Load the ROM
-
-        if let Some(path) = &args.rom {
-            runner.send_command(Command::LoadRom(PathBuf::from(path)));
-        }
+    pub fn new() -> Self {
+        let core_thread = CoreThread::new();
 
         Self {
-            runner: Some(runner),
-            paused,
-            widgets,
+            widgets: vec![
+                Box::new(InstructionsWidget::default()),
+                Box::new(MemoryWidget::default()),
+                Box::new(RegistersWidget::default()),
+                Box::new(MiWidget::default()),
+                Box::new(ViWidget::default()),
+                Box::new(SiWidget::default()),
+                Box::new(AiWidget::default()),
+                Box::new(RspWidget::default()),
+                Box::new(FramebufferWidget::default()),
+                Box::new(BreakpointsWidget::default()),
+            ],
+            core_thread,
+            status: Status::Paused,
+            last_rom_path: None,
         }
     }
 
-    fn poll_runner(&mut self, ctx: &Context) {
-        while let Some(event) = self.runner.as_ref().and_then(|r| r.poll_event()) {
-            match event {
-                Event::Pause => {
-                    self.paused = true;
-                }
+    pub fn load_rom(&mut self, path: PathBuf) {
+        for widget in self.widgets.iter_mut() {
+            let widget_commands = widget.init();
+
+            for command in widget_commands {
+                self.core_thread.send_command(command);
+            }
+        }
+
+        self.core_thread
+            .send_command(Command::LoadRom(path.clone()));
+
+        self.last_rom_path = Some(path);
+    }
+
+    fn poll_core_thread(&mut self, ctx: &Context) {
+        while let Some(event) = self.core_thread.poll_event() {
+            match &event {
+                Event::StatusUpdate(status) => self.status = *status,
                 _ => {}
             }
 
@@ -137,28 +128,25 @@ impl Ui {
 
 impl eframe::App for Ui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_runner(ctx);
+        self.poll_core_thread(ctx);
 
-        // Handle events
+        // Handle inputs
 
         ctx.input(|input| {
-            if let Some(runner) = self.runner.as_ref() {
-                if input.key_pressed(Key::Enter) {
-                    if self.paused {
-                        runner.send_command(Command::Resume);
-                    } else {
-                        runner.send_command(Command::Pause);
-                    }
+            if matches!(self.status, Status::Running) && input.key_pressed(Key::Enter) {
+                self.core_thread.send_command(Command::Pause);
+            }
 
-                    self.paused = !self.paused;
+            if matches!(self.status, Status::Paused) {
+                if input.key_pressed(Key::Enter) {
+                    self.core_thread.send_command(Command::Resume);
                 }
 
-                if self.paused && input.key_pressed(Key::Space) {
-                    runner.send_command(Command::Step);
+                if input.key_pressed(Key::Space) {
+                    self.core_thread.send_command(Command::Step);
                 }
             }
 
-            // TODO clean exit
             if input.key_pressed(Key::Escape) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -166,42 +154,53 @@ impl eframe::App for Ui {
 
         // Render widgets
 
-        //TODO to widget
         TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             MenuBar::new().ui(ui, |ui| {
-                if let Some(runner) = &self.runner
-                    && ui.button("Load ROM…").clicked()
+                // Load ROM
+                if ui.button("Load ROM…").clicked()
                     && let Some(path) = rfd::FileDialog::new()
                         .add_filter("ROM files", &["n64", "z64", "v64", "zip"])
                         .pick_file()
                 {
-                    runner.send_command(Command::LoadRom(path));
+                    self.load_rom(path);
+
                     ui.close_kind(UiKind::Menu);
                 }
 
-                if let Some(runner) = &self.runner
-                    && ui
-                        .button(if self.paused {
-                            "▶ Resume"
-                        } else {
-                            "⏸ Pause"
-                        })
-                        .clicked()
-                {
-                    if self.paused {
-                        runner.send_command(Command::Resume);
-                    } else {
-                        runner.send_command(Command::Pause);
-                    }
+                // Restart
 
-                    self.paused = !self.paused;
+                if let Some(last_rom_path) = &self.last_rom_path
+                    && ui.button("↻ Restart").clicked()
+                {
+                    self.load_rom(last_rom_path.clone());
+
+                    self.status = Status::Paused;
                 }
 
-                if self.paused
-                    && let Some(runner) = &self.runner
-                    && ui.button("⏭ Step").clicked()
-                {
-                    runner.send_command(Command::Step);
+                // Pause/Resume/Step
+
+                match self.status {
+                    Status::Running => {
+                        if ui.button("⏸ Pause").clicked() {
+                            self.core_thread.send_command(Command::Pause);
+                        }
+                    }
+                    Status::Paused => {
+                        if ui.button("▶ Resume").clicked() {
+                            self.core_thread.send_command(Command::Resume);
+                        }
+                    }
+                    _ => {}
+                }
+
+                if ui.button("⏭ Step").clicked() {
+                    self.core_thread.send_command(Command::Step);
+                }
+
+                // panicked :(
+
+                if matches!(self.status, Status::Panicked) {
+                    Text::new("⚠ Core panicked").color(Color::Error).show(ui);
                 }
             });
         });
@@ -209,14 +208,12 @@ impl eframe::App for Ui {
         for widget in self.widgets.iter_mut() {
             let commands = widget.show(ctx);
 
-            if let Some(runner) = &self.runner {
-                for command in commands {
-                    runner.send_command(command);
-                }
+            for command in commands {
+                self.core_thread.send_command(command);
             }
         }
 
-        ctx.request_repaint(); // TODO???
+        ctx.request_repaint();
     }
 }
 

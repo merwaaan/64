@@ -101,7 +101,10 @@ impl Pi {
                     s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_ERROR_MASK;
                 }
             }
-            _ => unimplemented!("Write PI register @ {:08X}", addr.relative()),
+            _ => log::error!(
+                "Write PI register @ {:08X} NOT IMPLEMENTED",
+                addr.relative()
+            ),
         }
     }
 

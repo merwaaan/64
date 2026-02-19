@@ -1,3 +1,4 @@
+use std::panic::AssertUnwindSafe;
 use std::thread::{self, JoinHandle};
 
 use crossbeam::channel::{Receiver, Sender, TryRecvError, unbounded};
@@ -7,6 +8,7 @@ use n64::{
     vi::Vi,
 };
 
+use crate::ui::Status;
 use crate::{
     emu::{command::Command, event::Event},
     ui::{
@@ -17,13 +19,6 @@ use crate::{
     },
 };
 
-#[derive(Debug)]
-pub enum RunMode {
-    Running,
-    Paused { step_requested: bool },
-    Exited,
-}
-
 #[derive(Default)]
 pub struct UiSettings {
     pub instructions: Option<InstructionsSettings>,
@@ -32,13 +27,28 @@ pub struct UiSettings {
     pub framebuffer: Option<()>,
 }
 
-pub struct RunnerState {
+#[derive(Debug, Clone, Copy)]
+pub enum CoreThreadStatus {
+    Running,
+    Paused { step: bool },
+}
+
+impl Into<Status> for CoreThreadStatus {
+    fn into(self) -> Status {
+        match self {
+            CoreThreadStatus::Running => Status::Running,
+            CoreThreadStatus::Paused { .. } => Status::Paused,
+        }
+    }
+}
+
+pub struct CoreThreadState {
     pub system: Option<System>,
-    pub run_mode: RunMode,
+    pub status: CoreThreadStatus,
     pub ui_settings: UiSettings,
 }
 
-pub struct Runner {
+pub struct CoreThread {
     thread: JoinHandle<()>,
     command_tx: Sender<Command>,
     event_rx: Receiver<Event>,
@@ -46,7 +56,7 @@ pub struct Runner {
 
 const UPDATE_INTERVAL: usize = 100_000;
 
-impl Runner {
+impl CoreThread {
     pub fn new() -> Self {
         // Setup the core thread
 
@@ -56,85 +66,38 @@ impl Runner {
         let thread = thread::Builder::new()
             .name("Core".to_string())
             .spawn(move || {
-                let mut state: RunnerState = RunnerState {
-                    system: None,
-                    run_mode: RunMode::Paused {
-                        step_requested: false,
-                    },
-                    ui_settings: UiSettings::default(),
-                };
-
-                let mut xxx = 0;
+                // Thread loop;
+                // - create a state
+                // - run the emulation loop
+                // - restart if something fails
 
                 loop {
-                    // Handle commands
+                    // Run the core loop
 
-                    loop {
-                        match command_rx.try_recv() {
-                            Ok(command) => {
-                                let events = command.handle(&mut state);
+                    log::debug!("Core loop started");
 
-                                for event in events {
-                                    event_tx.send(event).unwrap();
-                                }
-                            }
-                            Err(TryRecvError::Empty) => {
-                                break;
-                            }
-                            Err(error) => {
-                                panic!("Runner channel error: {:?}", error);
-                            }
-                        }
-                    }
+                    let mut state = CoreThreadState {
+                        system: None,
+                        status: CoreThreadStatus::Paused { step: false },
+                        ui_settings: UiSettings::default(),
+                    };
 
-                    // Update the system
+                    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                        Self::run_core_loop(&mut state, &command_rx, &event_tx);
+                    }));
 
-                    let step = matches!(state.run_mode, RunMode::Running)
-                        || matches!(
-                            state.run_mode,
-                            RunMode::Paused {
-                                step_requested: true
-                            }
-                        );
+                    // Restart the core loop if it panicked
 
-                    if step && let Some(system) = &mut state.system {
-                        let mut send_update = false;
+                    if result.is_err() {
+                        log::warn!("Core loop panicked");
 
-                        let breakpoint_hit = system.step();
-
-                        if breakpoint_hit {
-                            state.run_mode = RunMode::Paused {
-                                step_requested: false,
-                            };
-
-                            event_tx
-                                .send(Event::Pause)
-                                .expect("Failed to send pause event");
-
-                            send_update = true;
-                        } else {
-                            if let RunMode::Paused { step_requested } = &mut state.run_mode {
-                                *step_requested = false;
-                                send_update = true;
-                            }
-
-                            xxx += 1;
-
-                            if xxx % UPDATE_INTERVAL == 0 {
-                                send_update = true;
-                            }
-                        }
-
-                        if send_update {
-                            for event in Runner::update_events(&state) {
-                                event_tx.send(event).unwrap();
-                            }
-                        }
-                    }
-
-                    // Exit?
-
-                    if matches!(state.run_mode, RunMode::Exited) {
+                        event_tx
+                            .send(Event::StatusUpdate(Status::Panicked))
+                            .inspect_err(|error| {
+                                log::error!("Failed to send status update: {:?}", error)
+                            })
+                            .ok();
+                    } else {
                         break;
                     }
                 }
@@ -150,26 +113,94 @@ impl Runner {
         }
     }
 
-    /// Sends a command to the core thread.
+    fn run_core_loop(
+        state: &mut CoreThreadState,
+        command_rx: &Receiver<Command>,
+        event_tx: &Sender<Event>,
+    ) {
+        let mut update_counter = 0u64;
+
+        // Loop until exited
+
+        loop {
+            // Handle pending commands
+
+            loop {
+                match command_rx.try_recv() {
+                    Ok(command) => {
+                        let events = command.handle(state);
+
+                        for event in events {
+                            let _ = event_tx.send(event);
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => return,
+                }
+            }
+
+            // Step
+
+            let step = matches!(state.status, CoreThreadStatus::Running)
+                || matches!(state.status, CoreThreadStatus::Paused { step: true });
+
+            if step {
+                if let Some(system) = &mut state.system {
+                    let mut send_update = false;
+
+                    let breakpoint_hit = system.step();
+
+                    if breakpoint_hit {
+                        state.status = CoreThreadStatus::Paused { step: false };
+
+                        let _ = event_tx.send(Event::StatusUpdate(state.status.into()));
+
+                        send_update = true;
+                    } else {
+                        if let CoreThreadStatus::Paused {
+                            step: step_requested,
+                        } = &mut state.status
+                        {
+                            *step_requested = false;
+                            send_update = true;
+                        }
+
+                        update_counter = update_counter.wrapping_add(1);
+
+                        if update_counter % UPDATE_INTERVAL as u64 == 0 {
+                            send_update = true;
+                        }
+                    }
+
+                    if send_update {
+                        for event in Self::create_update_events(&state) {
+                            let _ = event_tx.send(event);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub fn send_command(&self, command: Command) {
         self.command_tx
             .send(command)
-            .expect("Failed to send command");
+            .inspect_err(|error| log::error!("Failed to send command: {:?}", error))
+            .ok();
     }
 
-    /// Receives an event from the core thread if available.
     pub fn poll_event(&self) -> Option<Event> {
         self.event_rx.try_recv().ok()
     }
 
-    pub fn update_events(state: &RunnerState) -> Vec<Event> {
+    pub fn create_update_events(state: &CoreThreadState) -> Vec<Event> {
         let mut events = Vec::new();
 
         if let Some(system) = &state.system {
             if let Some(instructions_settings) = state.ui_settings.instructions.as_ref() {
                 let base_address = match instructions_settings.base_address {
                     InstructionAddress::Pc => system.cpu.regs.pc,
-                    InstructionAddress::Address(addr) => addr,
+                    //InstructionAddress::Address(addr) => addr,
                 };
 
                 let instructions = (base_address

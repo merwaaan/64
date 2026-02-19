@@ -3,6 +3,7 @@ use crate::{
     cart::{Cart, CartLocation},
     data::Data,
     dd::Dd,
+    dp::{Dp, DpLocation},
     mi::{Mi, MiLocation},
     openbus,
     pi::{Pi, PiLocation},
@@ -71,6 +72,7 @@ pub enum MapLocation {
     RspDmem(RspDmemLocation),
     RspImem(RspImemLocation),
     RspRegs(RspRegsLocation),
+    Dp(DpLocation),
     Mi(MiLocation),
     Vi(ViLocation),
     Ai(AiLocation),
@@ -86,6 +88,7 @@ pub enum MapLocation {
 pub struct Map {
     pub rdram: Rdram,
     pub rsp: Rsp,
+    pub dp: Dp,
     pub mi: Mi,
     pub vi: Vi,
     pub ai: Ai,
@@ -101,6 +104,7 @@ impl Map {
         Self {
             rdram: Rdram::default(),
             rsp: Rsp::default(),
+            dp: Dp::default(),
             mi: Mi::default(),
             vi: Vi::default(),
             ai: Ai::default(),
@@ -133,6 +137,9 @@ impl Map {
             RspRegsLocation::START..RspRegsLocation::END => {
                 Some(MapLocation::RspRegs(RspRegsLocation::from_absolute(addr)))
             }
+            DpLocation::START..DpLocation::END => {
+                Some(MapLocation::Dp(DpLocation::from_absolute(addr)))
+            }
             MiLocation::START..MiLocation::END => {
                 Some(MapLocation::Mi(MiLocation::from_absolute(addr)))
             }
@@ -154,7 +161,7 @@ impl Map {
             // DdLocation::START..DdLocation::END => {
             //     Some(MapLocation::Dd(DdLocation::from_absolute(addr)))
             // }
-            0x0500_0000..0x0600_0000 => Some(MapLocation::OpenBus(addr)),
+            0x0500_0000..0x1000_0000 => Some(MapLocation::OpenBus(addr)),
             CartLocation::START..CartLocation::END => {
                 Some(MapLocation::Cart(CartLocation::from_absolute(addr)))
             }
@@ -175,6 +182,7 @@ impl Map {
             Some(MapLocation::RspDmem(addr)) => s.map.rsp.read_dmem(addr),
             Some(MapLocation::RspImem(addr)) => s.map.rsp.read_imem(addr),
             Some(MapLocation::RspRegs(addr)) => s.map.rsp.read_reg(addr),
+            Some(MapLocation::Dp(addr)) => s.map.dp.read(addr),
             Some(MapLocation::Mi(addr)) => s.map.mi.read(addr),
             Some(MapLocation::Vi(addr)) => s.map.vi.read(addr),
             Some(MapLocation::Ai(addr)) => s.map.ai.read(addr),
@@ -199,6 +207,7 @@ impl Map {
             Some(MapLocation::RspDmem(addr)) => Rsp::write_dmem(s, addr, data),
             Some(MapLocation::RspImem(addr)) => Rsp::write_imem(s, addr, data),
             Some(MapLocation::RspRegs(addr)) => Rsp::write_reg(s, addr, data),
+            Some(MapLocation::Dp(addr)) => Dp::write(s, addr, data),
             Some(MapLocation::Mi(addr)) => Mi::write(s, addr, data),
             Some(MapLocation::Vi(addr)) => Vi::write(s, addr, data),
             Some(MapLocation::Ai(addr)) => Ai::write(s, addr, data),

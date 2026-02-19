@@ -99,7 +99,7 @@ impl Cart {
     // }
 
     pub fn read<T: Data>(&self, addr: CartLocation) -> T {
-        T::read(&self.data, addr.relative())
+        T::read(&self.data, addr.relative() % (self.data.len() as u32)) // TODO mod = costly?
     }
 
     pub fn write<T: Data>(s: &mut System, addr: CartLocation, data: T) {

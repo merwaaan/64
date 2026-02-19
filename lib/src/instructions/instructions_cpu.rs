@@ -18,6 +18,7 @@ pub fn decode_special(opcode: Opcode) -> Option<&'static dyn Instruction> {
         0x07 => &SRAV_,
         0x08 => &JR_,
         0x09 => &JALR_,
+        0x0D => &BREAK_,
         0x0F => &SYNC_,
         0x10 => &MFHI_,
         0x11 => &MTHI_,
@@ -66,9 +67,11 @@ pub fn decode_special(opcode: Opcode) -> Option<&'static dyn Instruction> {
 pub fn decode_regimm(opcode: Opcode) -> Option<&'static dyn Instruction> {
     debug_assert_eq!(opcode.group(), 0x01);
 
-    let instruction: &'static dyn Instruction = match opcode.0 & 0x001F_0000 {
+    let instruction: &'static dyn Instruction = match opcode.0 & 0x1F_0000 {
         0x00_0000 => &BLTZ_,
         0x01_0000 => &BGEZ_,
+        0x02_0000 => &BLTZL_,
+        0x03_0000 => &BGEZL_,
         0x10_0000 => &BLTZAL_,
         0x11_0000 => &BGEZAL_,
         _ => &UNKNOWN_,
@@ -121,6 +124,7 @@ pub fn decode_standard(opcode: Opcode) -> Option<&'static dyn Instruction> {
         0x2F => &CACHE_,
         0x30 => &LL_,
         0x31 => &LWC1_,
+        0x35 => &LDC1_,
         0x37 => &LD_,
         0x38 => &SC_,
         0x39 => &SWC1_, // TODO generalize?
@@ -297,6 +301,23 @@ impl Instruction for BGEZ {
     }
 }
 
+instruction_struct!(BGEZL);
+
+impl Instruction for BGEZL {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        if (op.rsv(s) as i32) >= 0 {
+            Some(DelayedBranching(op.branch_target(s)))
+        } else {
+            s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("BGEZ {}, {:#06X}", op.rsn(), op.branch_offset()))
+    }
+}
+
 instruction_struct!(BGEZAL);
 
 impl Instruction for BGEZAL {
@@ -405,6 +426,23 @@ impl Instruction for BLTZAL {
     }
 }
 
+instruction_struct!(BLTZL);
+
+impl Instruction for BLTZL {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        if (op.rsv(s) as i32) < 0 {
+            Some(DelayedBranching(op.branch_target(s)))
+        } else {
+            s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("BLTZL {}, {:#06X}", op.rsn(), op.branch_offset()))
+    }
+}
+
 instruction_struct!(BNE);
 
 impl Instruction for BNE {
@@ -447,12 +485,23 @@ impl Instruction for BNEL {
         ))
     }
 }
+instruction_struct!(BREAK);
+
+impl Instruction for BREAK {
+    fn execute(&self, s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+        panic!("BREAK at {:08X}", s.cpu.regs.pc);
+    }
+
+    fn disassemble(&self, _s: &System, _op: Opcode) -> Disassembly {
+        Disassembly::new("BREAK".to_string())
+    }
+}
 
 instruction_struct!(CACHE);
 
 impl Instruction for CACHE {
     fn execute(&self, _s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        log::debug!("CACHE {:08X}", op.0);
+        //TODO log::debug!("CACHE {:08X}", op.0);
         None
     }
 
@@ -463,31 +512,6 @@ impl Instruction for CACHE {
             op.imm16(),
             op.basen()
         ))
-    }
-}
-
-// TODO mvoe down
-instruction_struct!(LWC1);
-
-impl Instruction for LWC1 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op.offset_addr(s);
-        let data = s.read::<u32>(addr);
-
-        if s.cop0.f_64() {
-            s.cpu.regs.fpr[op.rt()].set64(data as u64);
-        } else {
-            s.cpu.regs.fpr[op.rt() & !1].set64(data as u64);
-        }
-
-        // TODO exceptions
-        // TODO COP1 enabled?
-
-        None
-    }
-
-    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
-        Disassembly::new(format!("LWC1 {}, {}({})", op.rtn(), op.imm16(), op.basen()))
     }
 }
 
@@ -993,6 +1017,30 @@ impl Instruction for LD {
         .with_address_hint(op.offset_addr(s))
     }
 }
+// TODO mvoe down
+instruction_struct!(LDC1);
+
+impl Instruction for LDC1 {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let data = s.read::<u64>(op.offset_addr(s));
+
+        if s.cop0.f_64() {
+            s.cpu.regs.fpr[op.rt()].set64(data as u64);
+        } else {
+            s.cpu.regs.fpr[op.rt()].set(data as u32);
+            s.cpu.regs.fpr[op.rt() + 1].set((data >> 32) as u32);
+        }
+
+        // TODO exceptions
+        // TODO COP1 enabled?
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("LDC1 {}, {}({})", op.rtn(), op.imm16(), op.basen()))
+    }
+}
 
 instruction_struct!(LDL);
 
@@ -1162,6 +1210,30 @@ impl Instruction for LW {
             op.rsn()
         ))
         .with_address_hint(op.offset_addr(s))
+    }
+}
+// TODO mvoe down
+instruction_struct!(LWC1);
+
+impl Instruction for LWC1 {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        let addr = op.offset_addr(s);
+        let data = s.read::<u32>(addr);
+
+        if s.cop0.f_64() {
+            s.cpu.regs.fpr[op.rt()].set64(data as u64);
+        } else {
+            s.cpu.regs.fpr[op.rt() & !1].set64(data as u64);
+        }
+
+        // TODO exceptions
+        // TODO COP1 enabled?
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("LWC1 {}, {}({})", op.rtn(), op.imm16(), op.basen()))
     }
 }
 

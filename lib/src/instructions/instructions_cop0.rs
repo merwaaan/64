@@ -53,7 +53,7 @@ impl Instruction for ERET {
             //     panic!("ERET in EXL mode @ {:08X}", s.cop0.epc());
             // }
             //panic!("ERET {:08X} @ {:08X}", s.cop0.epc(), s.cpu.regs.pc);
-            s.cpu.regs.pc = s.cop0.epc() - 4; // TODO offset???
+            s.cpu.regs.pc = s.cop0.epc().wrapping_sub(4); // TODO offset???
             s.cop0.clear_exl();
         }
 
@@ -71,15 +71,10 @@ impl Instruction for MTC0 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
         let data = s.cpu.regs.gpr[op.rt()].get64();
 
-        log::warn!("MTC0 {}, {:08X} unsure?", op.rd0n(), data);
         // TODO cause: only two last bits can be written! move to reg implem ???
         // TODO not b0-1 but 8-9???? 0x0000_0300
         // if op.rd() == 13 {
         //     data = (data & 3) | (s.cop0.regs[13].get64() & 0xFFFF_FFFF_FFFF_FFFC);
-        // }
-
-        // if (op.rd() == 12) {
-        //     panic!("MTC0 EPC @ {:08X} @ {:08X}", data, s.cpu.regs.pc);
         // }
 
         s.cop0.regs[op.rd()].set64(data);

@@ -76,10 +76,10 @@ impl Mi {
 
         // TODO mask stuff? or jsut access directly w/o match?
         match reg {
-            MODE_REG => T::from_u32(self.regs[MODE_REG]),
-            VERSION_REG => T::from_u32(self.regs[VERSION_REG]),
-            INTERRUPT_REG => T::from_u32(self.regs[INTERRUPT_REG]),
-            MASK_REG => T::from_u32(self.regs[MASK_REG]),
+            0 => T::from_u32(self.regs[Register::Mode as usize]),
+            1 => T::from_u32(self.regs[Register::Version as usize]),
+            2 => T::from_u32(self.regs[Register::Interrupt as usize]),
+            3 => T::from_u32(self.regs[Register::Mask as usize]),
             _ => panic!("Invalid MI register read: {:08X}", reg),
         }
     }
@@ -88,8 +88,8 @@ impl Mi {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         match reg {
-            MODE_REG => {
-                let reg = &mut s.map.mi.regs[MODE_REG];
+            0 => {
+                let reg = &mut s.map.mi.regs[Register::Mode as usize];
 
                 let data = data.to_u32();
 
@@ -120,57 +120,54 @@ impl Mi {
                     *reg |= MODE_WRITE_UPPER_SET_MASK;
                 }
             }
-            VERSION_REG => {
-                log::warn!("Write MI_VERSION {:X}", data.to_u32());
-            }
-            INTERRUPT_REG => {
+            1 => {}
+            2 => {
                 log::warn!("Write MI_INTERRUPT {:X}", data.to_u32());
             }
-            MASK_REG => {
-                log::error!("Write MI_MASK {:X}", data.to_u32());
+            3 => {
                 let data = data.to_u32();
 
                 if data & MASK_SP_CLEAR == MASK_SP_CLEAR {
-                    s.map.mi.regs[MASK_REG] &= !(Interrupt::Sp as u32);
+                    s.map.mi.regs[Register::Mask as usize] &= !(Interrupt::Sp as u32);
                 }
                 if data & MASK_SP_SET == MASK_SP_SET {
-                    s.map.mi.regs[MASK_REG] |= Interrupt::Sp as u32;
+                    s.map.mi.regs[Register::Mask as usize] |= Interrupt::Sp as u32;
                 }
 
                 if data & MASK_SI_CLEAR == MASK_SI_CLEAR {
-                    s.map.mi.regs[MASK_REG] &= !(Interrupt::Si as u32);
+                    s.map.mi.regs[Register::Mask as usize] &= !(Interrupt::Si as u32);
                 }
                 if data & MASK_SI_SET == MASK_SI_SET {
-                    s.map.mi.regs[MASK_REG] |= Interrupt::Si as u32;
+                    s.map.mi.regs[Register::Mask as usize] |= Interrupt::Si as u32;
                 }
 
                 if data & MASK_AI_CLEAR == MASK_AI_CLEAR {
-                    s.map.mi.regs[MASK_REG] &= !(Interrupt::Ai as u32);
+                    s.map.mi.regs[Register::Mask as usize] &= !(Interrupt::Ai as u32);
                 }
                 if data & MASK_AI_SET == MASK_AI_SET {
-                    s.map.mi.regs[MASK_REG] |= Interrupt::Ai as u32;
+                    s.map.mi.regs[Register::Mask as usize] |= Interrupt::Ai as u32;
                 }
 
                 if data & MASK_VI_CLEAR == MASK_VI_CLEAR {
-                    s.map.mi.regs[MASK_REG] &= !(Interrupt::Vi as u32);
+                    s.map.mi.regs[Register::Mask as usize] &= !(Interrupt::Vi as u32);
                 }
                 if data & MASK_VI_SET == MASK_VI_SET {
-                    s.map.mi.regs[MASK_REG] |= Interrupt::Vi as u32;
+                    s.map.mi.regs[Register::Mask as usize] |= Interrupt::Vi as u32;
                 }
                 //s.map.mi.regs[MASK_REG] |= Interrupt::Vi as u32; /////////////s
 
                 if data & MASK_PI_CLEAR == MASK_PI_CLEAR {
-                    s.map.mi.regs[MASK_REG] &= !(Interrupt::Pi as u32);
+                    s.map.mi.regs[Register::Mask as usize] &= !(Interrupt::Pi as u32);
                 }
                 if data & MASK_PI_SET == MASK_PI_SET {
-                    s.map.mi.regs[MASK_REG] |= Interrupt::Pi as u32;
+                    s.map.mi.regs[Register::Mask as usize] |= Interrupt::Pi as u32;
                 }
 
                 if data & MASK_DP_CLEAR == MASK_DP_CLEAR {
-                    s.map.mi.regs[MASK_REG] &= !(Interrupt::Dp as u32);
+                    s.map.mi.regs[Register::Mask as usize] &= !(Interrupt::Dp as u32);
                 }
                 if data & MASK_DP_SET == MASK_DP_SET {
-                    s.map.mi.regs[MASK_REG] |= Interrupt::Dp as u32;
+                    s.map.mi.regs[Register::Mask as usize] |= Interrupt::Dp as u32;
                 }
             }
             _ => panic!(
@@ -245,7 +242,7 @@ impl Mi {
     }
 
     // TODO rename
-    pub fn has_interrupt(&self) -> bool {
+    pub fn has_pending_unmasked_interrupt(&self) -> bool {
         self.regs[Register::Interrupt as usize] & self.regs[Register::Mask as usize] != 0
     }
 

@@ -85,6 +85,10 @@ impl Opcode {
         s.cpu.regs.fpr[self.fs()].get()
     }
 
+    pub(crate) fn fsv64(&self, s: &System) -> u64 {
+        s.cpu.regs.fpr[self.fs()].get64()
+    }
+
     // base
 
     pub(crate) fn base(&self) -> usize {

@@ -28,8 +28,6 @@ pub struct System {
 
     // Debugger
     breakpoints: Breakpoints,
-
-    broken: bool,
 }
 
 impl System {
@@ -44,8 +42,6 @@ impl System {
             odd: false,
 
             breakpoints: Breakpoints::default(),
-
-            broken: false,
         };
 
         s.events.push(Event {
@@ -125,19 +121,9 @@ impl System {
     }
 
     pub fn step(&mut self) -> bool {
-        if self.broken {
-            return false;
-        }
-
         // Step the CPU
 
-        let ok = CPU::step(self);
-
-        if !ok {
-            log::warn!("BROKEN at {:08X}", self.cpu.regs.pc);
-            self.broken = true;
-            return false;
-        }
+        CPU::step(self);
 
         self.cycles += 2; //if self.odd { 2 } else { 1 };
         self.odd = !self.odd;
@@ -149,35 +135,47 @@ impl System {
 
         // Check for pending interrupts
 
-        // TODO mask?
-        // TODO raise int if cause b0-1 set?
+        if self.cop0.ie() // Interrupts globally enabled    
+            && !self.cop0.exl() // Not currently handling an interrupt
+            && !self.cop0.erl()
+        // TODO??? error?
+        {
+            let mut ip = 0;
 
-        // if self.map.mi.has_interrupt() {
-        //     log::error!(
-        //         "has_interrupt: {} {} {}",
-        //         self.cop0.ie(),
-        //         self.cop0.exl(),
-        //         self.cop0.erl()
-        //     );
-        // }
-        // if self.map.mi.has_interrupt() {
-        //     log::error!(
-        //         "has_interrupt: {} {} {}",
-        //         self.cop0.ie(),
-        //         self.cop0.exl(),
-        //         self.cop0.erl()
-        //     );
-        // }
-        if self.cop0.ie() && !self.cop0.exl() && !self.cop0.erl() && self.map.mi.has_interrupt() {
-            // EPC
-            // Cause (BD/ExcCode)
-            self.cop0.regs[13].set(0x400); // TODO tmp
+            // IP2: MI interrupt
 
-            self.cop0.set_exl();
+            ip |= (self.map.mi.has_pending_unmasked_interrupt() as u32) << 2;
 
-            self.cpu.regs.pc = 0x8000_0180; // TODO others?
+            // TODO COUNT/COMPARE STUFF
+            //     ip |= 1 << 7; // IP7: XXXXXXXX
 
-            log::warn!("TODOOOOOO INTERRUPT")
+            // Software interrupts, stored in CAUSE
+
+            ip |= (self.cop0.regs[13].get() >> 8) & 3; // IP0-5: Software interrupts
+
+            // Not masked?
+
+            if ip & (self.cop0.regs[12].get() >> 8) & 0xFF != 0 {
+                // Update IP in CAUSE
+
+                self.cop0.regs[13]
+                    .set64(self.cop0.regs[13].get64() & (!0xFFFF) | ((ip as u64) << 8));
+                // TODO BD
+                // TODO ExcCode currently 0 (= interrupt) but need other values for exceptions?
+
+                // Set EXL to prevent nested interrupts
+
+                self.cop0.set_exl();
+
+                // Save the return address
+                // TODO error EPC?
+
+                self.cop0.set_epc(self.cpu.regs.pc);
+
+                // Jump to the exception handler
+
+                self.cpu.regs.pc = 0x8000_0180; // TODO others?
+            }
         }
 
         // Breakpoints

@@ -1,12 +1,12 @@
-use n64::{ai::Ai, breakpoints::Breakpoints, mi::Mi, rsp::Rsp, si::Si, vi::Vi};
+use n64::{ai::Ai, breakpoints::Breakpoints, mi::Mi, si::Si, vi::Vi};
 
 use crate::ui::{
-    framebuffer::FramebufferUpdate, instructions::InstructionData, memory::MemoryUpdate,
+    Status, framebuffer::FramebufferUpdate, instructions::InstructionData, memory::MemoryUpdate,
     registers::RegistersUpdate,
 };
 
 pub enum Event {
-    Pause,
+    StatusUpdate(Status),
     RegistersUpdate(RegistersUpdate),
     MemoryUpdate(MemoryUpdate),
     InstructionsUpdate(Vec<InstructionData>),

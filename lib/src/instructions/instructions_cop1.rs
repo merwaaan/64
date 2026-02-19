@@ -8,11 +8,6 @@ fn cop1_rs(opcode: Opcode) -> u32 {
     (opcode.0 >> 21) & 0x1F
 }
 
-/// COP1 function field (bits 5–0) for S/D/W/L formats.
-fn cop1_func(opcode: Opcode) -> u32 {
-    opcode.0 & 0x3F
-}
-
 pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
     debug_assert_eq!(opcode.group(), 0x11);
 
@@ -82,8 +77,16 @@ impl Instruction for CTC1 {
 instruction_struct!(MFC1);
 
 impl Instruction for MFC1 {
-    fn execute(&self, _s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        panic!("MFC1");
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        // TODO unusable?
+
+        let value = if s.cop0.f_64() || op.fs() & 1 == 0 {
+            op.fsv(s)
+        } else {
+            (s.cpu.regs.fpr[op.fs() & !1].get64() >> 32) as u32
+        };
+
+        s.cpu.regs.gpr[op.rt()].set(value);
 
         None
     }
@@ -96,8 +99,18 @@ impl Instruction for MFC1 {
 instruction_struct!(MTC1);
 
 impl Instruction for MTC1 {
-    fn execute(&self, _s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        panic!("MFC1");
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        // TODO unusable?
+
+        let freg = op.fs();
+        let fval = s.cpu.regs.fpr[freg].get64();
+
+        if s.cop0.f_64() || freg & 1 == 0 {
+            s.cpu.regs.fpr[freg].set64((fval & 0xFFFFFFFF_00000000) | (op.rtv(s) as u64));
+        } else {
+            s.cpu.regs.fpr[freg & !1]
+                .set64((fval & 0x00000000_FFFFFFFF) | ((op.rtv(s) as u64) << 32));
+        }
 
         None
     }
@@ -285,107 +298,5 @@ impl Instruction for COP1_RESERVED {
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
         Disassembly::new(format!("<COP1 reserved rs={}>", cop1_rs(op)))
-    }
-}
-
-fn cop1_s_mnemonic(func: u32) -> &'static str {
-    match func {
-        0x00 => "ADD",
-        0x01 => "SUB",
-        0x02 => "MUL",
-        0x03 => "DIV",
-        0x04 => "SQRT",
-        0x05 => "ABS",
-        0x06 => "MOV",
-        0x07 => "NEG",
-        0x08 => "ROUND.L",
-        0x09 => "TRUNC.L",
-        0x0A => "CEIL.L",
-        0x0B => "FLOOR.L",
-        0x0C => "ROUND.W",
-        0x0D => "TRUNC.W",
-        0x0E => "CEIL.W",
-        0x0F => "FLOOR.W",
-        0x20 => "CVT.S",
-        0x21 => "CVT.D",
-        0x24 => "CVT.W",
-        0x25 => "CVT.L",
-        0x30 => "C.F",
-        0x31 => "C.UN",
-        0x32 => "C.EQ",
-        0x33 => "C.UEQ",
-        0x34 => "C.OLT",
-        0x35 => "C.ULT",
-        0x36 => "C.OLE",
-        0x37 => "C.ULE",
-        0x38 => "C.SF",
-        0x39 => "C.NGLE",
-        0x3A => "C.SEQ",
-        0x3B => "C.NGL",
-        0x3C => "C.LT",
-        0x3D => "C.NGE",
-        0x3E => "C.LE",
-        0x3F => "C.NGT",
-        _ => "COP1.S",
-    }
-}
-
-fn cop1_d_mnemonic(func: u32) -> &'static str {
-    match func {
-        0x00 => "ADD",
-        0x01 => "SUB",
-        0x02 => "MUL",
-        0x03 => "DIV",
-        0x04 => "SQRT",
-        0x05 => "ABS",
-        0x06 => "MOV",
-        0x07 => "NEG",
-        0x08 => "ROUND.L",
-        0x09 => "TRUNC.L",
-        0x0A => "CEIL.L",
-        0x0B => "FLOOR.L",
-        0x0C => "ROUND.W",
-        0x0D => "TRUNC.W",
-        0x0E => "CEIL.W",
-        0x0F => "FLOOR.W",
-        0x20 => "CVT.S",
-        0x21 => "CVT.D",
-        0x24 => "CVT.W",
-        0x25 => "CVT.L",
-        0x30 => "C.F",
-        0x31 => "C.UN",
-        0x32 => "C.EQ",
-        0x33 => "C.UEQ",
-        0x34 => "C.OLT",
-        0x35 => "C.ULT",
-        0x36 => "C.OLE",
-        0x37 => "C.ULE",
-        0x38 => "C.SF",
-        0x39 => "C.NGLE",
-        0x3A => "C.SEQ",
-        0x3B => "C.NGL",
-        0x3C => "C.LT",
-        0x3D => "C.NGE",
-        0x3E => "C.LE",
-        0x3F => "C.NGT",
-        _ => "COP1.D",
-    }
-}
-
-fn cop1_wl_mnemonic(func: u32) -> &'static str {
-    match func {
-        0x00 => "ADD",
-        0x01 => "SUB",
-        0x02 => "MUL",
-        0x03 => "DIV",
-        0x04 => "SQRT",
-        0x05 => "ABS",
-        0x06 => "MOV",
-        0x07 => "NEG",
-        0x20 => "CVT.S",
-        0x21 => "CVT.D",
-        0x24 => "CVT.W",
-        0x25 => "CVT.L",
-        _ => "COP1",
     }
 }

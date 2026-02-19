@@ -37,6 +37,8 @@ impl Widget for MiWidget {
                         show_reg(reg);
                     });
 
+                    ui.separator();
+
                     ui.horizontal(|ui| {
                         for interrupt in Interrupt::iter() {
                             ui.horizontal(|ui| {

@@ -4,7 +4,7 @@ use egui::Color32;
 pub enum Color {
     Default,
     Light,
-    Dark,
+    //Dark,
     Active,
     Success,
     Warning,
@@ -16,7 +16,7 @@ impl Into<Color32> for Color {
         match self {
             Color::Default => Color32::GRAY,
             Color::Light => LIGHT_COLOR,
-            Color::Dark => Color32::DARK_GRAY,
+            //Color::Dark => Color32::DARK_GRAY,
             Color::Active => ACTIVE_COLOR,
             Color::Success => SUCCESS_COLOR,
             Color::Warning => WARNING_COLOR,

@@ -85,10 +85,18 @@ impl Cop0 {
         self.regs[Register::EPC as usize].get() // TODO 64/32?
     }
 
+    pub fn set_epc(&mut self, value: u32) {
+        self.regs[Register::EPC as usize].set(value);
+    }
+
     //
 
     pub fn error_epc(&self) -> u32 {
         self.regs[Register::ErrorEPC as usize].get() // TODO 64/32?
+    }
+
+    pub fn set_error_epc(&mut self, value: u32) {
+        self.regs[Register::ErrorEPC as usize].set(value);
     }
 
     //

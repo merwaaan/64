@@ -127,8 +127,9 @@ impl Registers {
     }
 }
 
+#[derive(Debug)]
 #[repr(u32)]
-enum RoundingMode {
+pub enum RoundingMode {
     Nearest,
     Zero,
     Infinity,

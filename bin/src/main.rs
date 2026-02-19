@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 use egui::ViewportBuilder;
 use env_logger::Env;
@@ -9,14 +11,14 @@ mod ui;
 
 #[derive(clap::Parser)]
 #[command(name = env!("CARGO_PKG_NAME"), about = "N64 emulator debugger")]
-pub struct Args {
+struct Args {
     /// Path to the ROM file (.z64, .n64)
     #[arg()]
     rom: Option<String>,
 }
 
 fn main() -> eframe::Result<()> {
-    env_logger::Builder::from_env(Env::default().default_filter_or("bin=info,n64=info")).init();
+    env_logger::Builder::from_env(Env::default().default_filter_or("bin=debug,n64=debug")).init();
 
     let args = Args::parse();
 
@@ -28,6 +30,14 @@ fn main() -> eframe::Result<()> {
                 .with_drag_and_drop(true),
             ..Default::default()
         },
-        Box::new(|_cc| Ok(Box::new(Ui::new(&args)))),
+        Box::new(|_cc| {
+            let mut ui = Box::new(Ui::new());
+
+            if let Some(rom) = args.rom {
+                ui.load_rom(PathBuf::from(rom));
+            }
+
+            Ok(ui)
+        }),
     )
 }

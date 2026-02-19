@@ -14,7 +14,7 @@ pub struct CPU {
 }
 
 impl CPU {
-    pub fn step(s: &mut System) -> bool {
+    pub fn step(s: &mut System) {
         // Decode and execute the current instruction
 
         let instruction = s.read(s.cpu.regs.pc);
@@ -24,14 +24,10 @@ impl CPU {
         let handler = decode(opcode);
 
         if handler.is_none() {
-            log::error!(
+            panic!(
                 "Unknown instruction {:08X} at {:08X} / {}",
-                instruction,
-                s.cpu.regs.pc,
-                s.cpu.step
+                instruction, s.cpu.regs.pc, s.cpu.step
             );
-            // TODO temp hack
-            return false;
         }
 
         let next_delayed_branching = handler.unwrap().execute(s, opcode);
@@ -48,7 +44,5 @@ impl CPU {
         // TODO rm
 
         s.cpu.step += 1;
-
-        true
     }
 }

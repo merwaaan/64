@@ -124,7 +124,6 @@ impl Vi {
         match reg {
             STATUS_REG => {
                 // TODO
-                log::warn!("Write VI_STATUS {:X}", data.to_u32());
 
                 s.map.vi.regs[STATUS_REG] = data;
             }
@@ -138,9 +137,6 @@ impl Vi {
             }
 
             INTERRUPT_SCANLINE_REG => {
-                // TODO
-                log::warn!("Write VI_INTERRUPT_SCANLINE {:X}", data.to_u32());
-
                 s.map.vi.regs[INTERRUPT_SCANLINE_REG] = data & INTERRUPT_SCANLINE_MASK;
             }
 
@@ -158,49 +154,42 @@ impl Vi {
 
             V_SYNC_REG => {
                 // TODO
-                log::warn!("Write VI_V_SYNC {:X}", data.to_u32());
 
                 s.map.vi.regs[V_SYNC_REG] = data;
             }
 
             H_SYNC_REG => {
                 // TODO
-                log::warn!("Write VI_H_SYNC {:X}", data.to_u32());
 
                 s.map.vi.regs[H_SYNC_REG] = data;
             }
 
             H_SYNC_LEAP_REG => {
                 // TODO
-                log::warn!("Write VI_H_SYNC_LEAP {:X}", data.to_u32());
 
                 s.map.vi.regs[H_SYNC_LEAP_REG] = data;
             }
 
             H_VIDEO_REG => {
                 // TODO
-                log::warn!("Write VI_H_VIDEO {:X}", data.to_u32());
 
                 s.map.vi.regs[H_VIDEO_REG] = data;
             }
 
             V_VIDEO_REG => {
                 // TODO
-                log::warn!("Write VI_V_VIDEO {:X}", data.to_u32());
 
                 s.map.vi.regs[V_VIDEO_REG] = data;
             }
 
             V_BURST_REG => {
                 // TODO
-                log::warn!("Write VI_V_BURST {:X}", data.to_u32());
 
                 s.map.vi.regs[V_BURST_REG] = data;
             }
 
             X_SCALE_REG => {
                 // TODO
-                log::warn!("Write VI_X_SCALE {:X}", data.to_u32());
 
                 s.map.vi.regs[X_SCALE_REG] = data;
             }

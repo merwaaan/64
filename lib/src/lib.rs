@@ -5,6 +5,7 @@ pub mod cop0;
 pub mod cpu;
 pub mod data;
 pub mod dd;
+pub mod dp;
 pub mod events;
 pub mod instructions;
 pub mod map;

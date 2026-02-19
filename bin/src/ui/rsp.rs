@@ -1,5 +1,5 @@
 use egui::{Context, Window};
-use n64::rsp::{Register, Rsp};
+use n64::rsp::Register;
 use strum::IntoEnumIterator;
 
 use crate::{
@@ -25,7 +25,7 @@ impl Widget for RspWidget {
             .show(ctx, |ui| {
                 if let Some(rsp_regs) = &self.last_update {
                     let mut show_reg = |reg: Register| {
-                        reg32(ui, format!("{:>17}", reg), rsp_regs[reg as usize]);
+                        reg32(ui, format!("{:>10}", reg), rsp_regs[reg as usize]);
                     };
 
                     Register::iter().for_each(|reg| {

@@ -4,29 +4,62 @@ use n64::{cart::Cart, system::System};
 
 use crate::{
     emu::{
+        core_thread::{CoreThread, CoreThreadState, CoreThreadStatus},
         event::Event,
-        runner::{RunMode, Runner, RunnerState},
     },
-    ui::SettingUpdate,
+    ui::{SettingUpdate, Status},
 };
 
 pub enum Command {
-    SetSetting(SettingUpdate),
-    AddBreakpoint(u32),
-    ToggleBreakpoint(u32),
-    RemoveBreakpoint(u32),
     LoadRom(PathBuf),
     Pause,
     Resume,
     Step,
-    //Exit,
+    SetSetting(SettingUpdate),
+    AddBreakpoint(u32),
+    ToggleBreakpoint(u32),
+    RemoveBreakpoint(u32),
 }
 
 impl Command {
-    pub fn handle(&self, state: &mut RunnerState) -> Vec<Event> {
+    pub fn handle(&self, state: &mut CoreThreadState) -> Vec<Event> {
         let mut events = Vec::new();
 
         match self {
+            Command::LoadRom(path) => {
+                log::info!("Loading ROM {}", path.display());
+
+                match Cart::load(path) {
+                    Ok(cart) => {
+                        let mut system = System::new(cart);
+                        system.skip_ipl(); // TODO internalize
+
+                        events.push(Event::BreakpointsUpdate(system.breakpoints().clone()));
+
+                        state.system = Some(system);
+
+                        events.extend(CoreThread::create_update_events(state));
+                    }
+                    Err(e) => {
+                        log::error!("Failed to load cart: {}", e);
+                    }
+                }
+            }
+            Command::Pause => {
+                state.status = CoreThreadStatus::Paused { step: false };
+
+                events.push(Event::StatusUpdate(Status::Paused));
+            }
+            Command::Resume => {
+                state.status = CoreThreadStatus::Running;
+
+                events.push(Event::StatusUpdate(Status::Running));
+            }
+            Command::Step => {
+                state.status = CoreThreadStatus::Paused { step: true };
+
+                events.push(Event::StatusUpdate(Status::Paused));
+            }
             Command::SetSetting(setting) => {
                 match setting {
                     SettingUpdate::Instructions(settings) => {
@@ -43,46 +76,8 @@ impl Command {
                     }
                 }
 
-                events.extend(Runner::update_events(state));
+                events.extend(CoreThread::create_update_events(state));
             }
-
-            Command::LoadRom(path) => {
-                match Cart::load(path) {
-                    Ok(cart) => {
-                        let mut system = System::new(cart);
-                        system.skip_ipl(); // TODO internalize
-
-                        events.push(Event::BreakpointsUpdate(system.breakpoints().clone()));
-
-                        state.system = Some(system);
-
-                        events.extend(Runner::update_events(state));
-                    }
-                    Err(e) => {
-                        log::error!("Failed to load cart: {}", e);
-                    }
-                }
-            }
-
-            Command::Pause => {
-                state.run_mode = RunMode::Paused {
-                    step_requested: false,
-                };
-            }
-
-            Command::Resume => {
-                state.run_mode = RunMode::Running;
-            }
-
-            Command::Step => {
-                if let RunMode::Paused { step_requested } = &mut state.run_mode {
-                    *step_requested = true;
-                }
-            }
-
-            // Command::Exit => {
-            //     state.run_mode = RunMode::Exited;
-            // }
             Command::AddBreakpoint(breakpoint) => {
                 if let Some(system) = &mut state.system {
                     system.add_breakpoint(*breakpoint);
@@ -90,7 +85,6 @@ impl Command {
                     events.push(Event::BreakpointsUpdate(system.breakpoints().clone()));
                 }
             }
-
             Command::RemoveBreakpoint(breakpoint) => {
                 if let Some(system) = &mut state.system {
                     system.remove_breakpoint(*breakpoint);
@@ -98,7 +92,6 @@ impl Command {
                     events.push(Event::BreakpointsUpdate(system.breakpoints().clone()));
                 }
             }
-
             Command::ToggleBreakpoint(address) => {
                 if let Some(system) = &mut state.system {
                     system.toggle_breakpoint(*address);

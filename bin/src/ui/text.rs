@@ -31,12 +31,12 @@ impl Text {
         Self { color, ..self }
     }
 
-    pub fn bgcolor(self, color: Color) -> Self {
-        Self {
-            bgcolor: color,
-            ..self
-        }
-    }
+    // pub fn bgcolor(self, color: Color) -> Self {
+    //     Self {
+    //         bgcolor: color,
+    //         ..self
+    //     }
+    // }
 
     pub fn reverse(self, reverse: bool) -> Self {
         Self { reverse, ..self }
