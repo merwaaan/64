@@ -1,34 +1,52 @@
-use crate::{data::Data, map::Location, system::System};
+use crate::{data::Value, map::Location, system::System};
 
 const REG_START: u32 = 0x0410_0000;
 const REG_END: u32 = 0x0420_0000;
 
 pub type DpLocation = Location<REG_START, REG_END>;
 
-#[derive(Clone)]
+const START_REG: u32 = 0;
+const END_REG: u32 = 1;
+//const CURRENT_REG: u32 = 2;
+const STATUS_REG: u32 = 3;
+//const CLOCK_REG: u32 = 4;
+//const BUF_BUSY_REG: u32 = 5;
+//const PIPE_BUSY_REG: u32 = 6;
+//const TMEM_BUSY_REG: u32 = 7;
+
+const MASK: u32 = 0xF;
+
+#[derive(Default, Clone)]
 pub struct Dp {
     pub regs: [u32; 8],
 }
 
-impl Default for Dp {
-    fn default() -> Self {
-        Self { regs: [0; 8] }
-    }
-}
-
 impl Dp {
-    pub fn read<T: Data>(&self, addr: DpLocation) -> T {
-        log::warn!("Read DP register @ {:08X}", addr.relative());
+    pub fn read<T: Value>(&self, addr: DpLocation) -> T {
+        log::warn!("Read DP register @ {:08X} UNIMPLEMENTED", addr.relative());
 
         T::default()
     }
 
-    pub fn write<T: Data>(s: &mut System, addr: DpLocation, data: T) {
-        log::warn!(
-            "Write DP register @ {:08X} {:X}",
-            addr.relative(),
-            data.to_u32()
-        );
+    pub fn write<T: Value>(s: &mut System, addr: DpLocation, data: T) {
+        log::warn!("Write DP register @ {:08X} {:X}", addr.relative(), data);
+
+        match (addr.relative() >> 2) & MASK {
+            START_REG => {
+                data.write_reg(&mut s.map.dp.regs, addr.relative() & MASK);
+            }
+            END_REG => {
+                data.write_reg(&mut s.map.dp.regs, addr.relative() & MASK);
+            }
+            STATUS_REG => {
+                data.write_reg(&mut s.map.dp.regs, addr.relative() & MASK);
+            }
+            _ => panic!(
+                "Invalid DP register write: {:08X} {:X}",
+                addr.relative(),
+                data
+            ),
+        }
     }
 
     // fn start_dma(s: &mut System, direction: DmaDirection) {

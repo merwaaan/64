@@ -15,7 +15,7 @@ pub struct MemorySettings {
 impl Default for MemorySettings {
     fn default() -> Self {
         Self {
-            address: 0xa401_0000,
+            address: 0x0000_0000,
             rows: 8,
         }
     }
@@ -24,7 +24,7 @@ impl Default for MemorySettings {
 #[derive(Clone)]
 pub struct MemoryUpdate {
     pub base_address: u32,
-    pub data: Vec<u8>,
+    pub data: Vec<Option<u8>>,
 }
 
 #[derive(Default)]
@@ -113,7 +113,10 @@ impl Widget for MemoryWidget {
                                     ui.add_space(4.0);
                                 }
 
-                                let mut text = Text::new(format!("{:02X}", byte));
+                                let mut text = Text::new(
+                                    byte.map(|b| format!("{:02X}", b))
+                                        .unwrap_or("??".to_string()),
+                                );
 
                                 // TODO not working?
                                 if let Some(address_target) = address_target

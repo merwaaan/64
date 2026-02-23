@@ -23,9 +23,9 @@ impl Breakpoints {
     }
 
     pub fn toggle(&mut self, address: u32) {
-        self.breakpoints
-            .get_mut(&address)
-            .map(|breakpoint| breakpoint.enabled = !breakpoint.enabled);
+        if let Some(breakpoint) = self.breakpoints.get_mut(&address) {
+            breakpoint.enabled = !breakpoint.enabled;
+        }
     }
 
     pub fn should_break(&self, address: u32) -> bool {

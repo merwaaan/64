@@ -1,4 +1,4 @@
-use crate::{data::Data, map::Location, system::System};
+use crate::{data::Value, map::Location, system::System};
 
 const RAM_START: u32 = 0x1FC0_07C0;
 const RAM_END: u32 = 0x1FC0_0800;
@@ -6,22 +6,29 @@ const RAM_END: u32 = 0x1FC0_0800;
 pub type PifRamLocation = Location<RAM_START, RAM_END>;
 
 pub struct Pif {
-    // TODO ram
+    data: [u8; 0x40],
 }
 
 impl Default for Pif {
     fn default() -> Self {
-        Self {}
+        Self { data: [0; 0x40] }
     }
 }
 
 impl Pif {
-    pub fn read<T: Data>(&self, addr: PifRamLocation) -> T {
-        log::warn!("read PIF RAM: {:08X}", addr.relative());
-        T::default()
+    pub fn read<T: Value>(&self, addr: PifRamLocation) -> T {
+        log::error!(
+            "read PIF RAM: {:08X} {:X}",
+            addr.relative(),
+            self.data[addr.relative() as usize]
+        );
+
+        T::read_mem(&self.data, addr.relative())
     }
 
-    pub fn write<T: Data>(_s: &mut System, addr: PifRamLocation, data: T) {
-        log::warn!("write PIF RAM: {:08X} {:X}", addr.relative(), data.to_u32());
+    pub fn write<T: Value>(s: &mut System, addr: PifRamLocation, data: T) {
+        log::error!("write PIF RAM: {:08X} {:X}", addr.relative(), data);
+
+        data.write_mem(&mut s.map.pif.data, addr.relative());
     }
 }

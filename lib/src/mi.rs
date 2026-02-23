@@ -1,6 +1,6 @@
 use strum::{Display, EnumIter};
 
-use crate::{data::Data, map::Location, system::System};
+use crate::{data::Value, map::Location, system::System};
 
 #[derive(Debug, Display, Clone, Copy, EnumIter)]
 #[repr(u32)]
@@ -64,110 +64,109 @@ pub struct Mi {
 
 impl Default for Mi {
     fn default() -> Self {
-        Self {
-            regs: [0, VERSION_DEFAULT, 0, 0],
-        }
+        let mut regs = [0; 4];
+
+        VERSION_DEFAULT.write_reg(&mut regs, 4);
+
+        Self { regs }
     }
 }
 
 impl Mi {
-    pub fn read<T: Data>(&self, addr: MiLocation) -> T {
-        let reg = ((addr.relative() & MASK) >> 2) as usize;
-
-        // TODO mask stuff? or jsut access directly w/o match?
-        match reg {
-            0 => T::from_u32(self.regs[Register::Mode as usize]),
-            1 => T::from_u32(self.regs[Register::Version as usize]),
-            2 => T::from_u32(self.regs[Register::Interrupt as usize]),
-            3 => T::from_u32(self.regs[Register::Mask as usize]),
-            _ => panic!("Invalid MI register read: {:08X}", reg),
-        }
+    pub fn read<T: Value>(&self, addr: MiLocation) -> T {
+        T::read_reg(&self.regs, addr.relative() & MASK)
     }
 
-    pub fn write<T: Data>(s: &mut System, addr: MiLocation, data: T) {
+    pub fn write<T: Value>(s: &mut System, addr: MiLocation, data: T) {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         match reg {
             0 => {
-                let reg = &mut s.map.mi.regs[Register::Mode as usize];
+                let trigger_bits: u32 = 0;
+                data.write_reg(&mut [trigger_bits], addr.relative() & 3);
 
-                let data = data.to_u32();
+                let mode_reg = &mut s.map.mi.regs[Register::Mode as usize];
 
-                *reg = *reg & !MODE_READ_REPEAT_COUNT_MASK | data & MODE_READ_REPEAT_COUNT_MASK;
-
-                if data & MODE_WRITE_REPEAT_CLEAR_MASK != 0 {
-                    *reg &= !MODE_WRITE_REPEAT_CLEAR_MASK;
+                if trigger_bits & MODE_WRITE_REPEAT_CLEAR_MASK != 0 {
+                    *mode_reg &= !MODE_WRITE_REPEAT_CLEAR_MASK;
                 }
-                if data & MODE_WRITE_REPEAT_SET_MASK != 0 {
-                    *reg |= MODE_WRITE_REPEAT_SET_MASK;
-                }
-
-                if data & MODE_WRITE_EBUS_CLEAR_MASK != 0 {
-                    *reg &= !MODE_WRITE_EBUS_CLEAR_MASK;
-                }
-                if data & MODE_WRITE_EBUS_SET_MASK != 0 {
-                    *reg |= MODE_WRITE_EBUS_SET_MASK;
+                if trigger_bits & MODE_WRITE_REPEAT_SET_MASK != 0 {
+                    *mode_reg |= MODE_WRITE_REPEAT_SET_MASK;
                 }
 
-                if data & MODE_WRITE_DP_CLEAR_MASK != 0 {
-                    *reg &= !(Interrupt::Dp as u32);
+                if trigger_bits & MODE_WRITE_EBUS_CLEAR_MASK != 0 {
+                    *mode_reg &= !MODE_WRITE_EBUS_CLEAR_MASK;
+                }
+                if trigger_bits & MODE_WRITE_EBUS_SET_MASK != 0 {
+                    *mode_reg |= MODE_WRITE_EBUS_SET_MASK;
                 }
 
-                if data & MODE_WRITE_UPPER_CLEAR_MASK != 0 {
-                    *reg &= !MODE_WRITE_UPPER_CLEAR_MASK;
+                if trigger_bits & MODE_WRITE_DP_CLEAR_MASK != 0 {
+                    *mode_reg &= !(Interrupt::Dp as u32);
                 }
-                if data & MODE_WRITE_UPPER_SET_MASK != 0 {
-                    *reg |= MODE_WRITE_UPPER_SET_MASK;
+
+                if trigger_bits & MODE_WRITE_UPPER_CLEAR_MASK != 0 {
+                    *mode_reg &= !MODE_WRITE_UPPER_CLEAR_MASK;
                 }
+                if trigger_bits & MODE_WRITE_UPPER_SET_MASK != 0 {
+                    *mode_reg |= MODE_WRITE_UPPER_SET_MASK;
+                }
+
+                // TODO repeat count
             }
-            1 => {}
+            1 => {
+                // Not writable
+            }
             2 => {
-                log::warn!("Write MI_INTERRUPT {:X}", data.to_u32());
+                log::warn!("Write MI_INTERRUPT {:X}", data);
             }
             3 => {
-                let data = data.to_u32();
+                let trigger_bits: u32 = 0;
+                data.write_reg(&mut [trigger_bits], addr.relative() & 3);
 
-                if data & MASK_SP_CLEAR == MASK_SP_CLEAR {
-                    s.map.mi.regs[Register::Mask as usize] &= !(Interrupt::Sp as u32);
-                }
-                if data & MASK_SP_SET == MASK_SP_SET {
-                    s.map.mi.regs[Register::Mask as usize] |= Interrupt::Sp as u32;
-                }
+                let mask_reg = &mut s.map.mi.regs[Register::Mask as usize];
 
-                if data & MASK_SI_CLEAR == MASK_SI_CLEAR {
-                    s.map.mi.regs[Register::Mask as usize] &= !(Interrupt::Si as u32);
+                if trigger_bits & MASK_SP_CLEAR == MASK_SP_CLEAR {
+                    *mask_reg &= !(Interrupt::Sp as u32);
                 }
-                if data & MASK_SI_SET == MASK_SI_SET {
-                    s.map.mi.regs[Register::Mask as usize] |= Interrupt::Si as u32;
+                if trigger_bits & MASK_SP_SET == MASK_SP_SET {
+                    *mask_reg |= Interrupt::Sp as u32;
                 }
 
-                if data & MASK_AI_CLEAR == MASK_AI_CLEAR {
-                    s.map.mi.regs[Register::Mask as usize] &= !(Interrupt::Ai as u32);
+                if trigger_bits & MASK_SI_CLEAR == MASK_SI_CLEAR {
+                    *mask_reg &= !(Interrupt::Si as u32);
                 }
-                if data & MASK_AI_SET == MASK_AI_SET {
-                    s.map.mi.regs[Register::Mask as usize] |= Interrupt::Ai as u32;
+                if trigger_bits & MASK_SI_SET == MASK_SI_SET {
+                    *mask_reg |= Interrupt::Si as u32;
                 }
 
-                if data & MASK_VI_CLEAR == MASK_VI_CLEAR {
-                    s.map.mi.regs[Register::Mask as usize] &= !(Interrupt::Vi as u32);
+                if trigger_bits & MASK_AI_CLEAR == MASK_AI_CLEAR {
+                    *mask_reg &= !(Interrupt::Ai as u32);
                 }
-                if data & MASK_VI_SET == MASK_VI_SET {
-                    s.map.mi.regs[Register::Mask as usize] |= Interrupt::Vi as u32;
+                if trigger_bits & MASK_AI_SET == MASK_AI_SET {
+                    *mask_reg |= Interrupt::Ai as u32;
+                }
+
+                if trigger_bits & MASK_VI_CLEAR == MASK_VI_CLEAR {
+                    *mask_reg &= !(Interrupt::Vi as u32);
+                }
+                if trigger_bits & MASK_VI_SET == MASK_VI_SET {
+                    *mask_reg |= Interrupt::Vi as u32;
                 }
                 //s.map.mi.regs[MASK_REG] |= Interrupt::Vi as u32; /////////////s
 
-                if data & MASK_PI_CLEAR == MASK_PI_CLEAR {
-                    s.map.mi.regs[Register::Mask as usize] &= !(Interrupt::Pi as u32);
+                if trigger_bits & MASK_PI_CLEAR == MASK_PI_CLEAR {
+                    *mask_reg &= !(Interrupt::Pi as u32);
                 }
-                if data & MASK_PI_SET == MASK_PI_SET {
-                    s.map.mi.regs[Register::Mask as usize] |= Interrupt::Pi as u32;
+                if trigger_bits & MASK_PI_SET == MASK_PI_SET {
+                    *mask_reg |= Interrupt::Pi as u32;
                 }
 
-                if data & MASK_DP_CLEAR == MASK_DP_CLEAR {
-                    s.map.mi.regs[Register::Mask as usize] &= !(Interrupt::Dp as u32);
+                if trigger_bits & MASK_DP_CLEAR == MASK_DP_CLEAR {
+                    *mask_reg &= !(Interrupt::Dp as u32);
                 }
-                if data & MASK_DP_SET == MASK_DP_SET {
-                    s.map.mi.regs[Register::Mask as usize] |= Interrupt::Dp as u32;
+                if trigger_bits & MASK_DP_SET == MASK_DP_SET {
+                    *mask_reg |= Interrupt::Dp as u32;
                 }
             }
             _ => panic!(
@@ -192,34 +191,34 @@ impl Mi {
 
     // MODE
 
-    pub fn upper_mode(&self) -> bool {
-        self.regs[Register::Mode as usize] & MODE_READ_UPPER_MASK != 0
-    }
+    // pub fn upper_mode(&self) -> bool {
+    //     self.regs[Register::Mode as usize] & MODE_READ_UPPER_MASK != 0
+    // }
 
-    pub fn ebus_mode(&self) -> bool {
-        self.regs[Register::Mode as usize] & MODE_READ_EBUS_MASK != 0
-    }
+    // pub fn ebus_mode(&self) -> bool {
+    //     self.regs[Register::Mode as usize] & MODE_READ_EBUS_MASK != 0
+    // }
 
-    pub fn repeat_mode(&self) -> bool {
-        self.regs[Register::Mode as usize] & MODE_READ_REPEAT_MASK != 0
-    }
+    // pub fn repeat_mode(&self) -> bool {
+    //     self.regs[Register::Mode as usize] & MODE_READ_REPEAT_MASK != 0
+    // }
 
-    pub fn repeat_count(&self) -> u32 {
-        self.regs[Register::Mode as usize] & MODE_READ_REPEAT_COUNT_MASK
-    }
+    // pub fn repeat_count(&self) -> u32 {
+    //     self.regs[Register::Mode as usize] & MODE_READ_REPEAT_COUNT_MASK
+    // }
 
     // VERSION
 
-    pub fn version(&self) -> Versions {
-        let version = self.regs[Register::Version as usize];
+    // pub fn version(&self) -> Versions {
+    //     let version = self.regs[4 * Register::Version as usize];
 
-        Versions {
-            rsp: (version >> 24) as u8,
-            rdp: (version >> 16) as u8,
-            rac: (version >> 8) as u8,
-            io: version as u8,
-        }
-    }
+    //     Versions {
+    //         rsp: (version >> 24) as u8,
+    //         rdp: (version >> 16) as u8,
+    //         rac: (version >> 8) as u8,
+    //         io: version as u8,
+    //     }
+    // }
 
     // INT_PENDING
 
@@ -237,8 +236,8 @@ impl Mi {
 
     // INT_MASK
 
-    pub fn is_interrupt_masked(&self, interrupt: Interrupt) -> bool {
-        self.regs[Register::Mask as usize] & (interrupt as u32) == 0
+    pub fn is_interrupt_enabled(&self, interrupt: Interrupt) -> bool {
+        self.regs[Register::Mask as usize] & (interrupt as u32) != 0
     }
 
     // TODO rename

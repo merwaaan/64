@@ -36,7 +36,7 @@ impl CPU {
 
         match s.cpu.delayed_branching.take() {
             Some(DelayedBranching(target)) => s.cpu.regs.pc = target,
-            None => s.cpu.regs.pc += 4,
+            None => s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4),
         }
 
         s.cpu.delayed_branching = next_delayed_branching;

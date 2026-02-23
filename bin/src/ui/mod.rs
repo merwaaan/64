@@ -202,6 +202,12 @@ impl eframe::App for Ui {
                 if matches!(self.status, Status::Panicked) {
                     Text::new("⚠ Core panicked").color(Color::Error).show(ui);
                 }
+
+                if let Some(rom_name) = &self.last_rom_path.as_ref().and_then(|p| p.file_name()) {
+                    Text::new(format!("({})", rom_name.display()))
+                        .color(Color::Light)
+                        .show(ui);
+                }
             });
         });
 

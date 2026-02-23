@@ -1,6 +1,6 @@
 use strum::{Display, EnumIter};
 
-use crate::{data::Data, map::Location, mi::Interrupt, system::System};
+use crate::{data::Value, map::Location, mi::Interrupt, system::System};
 
 const START: u32 = 0x0480_0000;
 const END: u32 = 0x0490_0000;
@@ -39,10 +39,10 @@ const PIF_ADDR_WRITE4_LO: u32 = (PIF_ADDR_WRITE4_REG as u32) << 2;
 const STATUS_REG: usize = 6;
 const STATUS_LO: u32 = (STATUS_REG as u32) << 2;
 
-const STATUS_DMA_BUSY_MASK: u32 = 1;
-const STATUS_IO_BUSY_MASK: u32 = 1 << 1;
-const STATUS_READ_PENDING_MASK: u32 = 1 << 2;
-const STATUS_DMA_ERROR_MASK: u32 = 1 << 3;
+//const STATUS_DMA_BUSY_MASK: u32 = 1;
+//const STATUS_IO_BUSY_MASK: u32 = 1 << 1;
+//const STATUS_READ_PENDING_MASK: u32 = 1 << 2;
+//const STATUS_DMA_ERROR_MASK: u32 = 1 << 3;
 // TODO others
 
 #[derive(Default, Clone, Copy)]
@@ -51,23 +51,31 @@ pub struct Si {
 }
 
 impl Si {
-    pub fn read<T: Data>(&self, addr: SiLocation) -> T {
-        let reg = ((addr.relative() & MASK) >> 2) as usize;
-
+    pub fn read<T: Value>(&self, addr: SiLocation) -> T {
         // TODO depends???
 
-        T::from_u32(self.regs[reg as usize]) // TOD0 weirddd
+        // TODO temp
+        if addr.relative() > 0x1B {
+            panic!("Read invalid SI register @ {:08X}", addr.relative());
+        }
+
+        log::info!("Read SI register @ {:08X}", addr.relative());
+
+        T::read_reg(&self.regs, addr.relative() & MASK)
     }
 
-    pub fn write<T: Data>(s: &mut System, addr: SiLocation, data: T) {
+    pub fn write<T: Value>(s: &mut System, addr: SiLocation, data: T) {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
 
-        let data = data.to_u32(); // TODO temp hack, should be able to write any size
+        log::info!("Write SI register @ {:08X} {:X}", addr.relative(), data);
 
         match reg {
             DRAM_ADDR_REG => {
                 //panic!("Write SI_DRAM_ADDR {:X}", data);
-                s.map.si.regs[DRAM_ADDR_REG] = data & 0x00FF_FFFF;
+
+                data.write_reg(&mut s.map.si.regs, addr.relative() & MASK);
+
+                s.map.si.regs[DRAM_ADDR_REG] &= 0x00FF_FFFF;
             }
             STATUS_REG => {
                 // Writing any value acknowledges the interrupt

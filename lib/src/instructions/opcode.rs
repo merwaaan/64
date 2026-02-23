@@ -59,14 +59,6 @@ impl Opcode {
         ((self.0 >> 11) & 0x1F) as usize
     }
 
-    pub(crate) fn rdv(&self, s: &System) -> u32 {
-        s.cpu.regs.gpr[self.rd()].get()
-    }
-
-    pub(crate) fn rdv64(&self, s: &System) -> u64 {
-        s.cpu.regs.gpr[self.rd()].get64()
-    }
-
     pub(crate) fn rdn(&self) -> &'static str {
         Registers::gpr_name(self.rd())
     }
@@ -85,8 +77,8 @@ impl Opcode {
         s.cpu.regs.fpr[self.fs()].get()
     }
 
-    pub(crate) fn fsv64(&self, s: &System) -> u64 {
-        s.cpu.regs.fpr[self.fs()].get64()
+    pub(crate) fn fsn(&self) -> &'static str {
+        Registers::fpr_name(self.fs())
     }
 
     // base

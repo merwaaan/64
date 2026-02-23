@@ -33,9 +33,9 @@ pub enum CoreThreadStatus {
     Paused { step: bool },
 }
 
-impl Into<Status> for CoreThreadStatus {
-    fn into(self) -> Status {
-        match self {
+impl From<CoreThreadStatus> for Status {
+    fn from(status: CoreThreadStatus) -> Status {
+        match status {
             CoreThreadStatus::Running => Status::Running,
             CoreThreadStatus::Paused { .. } => Status::Paused,
         }
@@ -144,38 +144,36 @@ impl CoreThread {
             let step = matches!(state.status, CoreThreadStatus::Running)
                 || matches!(state.status, CoreThreadStatus::Paused { step: true });
 
-            if step {
-                if let Some(system) = &mut state.system {
-                    let mut send_update = false;
+            if step && let Some(system) = &mut state.system {
+                let mut send_update = false;
 
-                    let breakpoint_hit = system.step();
+                let breakpoint_hit = system.step();
 
-                    if breakpoint_hit {
-                        state.status = CoreThreadStatus::Paused { step: false };
+                if breakpoint_hit {
+                    state.status = CoreThreadStatus::Paused { step: false };
 
-                        let _ = event_tx.send(Event::StatusUpdate(state.status.into()));
+                    let _ = event_tx.send(Event::StatusUpdate(state.status.into()));
 
+                    send_update = true;
+                } else {
+                    if let CoreThreadStatus::Paused {
+                        step: step_requested,
+                    } = &mut state.status
+                    {
+                        *step_requested = false;
                         send_update = true;
-                    } else {
-                        if let CoreThreadStatus::Paused {
-                            step: step_requested,
-                        } = &mut state.status
-                        {
-                            *step_requested = false;
-                            send_update = true;
-                        }
-
-                        update_counter = update_counter.wrapping_add(1);
-
-                        if update_counter % UPDATE_INTERVAL as u64 == 0 {
-                            send_update = true;
-                        }
                     }
 
-                    if send_update {
-                        for event in Self::create_update_events(&state) {
-                            let _ = event_tx.send(event);
-                        }
+                    update_counter = update_counter.wrapping_add(1);
+
+                    if update_counter.is_multiple_of(UPDATE_INTERVAL as u64) {
+                        send_update = true;
+                    }
+                }
+
+                if send_update {
+                    for event in Self::create_update_events(state) {
+                        let _ = event_tx.send(event);
                     }
                 }
             }
@@ -244,7 +242,7 @@ impl CoreThread {
                 let base_address = memory_settings.address & !0xF;
 
                 let data = (0..memory_settings.rows * 16)
-                    .map(|i| system.read(base_address + i as u32))
+                    .map(|i| system.try_read(base_address + i as u32))
                     .collect();
 
                 events.push(Event::MemoryUpdate(MemoryUpdate { base_address, data }));

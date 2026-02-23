@@ -1,7 +1,7 @@
 use crate::breakpoints::Breakpoints;
 use crate::cart::CartLocation;
 use crate::cop0::Cop0;
-use crate::data::Data;
+use crate::data::Value;
 use crate::events::{Cycle, Event, EventType, Events};
 use crate::map::Location;
 use crate::rsp::Rsp;
@@ -76,36 +76,36 @@ impl System {
         self.cop0.regs[1].set(0x1F);
         self.cop0.regs[12].set(0x34000000);
         self.cop0.regs[15].set(0x00000B00);
-        self.cop0.regs[16].set(0x0006E463);
+        self.cop0.regs[16].set(0x7006E463); // Required by lemmy startup test
 
         // TODO temp p64 match
-        self.cpu.regs.gpr[1].set(1);
-        self.cpu.regs.gpr[2].set(0xEBDA536);
-        self.cpu.regs.gpr[3].set(0xEBDA536);
-        self.cpu.regs.gpr[4].set(0xA536);
-        self.cpu.regs.gpr[5].set(0xC0F1D859);
-        self.cpu.regs.gpr[6].set(0xA4001F0C);
-        self.cpu.regs.gpr[7].set(0xA4001F08);
-        self.cpu.regs.gpr[8].set(0x000000C0);
-        self.cpu.regs.gpr[10].set(0x00000040);
-        self.cpu.regs.gpr[11].set(0xA4000040);
-        self.cpu.regs.gpr[12].set(0xED10D0B3);
-        self.cpu.regs.gpr[13].set(0x1402A4CC);
-        self.cpu.regs.gpr[14].set(0x2DE108EA);
-        self.cpu.regs.gpr[15].set(0x3103E121);
-        self.cpu.regs.gpr[23].set(0x6);
-        self.cpu.regs.gpr[25].set(0x9DEBB54F);
-        self.cpu.regs.gpr[29].set(0xA4001FF0);
-        self.cpu.regs.gpr[31].set(0xA4001554);
-        self.cop0.regs[4].set(0x007FFFF0);
-        self.cop0.regs[8].set(0xFFFFFFFF);
-        //self.cop0.regs[5].set(0x5000);
-        self.cop0.regs[9].set(0x5000);
-        self.cop0.regs[13].set(0x5C);
-        self.cop0.regs[14].set(0xFFFFFFFF);
-        self.cop0.regs[15].set(0x00000B22);
-        self.cop0.regs[16].set(0x7006E463);
-        self.cop0.regs[30].set(0xFFFFFFFF);
+        // self.cpu.regs.gpr[1].set(1);
+        // self.cpu.regs.gpr[2].set(0xEBDA536);
+        // self.cpu.regs.gpr[3].set(0xEBDA536);
+        // self.cpu.regs.gpr[4].set(0xA536);
+        // self.cpu.regs.gpr[5].set(0xC0F1D859);
+        // self.cpu.regs.gpr[6].set(0xA4001F0C);
+        // self.cpu.regs.gpr[7].set(0xA4001F08);
+        // self.cpu.regs.gpr[8].set(0x000000C0);
+        // self.cpu.regs.gpr[10].set(0x00000040);
+        // self.cpu.regs.gpr[11].set(0xA4000040);
+        // self.cpu.regs.gpr[12].set(0xED10D0B3);
+        // self.cpu.regs.gpr[13].set(0x1402A4CC);
+        // self.cpu.regs.gpr[14].set(0x2DE108EA);
+        // self.cpu.regs.gpr[15].set(0x3103E121);
+        // self.cpu.regs.gpr[23].set(0x6);
+        // self.cpu.regs.gpr[25].set(0x9DEBB54F);
+        // self.cpu.regs.gpr[29].set(0xA4001FF0);
+        // self.cpu.regs.gpr[31].set(0xA4001554);
+        // self.cop0.regs[4].set(0x007FFFF0);
+        // self.cop0.regs[8].set(0xFFFFFFFF);
+        // //self.cop0.regs[5].set(0x5000);
+        // self.cop0.regs[9].set(0x5000);
+        // self.cop0.regs[13].set(0x5C);
+        // self.cop0.regs[14].set(0xFFFFFFFF);
+        // self.cop0.regs[15].set(0x00000B22);
+        // self.cop0.regs[16].set(0x7006E463);
+        // self.cop0.regs[30].set(0xFFFFFFFF);
 
         // Copy the cart's boot code to memory
 
@@ -188,11 +188,15 @@ impl System {
         }
     }
 
-    pub fn read<T: Data>(&self, addr: u32) -> T {
+    pub fn read<T: Value>(&self, addr: u32) -> T {
         Map::read(self, addr) // TODO  Map:: really needed??
     }
 
-    pub fn write<T: Data>(&mut self, addr: u32, data: T) {
+    pub fn try_read<T: Value>(&self, addr: u32) -> Option<T> {
+        Map::try_read(self, addr)
+    }
+
+    pub fn write<T: Value>(&mut self, addr: u32, data: T) {
         Map::write(self, addr, data); // TODO  Map:: really needed???
     }
 

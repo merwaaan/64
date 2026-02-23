@@ -7,7 +7,7 @@ use std::{
 use thiserror::Error;
 use zip::ZipArchive;
 
-use crate::{data::Data, map::Location, system::System};
+use crate::{data::Value, map::Location, system::System};
 
 #[derive(Debug, Error)]
 pub enum CartError {
@@ -31,6 +31,7 @@ pub struct Cart {
     data: Vec<u8>,
 
     // TODO name?
+    // TODO to struct with push, flush funcs
     isviewer_buffer: [u8; 0x200],
     isviewer_index: usize,
     isviewer_log: String,
@@ -46,19 +47,17 @@ impl Cart {
 
         match first_word {
             // Already big-endian
-            0x80371240 => {}
+            0x8037_1240 => {}
 
             // Byte-swapped
-            0x37804012 => {
+            0x3780_4012 => {
                 for word in data.chunks_exact_mut(2) {
                     word.swap(0, 1);
                 }
             }
 
             // Word-swapped
-            0x40123780 => {
-                log::info!("Word-swapped");
-
+            0x4012_3780 => {
                 todo!("Word-swapped");
             }
 
@@ -98,20 +97,20 @@ impl Cart {
     //     self.data[0x3F]
     // }
 
-    pub fn read<T: Data>(&self, addr: CartLocation) -> T {
-        T::read(&self.data, addr.relative() % (self.data.len() as u32)) // TODO mod = costly?
+    pub fn read<T: Value>(&self, addr: CartLocation) -> T {
+        T::read_mem(&self.data, addr.relative() % (self.data.len() as u32)) // TODO mod = costly?
     }
 
-    pub fn write<T: Data>(s: &mut System, addr: CartLocation, data: T) {
-        log::warn!("write CART: {:08X} {:X}", addr.relative(), data.to_u32());
+    pub fn write<T: Value>(s: &mut System, addr: CartLocation, data: T) {
+        log::warn!("write CART: {:08X} {:X}", addr.relative(), data);
 
         if (0x03FF_0020..0x03FF_0220).contains(&addr.relative()) {
-            data.write(
+            data.write_mem(
                 &mut s.map.cart.isviewer_buffer,
                 addr.relative() - 0x03FF_0020,
             );
 
-            s.map.cart.isviewer_index += T::SIZE;
+            s.map.cart.isviewer_index += T::BYTES;
         } else if addr.relative() == 0x03FF_0014 {
             let data =
                 String::from_utf8_lossy(&s.map.cart.isviewer_buffer[..s.map.cart.isviewer_index]);
@@ -127,7 +126,7 @@ impl Cart {
 const ROM_EXTENSIONS: &[&str] = &[".z64", ".v64", ".n64"];
 
 fn has_rom_extension(ext: &std::ffi::OsStr) -> bool {
-    ext.to_str().map_or(false, |e| {
+    ext.to_str().is_some_and(|e| {
         ROM_EXTENSIONS
             .iter()
             .any(|rom| e.eq_ignore_ascii_case(rom.trim_start_matches('.')))
@@ -143,9 +142,12 @@ fn load_rom(path: &Path) -> Result<Vec<u8>, CartError> {
 
     match path.extension() {
         Some(extension) => {
+            // Regular ROM file
             if has_rom_extension(extension) {
                 BufReader::new(file).read_to_end(&mut data)?;
-            } else if extension == std::ffi::OsStr::new("zip") {
+            }
+            // ZIP archive
+            else if extension == std::ffi::OsStr::new("zip") {
                 let mut archive = ZipArchive::new(file)?;
 
                 let index = (0..archive.len()).find(|&i| {

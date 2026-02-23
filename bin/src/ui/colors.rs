@@ -11,9 +11,9 @@ pub enum Color {
     Error,
 }
 
-impl Into<Color32> for Color {
-    fn into(self) -> Color32 {
-        match self {
+impl From<Color> for Color32 {
+    fn from(color: Color) -> Self {
+        match color {
             Color::Default => Color32::GRAY,
             Color::Light => LIGHT_COLOR,
             //Color::Dark => Color32::DARK_GRAY,

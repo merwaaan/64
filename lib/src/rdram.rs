@@ -1,9 +1,9 @@
-use crate::{data::Data, map::Location, system::System};
+use crate::{data::Value, map::Location, system::System};
 
 const DATA_START: u32 = 0x0000_0000;
 const DATA_END: u32 = 0x03F0_0000;
 
-const DATA_MAPPED_SIZE: u32 = 0x080_0000; // TODO more with exp pack
+const DATA_MAPPED_SIZE: u32 = 0x080_0000; // TODO more with exp pack?
 
 pub type RdramLocation = Location<DATA_START, DATA_END>;
 
@@ -33,50 +33,51 @@ impl Default for Rdram {
 }
 
 impl Rdram {
-    pub fn read<T: Data>(&self, addr: RdramLocation) -> T {
+    pub fn read<T: Value>(&self, addr: RdramLocation) -> T {
         match addr.relative() {
-            0..DATA_MAPPED_SIZE => T::read(&self.data, addr.relative()),
+            0..DATA_MAPPED_SIZE => T::read_mem(&self.data, addr.relative()),
             _ => {
-                log::warn!("Invalid RDRAM data read: {:08X}", addr.relative());
+                //log::warn!("Invalid RDRAM data read: {:08X}", addr.relative());
+
                 T::default()
             }
         }
     }
 
-    pub fn write<T: Data>(s: &mut System, addr: RdramLocation, data: T) {
+    pub fn write<T: Value>(s: &mut System, addr: RdramLocation, data: T) {
         match addr.relative() {
-            0..DATA_MAPPED_SIZE => data.write(&mut s.map.rdram.data, addr.relative()),
-            _ => log::warn!(
-                "Invalid RDRAM data write: {:08X} {:X}",
-                addr.relative(),
-                data.to_u32()
-            ),
+            0..DATA_MAPPED_SIZE => data.write_mem(&mut s.map.rdram.data, addr.relative()),
+            _ => {} // _ => log::warn!(
+                    //     "Invalid RDRAM data write: {:08X} {:X}",
+                    //     addr.relative(),
+                    //     data
+                    // ),
         }
     }
 
-    pub fn read_reg<T: Data>(&self, addr: RdramRegsLocation) -> T {
+    pub fn read_reg<T: Value>(&self, addr: RdramRegsLocation) -> T {
         log::warn!("Read RDRAM reg UNIMPLEMENTED: {:08X}", addr.relative());
 
         T::default()
     }
 
-    pub fn write_reg<T: Data>(_s: &mut System, addr: RdramRegsLocation, data: T) {
+    pub fn write_reg<T: Value>(_s: &mut System, addr: RdramRegsLocation, data: T) {
         log::warn!(
             "Write RDRAM reg UNIMPLEMENTED: {:08X} {:X}",
             addr.relative(),
-            data.to_u32()
+            data
         );
     }
 
-    pub fn read_interface<T: Data>(&self, addr: RdramInterfaceLocation) -> T {
+    pub fn read_interface<T: Value>(&self, addr: RdramInterfaceLocation) -> T {
         if addr.relative() == 0x0C {
-            // TODO temp
             log::warn!(
                 "Reading from RDRAM interface 0x14 RI_SELECT: {:08X}",
                 addr.relative()
             );
 
-            T::from_u32(0x14)
+            // TODO temp
+            T::read_reg(&[0x14u32], addr.relative() & 3)
         } else {
             log::warn!(
                 "Read RDRAM interface UNIMPLEMENTED: {:08X}",
@@ -87,11 +88,11 @@ impl Rdram {
         }
     }
 
-    pub fn write_interface<T: Data>(_s: &mut System, addr: RdramInterfaceLocation, data: T) {
+    pub fn write_interface<T: Value>(_s: &mut System, addr: RdramInterfaceLocation, data: T) {
         log::warn!(
             "Write RDRAM interface UNIMPLEMENTED: {:08X} {:X}",
             addr.relative(),
-            data.to_u32()
+            data
         );
     }
 

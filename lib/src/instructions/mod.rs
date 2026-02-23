@@ -79,10 +79,10 @@ instruction_struct!(UNKNOWN);
 
 impl Instruction for UNKNOWN {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        unimplemented!("Unknown opcode {:10X} @ {:10X}", op.0, s.cpu.regs.pc)
+        unimplemented!("Unknown opcode {:10X} @ {:X}", op.0, s.cpu.regs.pc)
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
-        Disassembly::new(format!("<UNKNOWN {:10X}>", op.0))
+        Disassembly::new(format!("<UNKNOWN {:X}>", op.0))
     }
 }

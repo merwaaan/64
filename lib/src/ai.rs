@@ -1,7 +1,7 @@
 use strum::{Display, EnumIter};
 
 use crate::{
-    data::Data,
+    data::Value,
     events::{Event, EventType},
     map::Location,
     mi::Interrupt,
@@ -40,54 +40,55 @@ pub enum Register {
     BitRate = BITRATE_REG,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct Ai {
     pub regs: [u32; 6], // TODO not pub
-}
-
-impl Default for Ai {
-    fn default() -> Self {
-        Self {
-            regs: [0, 0, 0, 0, 0, 0],
-        }
-    }
 }
 
 // TODO ENABLE FLAG???
 
 impl Ai {
-    pub fn read<T: Data>(&self, addr: AiLocation) -> T {
+    pub fn read<T: Value>(&self, addr: AiLocation) -> T {
         match (addr.relative() >> 2) & REG_MASK {
-            STATUS_REG => T::from_u32(self.regs[STATUS_REG as usize]),
+            STATUS_REG => T::read_reg(&self.regs, addr.relative() & REG_MASK),
 
             // All the other registers mirror LENGTH
-            _ => T::from_u32(self.regs[Register::Length as usize]),
+            _ => T::read_reg(&self.regs, LENGTH_REG + (addr.relative() & 3)),
         }
     }
 
-    pub fn write<T: Data>(s: &mut System, addr: AiLocation, data: T) {
+    pub fn write<T: Value>(s: &mut System, addr: AiLocation, data: T) {
         match (addr.relative() >> 2) & REG_MASK {
             DRAM_ADDR_REG => {
-                s.map.ai.regs[DRAM_ADDR_REG as usize] = data.to_u32() & 0x00FF_FFF8;
+                data.write_reg(&mut s.map.ai.regs, addr.relative() & REG_MASK);
+
+                s.map.ai.regs[DRAM_ADDR_REG as usize] &= 0x00FF_FFF8;
             }
             LENGTH_REG => {
-                s.map.ai.regs[LENGTH_REG as usize] = data.to_u32() & 0x0003_FFFF;
+                data.write_reg(&mut s.map.ai.regs, addr.relative() & REG_MASK);
+
+                s.map.ai.regs[LENGTH_REG as usize] &= 0x0003_FFFF;
 
                 // TODO depends on DMA_ENABLE???
                 Self::start_dma(s);
             }
             CONTROL_REG => {
-                s.map.ai.regs[CONTROL_REG as usize] = data.to_u32();
+                data.write_reg(&mut s.map.ai.regs, addr.relative() & REG_MASK);
             }
             STATUS_REG => {
                 // Writing any value acknowledges the interrupt
+
                 s.map.mi.clear_pending_interrupt(Interrupt::Ai);
             }
             DACRATE_REG => {
-                s.map.ai.regs[DACRATE_REG as usize] = data.to_u32() & 0x0000_3FFF;
+                data.write_reg(&mut s.map.ai.regs, addr.relative() & REG_MASK);
+
+                s.map.ai.regs[DACRATE_REG as usize] &= 0x0000_3FFF;
             }
             BITRATE_REG => {
-                s.map.ai.regs[BITRATE_REG as usize] = data.to_u32() & 0x0000_000F;
+                data.write_reg(&mut s.map.ai.regs, addr.relative() & REG_MASK);
+
+                s.map.ai.regs[BITRATE_REG as usize] &= 0x0000_000F;
             }
             _ => panic!(
                 "Invalid AI register write: {:08X} {:X}",

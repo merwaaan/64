@@ -1,7 +1,7 @@
 #![allow(clippy::upper_case_acronyms)]
 
 use super::{DelayedBranching, Disassembly, Instruction, Opcode, System};
-use crate::{instruction_struct, registers::Registers};
+use crate::{instruction_struct, instructions::UNKNOWN_, registers::Registers};
 
 /// COP1 rs field (bits 25–21).
 fn cop1_rs(opcode: Opcode) -> u32 {
@@ -13,11 +13,11 @@ pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
 
     let instruction: &'static dyn Instruction = match cop1_rs(opcode) {
         0x00 => &MFC1_,
-        //0x01 => &DMFC1_,
+        0x01 => &DMFC1_,
         0x02 => &CFC1_,
         //0x03 => &DCFC1_,
         0x04 => &MTC1_,
-        //0x05 => &DMTC1_,
+        0x05 => &DMTC1_,
         0x06 => &CTC1_,
         //0x07 => &DCTC1_,
         //0x08 => &BC1_,
@@ -25,7 +25,7 @@ pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
         //0x0A => &COP1_D_,
         // 0x0B => &COP1_W_,
         //0x0C => &COP1_L_,
-        _ => &COP1_RESERVED_,
+        _ => &UNKNOWN_,
     };
 
     Some(instruction)
@@ -71,6 +71,50 @@ impl Instruction for CTC1 {
             op.rtn(),
             Registers::fpr_name(op.rd())
         ))
+    }
+}
+
+instruction_struct!(DMFC1);
+
+impl Instruction for DMFC1 {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        // TODO unusable?
+
+        let freg = op.fs();
+
+        if s.cop0.f_64() {
+            s.cpu.regs.gpr[op.rt()].set64(s.cpu.regs.fpr[freg].get64());
+        } else {
+            s.cpu.regs.fpr[op.rt()].set64(s.cpu.regs.fpr[freg & !1].get64());
+        }
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("DMFC1 {}, {}", op.rtn(), op.fsn()))
+    }
+}
+
+instruction_struct!(DMTC1);
+
+impl Instruction for DMTC1 {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        // TODO unusable?
+
+        let freg = op.fs();
+
+        if s.cop0.f_64() {
+            s.cpu.regs.fpr[freg].set64(op.rtv64(s));
+        } else {
+            s.cpu.regs.fpr[freg & !1].set64(op.rtv64(s));
+        }
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("DMTC1 {}, {}", op.rtn(), op.rd0n()))
     }
 }
 
@@ -288,15 +332,15 @@ impl Instruction for MTC1 {
 //     }
 // }
 
-instruction_struct!(COP1_RESERVED);
+// instruction_struct!(COP1_RESERVED);
 
-impl Instruction for COP1_RESERVED {
-    fn execute(&self, _s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
-        log::debug!("COP1 reserved (stub)");
-        None
-    }
+// impl Instruction for COP1_RESERVED {
+//     fn execute(&self, _s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+//         log::debug!("COP1 reserved (stub)");
+//         None
+//     }
 
-    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
-        Disassembly::new(format!("<COP1 reserved rs={}>", cop1_rs(op)))
-    }
-}
+//     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+//         Disassembly::new(format!("<COP1 reserved rs={}>", cop1_rs(op)))
+//     }
+// }

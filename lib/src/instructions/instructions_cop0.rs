@@ -8,6 +8,7 @@ pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
         0x000_0000 => &MFC0_,
         0x020_0000 => &DMFC0_,
         0x080_0000 => &MTC0_,
+        0x0A0_0000 => &DMTC0_,
         // C0 sub-group
         0x200_0000 => match opcode.0 & 0x3F {
             0x01 => &TLBR_,
@@ -30,13 +31,27 @@ instruction_struct!(DMFC0);
 
 impl Instruction for DMFC0 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        s.cpu.regs.gpr[op.rt()].set64(op.rdv64(s));
+        s.cpu.regs.gpr[op.rt()].set64(s.cop0.regs[op.rd()].get64());
 
         None
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
         Disassembly::new(format!("DMFC0 {}, {}", op.rtn(), op.rd0n()))
+    }
+}
+
+instruction_struct!(DMTC0);
+
+impl Instruction for DMTC0 {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+        s.cop0.regs[op.rd()].set64(s.cpu.regs.gpr[op.rt()].get64());
+
+        None
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("DMTC0 {}, {}", op.rtn(), op.rd0n()))
     }
 }
 
@@ -77,6 +92,8 @@ impl Instruction for MTC0 {
         //     data = (data & 3) | (s.cop0.regs[13].get64() & 0xFFFF_FFFF_FFFF_FFFC);
         // }
 
+        //log::info!("MTC0 {}, {:08X}", op.rd0n(), data);
+
         s.cop0.regs[op.rd()].set64(data);
 
         None
@@ -91,7 +108,7 @@ instruction_struct!(MFC0);
 
 impl Instruction for MFC0 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        s.cpu.regs.gpr[op.rt()].set64(s.cop0.regs[op.rd()].get64());
+        s.cpu.regs.gpr[op.rt()].set(s.cop0.regs[op.rd()].get());
 
         None
     }

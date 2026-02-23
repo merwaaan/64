@@ -40,11 +40,11 @@ impl Widget for MiWidget {
                     ui.separator();
 
                     ui.horizontal(|ui| {
-                        for interrupt in Interrupt::iter() {
+                        for interrupt in Interrupt::iter().rev() {
                             ui.horizontal(|ui| {
                                 Text::new(format!("{}", interrupt))
                                     .color(if mi.has_pending_interrupt(interrupt) {
-                                        if mi.is_interrupt_masked(interrupt) {
+                                        if mi.is_interrupt_enabled(interrupt) {
                                             Color::Success
                                         } else {
                                             Color::Warning

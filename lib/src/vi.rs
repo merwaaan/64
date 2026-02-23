@@ -1,7 +1,7 @@
 use strum::{Display, EnumIter};
 
 use crate::{
-    data::Data,
+    data::Value,
     events::{Event, EventType},
     map::Location,
     mi::Interrupt,
@@ -52,34 +52,17 @@ const INTERRUPT_SCANLINE_LO: u32 = (INTERRUPT_SCANLINE_REG as u32) << 2;
 pub const INTERRUPT_SCANLINE_MASK: u32 = 0x03FF;
 
 const CURRENT_SCANLINE_REG: usize = 4;
-const CURRENT_SCANLINE_LO: u32 = (CURRENT_SCANLINE_REG as u32) << 2;
+//const CURRENT_SCANLINE_LO: u32 = (CURRENT_SCANLINE_REG as u32) << 2;
 
 const BURST_REG: usize = 5;
-const BURST_LO: u32 = (BURST_REG as u32) << 2;
-
 const V_SYNC_REG: usize = 6;
-const V_SYNC_LO: u32 = (V_SYNC_REG as u32) << 2;
-
 const H_SYNC_REG: usize = 7;
-const H_SYNC_LO: u32 = (H_SYNC_REG as u32) << 2;
-
 const H_SYNC_LEAP_REG: usize = 8;
-const H_SYNC_LEAP_LO: u32 = (H_SYNC_LEAP_REG as u32) << 2;
-
 const H_VIDEO_REG: usize = 9;
-const H_VIDEO_LO: u32 = (H_VIDEO_REG as u32) << 2;
-
 const V_VIDEO_REG: usize = 10;
-const V_VIDEO_LO: u32 = (V_VIDEO_REG as u32) << 2;
-
 const V_BURST_REG: usize = 11;
-const V_BURST_LO: u32 = (V_BURST_REG as u32) << 2;
-
 const X_SCALE_REG: usize = 12;
-const X_SCALE_LO: u32 = (X_SCALE_REG as u32) << 2;
-
 const Y_SCALE_REG: usize = 13;
-const Y_SCALE_LO: u32 = (Y_SCALE_REG as u32) << 2;
 
 // NTSC 59.94 Hz, 262.5 scanlines
 // PAL 50.00 Hz, 312.5 scanlines
@@ -101,43 +84,53 @@ impl Default for Vi {
 }
 
 impl Vi {
-    pub fn read<T: Data>(&self, addr: ViLocation) -> T {
+    pub fn read<T: Value>(&self, addr: ViLocation) -> T {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         match reg {
-            FRAMEBUFFER_ADDR_REG => T::from_u32(self.regs[FRAMEBUFFER_ADDR_REG]),
+            FRAMEBUFFER_ADDR_REG => {
+                // TODO mask addr value???
 
-            // TODO half scanlines???
-            CURRENT_SCANLINE_REG => T::from_u32(self.regs[CURRENT_SCANLINE_REG]),
+                T::read_reg(&self.regs, addr.relative() & MASK)
+            }
+            CURRENT_SCANLINE_REG => {
+                // TODO half scanlines???
 
+                T::read_reg(&self.regs, addr.relative() & MASK)
+            }
             _ => unimplemented!("Read VI register @ {:08X}", addr.relative()),
         }
     }
 
-    pub fn write<T: Data>(s: &mut System, addr: ViLocation, data: T) {
+    pub fn write<T: Value>(s: &mut System, addr: ViLocation, data: T) {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
 
-        let data = data.to_u32(); // TODO temp hack, should be able to write any size
-
+        log::warn!("Write VI register {:X} @ {:08X}", data, addr.relative());
         // TODO mask on w or r?
 
         match reg {
             STATUS_REG => {
                 // TODO
 
-                s.map.vi.regs[STATUS_REG] = data;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
             }
 
             FRAMEBUFFER_ADDR_REG => {
-                s.map.vi.regs[FRAMEBUFFER_ADDR_REG] = data & FRAMEBUFFER_ADDR_MASK;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+
+                s.map.vi.regs[FRAMEBUFFER_ADDR_REG] &= FRAMEBUFFER_ADDR_MASK;
             }
 
             WIDTH_REG => {
-                s.map.vi.regs[WIDTH_REG] = data & WIDTH_MASK;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+
+                s.map.vi.regs[WIDTH_REG] &= WIDTH_MASK;
             }
 
             INTERRUPT_SCANLINE_REG => {
-                s.map.vi.regs[INTERRUPT_SCANLINE_REG] = data & INTERRUPT_SCANLINE_MASK;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+
+                s.map.vi.regs[INTERRUPT_SCANLINE_REG] &= INTERRUPT_SCANLINE_MASK;
             }
 
             CURRENT_SCANLINE_REG => {
@@ -149,63 +142,58 @@ impl Vi {
             }
 
             BURST_REG => {
-                s.map.vi.regs[BURST_REG] = data;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
             }
 
             V_SYNC_REG => {
                 // TODO
 
-                s.map.vi.regs[V_SYNC_REG] = data;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
             }
 
             H_SYNC_REG => {
                 // TODO
 
-                s.map.vi.regs[H_SYNC_REG] = data;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
             }
 
             H_SYNC_LEAP_REG => {
                 // TODO
 
-                s.map.vi.regs[H_SYNC_LEAP_REG] = data;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
             }
 
             H_VIDEO_REG => {
                 // TODO
 
-                s.map.vi.regs[H_VIDEO_REG] = data;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
             }
 
             V_VIDEO_REG => {
                 // TODO
 
-                s.map.vi.regs[V_VIDEO_REG] = data;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
             }
 
             V_BURST_REG => {
                 // TODO
 
-                s.map.vi.regs[V_BURST_REG] = data;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
             }
 
             X_SCALE_REG => {
                 // TODO
 
-                s.map.vi.regs[X_SCALE_REG] = data;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
             }
 
             Y_SCALE_REG => {
                 // TODO
-                //log::warn!("Write VI_Y_SCALE {:X}", data.to_u32());
 
-                s.map.vi.regs[Y_SCALE_REG] = data;
+                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
             }
 
-            _ => unimplemented!(
-                "Write VI register {:X} @ {:08X}",
-                data.to_u32(),
-                addr.relative()
-            ),
+            _ => unimplemented!("Write VI register {:X} @ {:08X}", data, addr.relative()),
         }
     }
 

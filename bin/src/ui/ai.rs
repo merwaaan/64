@@ -15,7 +15,7 @@ pub struct AiWidget {
 impl Widget for AiWidget {
     fn update(&mut self, _ctx: &Context, event: &Event) {
         if let Event::AiUpdate(ai) = event {
-            self.last_update = Some(ai.clone());
+            self.last_update = Some(*ai);
         }
     }
 
@@ -25,7 +25,7 @@ impl Widget for AiWidget {
             .show(ctx, |ui| {
                 if let Some(ai) = &self.last_update {
                     let mut show_reg = |reg: Register| {
-                        reg32(ui, format!("{:>8}", reg), ai.regs[reg as usize]);
+                        reg32(ui, format!("{:>11}", reg), ai.regs[reg as usize]);
                     };
 
                     Register::iter().for_each(|reg| {

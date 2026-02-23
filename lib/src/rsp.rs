@@ -1,12 +1,14 @@
 use strum::{Display, EnumIter};
 
 use crate::{
-    data::Data,
+    data::Value,
     events::{Event, EventType},
     map::Location,
     mi::Interrupt,
     system::System,
 };
+
+// TODO separate i/dmem really needed?
 
 const DMEM_START: u32 = 0x0400_0000;
 const DMEM_END: u32 = 0x0401_0000;
@@ -40,13 +42,13 @@ pub enum Register {
 }
 
 // TODOrm
-const STATUS_HALTED_MASK: u32 = 1;
-const STATUS_BROKE: u32 = 1 << 1;
+//const STATUS_HALTED_MASK: u32 = 1;
+//const STATUS_BROKE: u32 = 1 << 1;
 const STATUS_DMA_BUSY: u32 = 1 << 2;
 const STATUS_DMA_FULL: u32 = 1 << 3;
-const STATUS_IO_BUSY: u32 = 1 << 4;
-const STATUS_SINGLE_STEP_MODE: u32 = 1 << 5;
-const STATUS_INTERRUPT_ON_BREAK: u32 = 1 << 6;
+//const STATUS_IO_BUSY: u32 = 1 << 4;
+//const STATUS_SINGLE_STEP_MODE: u32 = 1 << 5;
+//const STATUS_INTERRUPT_ON_BREAK: u32 = 1 << 6;
 // TODO others?
 
 #[derive(Clone)]
@@ -68,28 +70,26 @@ impl Default for Rsp {
 }
 
 impl Rsp {
-    pub fn read_dmem<T: Data>(&self, addr: RspDmemLocation) -> T {
-        T::read(&self.mem, addr.relative() & DMEM_MASK)
+    pub fn read_dmem<T: Value>(&self, addr: RspDmemLocation) -> T {
+        T::read_mem(&self.mem[..0x1000], addr.relative() & DMEM_MASK)
     }
 
-    pub fn write_dmem<T: Data>(s: &mut System, addr: RspDmemLocation, data: T) {
-        data.write(&mut s.map.rsp.mem, addr.relative() & DMEM_MASK);
+    pub fn write_dmem<T: Value>(s: &mut System, addr: RspDmemLocation, data: T) {
+        data.write_mem(&mut s.map.rsp.mem[..0x1000], addr.relative() & DMEM_MASK);
     }
-    pub fn read_imem<T: Data>(&self, addr: RspImemLocation) -> T {
-        T::read(&self.mem[0x1000..], addr.relative() & IMEM_MASK)
-    }
-
-    pub fn write_imem<T: Data>(s: &mut System, addr: RspImemLocation, data: T) {
-        data.write(&mut s.map.rsp.mem[0x1000..], addr.relative() & IMEM_MASK);
+    pub fn read_imem<T: Value>(&self, addr: RspImemLocation) -> T {
+        T::read_mem(&self.mem[0x1000..], addr.relative() & IMEM_MASK)
     }
 
-    pub fn read_reg<T: Data>(&self, addr: RspRegsLocation) -> T {
-        let reg = ((addr.relative() & REG_MASK) >> 2) as usize;
-
-        T::from_u32(self.regs[reg])
+    pub fn write_imem<T: Value>(s: &mut System, addr: RspImemLocation, data: T) {
+        data.write_mem(&mut s.map.rsp.mem[0x1000..], addr.relative() & IMEM_MASK);
     }
 
-    pub fn write_reg<T: Data>(s: &mut System, addr: RspRegsLocation, data: T) {
+    pub fn read_reg<T: Value>(&self, addr: RspRegsLocation) -> T {
+        T::read_reg(&self.regs, addr.relative() & REG_MASK)
+    }
+
+    pub fn write_reg<T: Value>(s: &mut System, addr: RspRegsLocation, data: T) {
         let reg = ((addr.relative() & REG_MASK) >> 2) as usize;
 
         match reg {
@@ -100,7 +100,9 @@ impl Rsp {
                 // Bits 0-2 cannot be written to so the address is always aligned to 8 bytes.
                 // Bit 12 is the "bank" (O = DMEM, 1 = IMEM).
 
-                s.map.rsp.regs[Register::DmaSpAddr as usize] = data.to_u32() & 0x0000_1FF8;
+                data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
+
+                s.map.rsp.regs[Register::DmaSpAddr as usize] &= 0x0000_1FF8;
             }
             1 => {
                 log::warn!("write SP_DMA_RAMADDR {:X}", data);
@@ -110,19 +112,21 @@ impl Rsp {
 
                 // TODO reads should return the previous value until DMA starts?
 
-                s.map.rsp.regs[Register::DmaRamAddr as usize] = data.to_u32() & 0x00FF_FFF8;
+                data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
+
+                s.map.rsp.regs[Register::DmaRamAddr as usize] &= 0x00FF_FFF8;
             }
             2 => {
                 log::warn!("write SP_DMA_RDLEN {:X}", data);
 
-                s.map.rsp.regs[Register::DmaRdLen as usize] = data.to_u32();
+                data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
 
                 Self::start_dma(s, DmaDirection::RamToSp);
             }
             3 => {
                 log::warn!("write SP_DMA_WRLEN {:X}", data);
 
-                s.map.rsp.regs[Register::DmaWrLen as usize] = data.to_u32();
+                data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
 
                 Self::start_dma(s, DmaDirection::SpToRam);
             }
@@ -200,8 +204,8 @@ impl Rsp {
                         s.map.rsp.mem[(sp_addr + byte) as usize] = data;
                     }
 
-                    // The transper wraps around the current bank
-                    sp_addr = (sp_addr + bytes_per_row) & 0x0FFF + sp_bank_offset;
+                    // The transfer wraps around the current bank
+                    sp_addr = ((sp_addr + bytes_per_row) & 0x0FFF) + sp_bank_offset;
 
                     ram_addr += bytes_per_row + skips;
                 }
@@ -223,14 +227,12 @@ impl Rsp {
                         s.write::<u8>(ram_addr + byte, data);
                     }
 
-                    sp_addr = (sp_addr + 1) & 0x0FFF + sp_bank_offset;
+                    sp_addr = ((sp_addr + bytes_per_row) & 0x0FFF) + sp_bank_offset;
 
                     ram_addr += bytes_per_row + skips;
                 }
             }
         }
-
-        2;
 
         // Update the status register
 

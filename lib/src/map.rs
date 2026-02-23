@@ -1,7 +1,7 @@
 use crate::{
     ai::{Ai, AiLocation},
     cart::{Cart, CartLocation},
-    data::Data,
+    data::Value,
     dd::Dd,
     dp::{Dp, DpLocation},
     mi::{Mi, MiLocation},
@@ -16,12 +16,12 @@ use crate::{
 };
 
 /// Location in the memory map.
-/// Bound by start and end addresses (exclusive).
+/// Bound by start (inclusive) and end (exclusive) addresses.
 ///
-/// Memory map section can define their own location:
+/// Memory map sections can define their own locations:
 ///
 /// ```
-/// pub type RspDmemLocation = Location<0x0000_0000, 0x0401_0000>;
+/// pub type RspDmemLocation = Location<0x0400_0000, 0x0401_0000>;
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct Location<const START: u32, const END: u32>(u32);
@@ -165,6 +165,8 @@ impl Map {
             CartLocation::START..CartLocation::END => {
                 Some(MapLocation::Cart(CartLocation::from_absolute(addr)))
             }
+            // TODO actually not openbus? ignore writes? what about reads?
+            0x1FC0_0000..PifRamLocation::START => Some(MapLocation::OpenBus(addr)),
             PifRamLocation::START..PifRamLocation::END => {
                 Some(MapLocation::Pif(PifRamLocation::from_absolute(addr)))
             }
@@ -173,32 +175,37 @@ impl Map {
         }
     }
 
-    pub fn read<T: Data>(s: &System, addr: u32) -> T {
+    pub fn read<T: Value>(s: &System, addr: u32) -> T {
+        // TODO optim, do not check on the fast path
+        Self::try_read(s, addr).unwrap_or_else(|| panic!("Invalid read address: {:08X}", addr))
+    }
+
+    pub fn try_read<T: Value>(s: &System, addr: u32) -> Option<T> {
         let location = Self::decode(addr);
 
         match location {
-            Some(MapLocation::Rdram(addr)) => s.map.rdram.read(addr),
-            Some(MapLocation::RdramRegs(addr)) => s.map.rdram.read_reg(addr),
-            Some(MapLocation::RspDmem(addr)) => s.map.rsp.read_dmem(addr),
-            Some(MapLocation::RspImem(addr)) => s.map.rsp.read_imem(addr),
-            Some(MapLocation::RspRegs(addr)) => s.map.rsp.read_reg(addr),
-            Some(MapLocation::Dp(addr)) => s.map.dp.read(addr),
-            Some(MapLocation::Mi(addr)) => s.map.mi.read(addr),
-            Some(MapLocation::Vi(addr)) => s.map.vi.read(addr),
-            Some(MapLocation::Ai(addr)) => s.map.ai.read(addr),
-            Some(MapLocation::Pi(addr)) => s.map.pi.read(addr),
-            Some(MapLocation::RdramInterface(addr)) => s.map.rdram.read_interface(addr),
-            Some(MapLocation::Si(addr)) => s.map.si.read(addr),
+            Some(MapLocation::Rdram(addr)) => Some(s.map.rdram.read(addr)),
+            Some(MapLocation::RdramRegs(addr)) => Some(s.map.rdram.read_reg(addr)),
+            Some(MapLocation::RspDmem(addr)) => Some(s.map.rsp.read_dmem(addr)),
+            Some(MapLocation::RspImem(addr)) => Some(s.map.rsp.read_imem(addr)),
+            Some(MapLocation::RspRegs(addr)) => Some(s.map.rsp.read_reg(addr)),
+            Some(MapLocation::Dp(addr)) => Some(s.map.dp.read(addr)),
+            Some(MapLocation::Mi(addr)) => Some(s.map.mi.read(addr)),
+            Some(MapLocation::Vi(addr)) => Some(s.map.vi.read(addr)),
+            Some(MapLocation::Ai(addr)) => Some(s.map.ai.read(addr)),
+            Some(MapLocation::Pi(addr)) => Some(s.map.pi.read(addr)),
+            Some(MapLocation::RdramInterface(addr)) => Some(s.map.rdram.read_interface(addr)),
+            Some(MapLocation::Si(addr)) => Some(s.map.si.read(addr)),
             //Some(MapLocation::Dd(addr)) => s.map.dd.read(addr),
-            Some(MapLocation::Cart(addr)) => s.map.cart.read(addr),
-            Some(MapLocation::Pif(addr)) => s.map.pif.read(addr),
-            Some(MapLocation::OpenBus(addr)) => openbus::read(addr),
-            None => panic!("Invalid read address: {:08X}", addr),
+            Some(MapLocation::Cart(addr)) => Some(s.map.cart.read(addr)),
+            Some(MapLocation::Pif(addr)) => Some(s.map.pif.read(addr)),
+            Some(MapLocation::OpenBus(addr)) => Some(openbus::read(addr)),
+            None => None,
         }
     }
 
     // TODO what if address crosses a boundary?
-    pub fn write<T: Data>(s: &mut System, addr: u32, data: T) {
+    pub fn write<T: Value>(s: &mut System, addr: u32, data: T) {
         let location = Self::decode(addr);
         //log::warn!("write {:08X} {:X}", addr, data.to_u32());
         match location {
@@ -228,7 +235,7 @@ pub fn virtual_to_physical_address(addr: u32) -> u32 {
     match addr {
         0x0000_0000..=0x7FFF_FFFF => addr,
 
-        // TOD just mask below?
+        // TODO just mask below?
         0x8000_0000..=0x9FFF_FFFF => addr - 0x8000_0000,
         0xA000_0000..=0xBFFF_FFFF => addr - 0xA000_0000,
         0xC000_0000..=0xDFFF_FFFF => addr - 0xC000_0000,

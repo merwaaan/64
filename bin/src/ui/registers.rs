@@ -54,15 +54,16 @@ impl Widget for RegistersWidget {
                             }
                         });
                     }
-
                     for row in 0..16 {
-                        for col in 0..2 {
-                            let reg_index = row + col * 16;
-                            let name = Cop0::reg_name(reg_index);
-                            let value = last_update.cop0_regs[reg_index].get64();
+                        ui.horizontal(|ui| {
+                            for col in 0..2 {
+                                let reg_index = row + col * 16;
+                                let name = format!("{:>8}", Cop0::reg_name(reg_index));
+                                let value = last_update.cop0_regs[reg_index].get64();
 
-                            reg64(ui, name, value);
-                        }
+                                reg64(ui, name, value);
+                            }
+                        });
                     }
                 }
             });
