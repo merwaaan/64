@@ -1,5 +1,5 @@
 use egui::{Context, Window};
-use n64::mi::Interrupt;
+use n64::interrupt::Interrupt;
 use n64::mi::Mi;
 use n64::mi::Register;
 use strum::IntoEnumIterator;

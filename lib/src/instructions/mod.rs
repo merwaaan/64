@@ -1,5 +1,6 @@
 #![allow(clippy::upper_case_acronyms)]
 
+use crate::exception::Exception;
 use crate::map::address_info;
 use crate::system::System;
 pub use opcode::Opcode;
@@ -9,11 +10,11 @@ mod instructions_cop1;
 mod instructions_cpu;
 mod opcode;
 
-/// Result of a branch/jump: target PC to use after the delay slot.
 #[derive(Clone, Copy, Debug)]
-pub struct DelayedBranching(pub u32);
-// TODO impl delay slot skip here?
-// TODO also eret to avoid offset hack?
+pub enum InstructionResult {
+    DelayedBranching(u32),
+    Exception(Exception),
+}
 
 #[derive(Clone)]
 pub struct Disassembly {
@@ -50,7 +51,7 @@ impl Disassembly {
 
 /// Instruction trait.
 pub trait Instruction {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching>;
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult>;
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly;
 }
 
@@ -78,7 +79,7 @@ macro_rules! instruction_struct {
 instruction_struct!(UNKNOWN);
 
 impl Instruction for UNKNOWN {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         unimplemented!("Unknown opcode {:10X} @ {:X}", op.0, s.cpu.regs.pc)
     }
 

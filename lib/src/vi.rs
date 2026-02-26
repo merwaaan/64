@@ -3,8 +3,8 @@ use strum::{Display, EnumIter};
 use crate::{
     data::Value,
     events::{Event, EventType},
+    interrupt::Interrupt,
     map::Location,
-    mi::Interrupt,
     system::System,
 };
 
@@ -136,7 +136,7 @@ impl Vi {
             CURRENT_SCANLINE_REG => {
                 // Writing anything to this register clears the Interrupt and resets the current scanline
 
-                s.map.mi.clear_pending_interrupt(Interrupt::Vi);
+                s.map.mi.clear_pending_interrupt(Interrupt::Vi, &mut s.cop0);
 
                 s.map.vi.regs[CURRENT_SCANLINE_REG] = 0; // TODO really?
             }
@@ -224,7 +224,7 @@ impl Vi {
         }
 
         if s.map.vi.regs[CURRENT_SCANLINE_REG] == s.map.vi.regs[INTERRUPT_SCANLINE_REG] {
-            s.map.mi.set_pending_interrupt(Interrupt::Vi);
+            s.map.mi.set_pending_interrupt(Interrupt::Vi, &mut s.cop0);
         }
 
         s.events.push(Event {

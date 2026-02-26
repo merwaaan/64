@@ -1,7 +1,8 @@
 //! CPU (and COP1) instruction implementations.
 
-use super::{DelayedBranching, Disassembly, Instruction, Opcode, System};
+use super::{Disassembly, Instruction, InstructionResult, Opcode, System};
 
+use crate::exception::Exception;
 use crate::instruction_struct;
 use crate::instructions::UNKNOWN_;
 
@@ -145,7 +146,7 @@ pub fn decode_standard(opcode: Opcode) -> Option<&'static dyn Instruction> {
 instruction_struct!(ADD);
 
 impl Instruction for ADD {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set(op.rsv(s).wrapping_add(op.rtv(s)));
 
         None
@@ -159,7 +160,7 @@ impl Instruction for ADD {
 instruction_struct!(ADDI);
 
 impl Instruction for ADDI {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rt()].set(op.rsv(s).wrapping_add(op.imm16() as i16 as u32));
 
         None
@@ -178,7 +179,7 @@ impl Instruction for ADDI {
 instruction_struct!(ADDIU);
 
 impl Instruction for ADDIU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let imm = (op.imm16() as i16 as i32) as u32;
         s.cpu.regs.gpr[op.rt()].set(op.rsv(s).wrapping_add(imm));
 
@@ -198,7 +199,7 @@ impl Instruction for ADDIU {
 instruction_struct!(ADDU);
 
 impl Instruction for ADDU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set(op.rsv(s).wrapping_add(op.rtv(s)));
 
         None
@@ -212,7 +213,7 @@ impl Instruction for ADDU {
 instruction_struct!(AND);
 
 impl Instruction for AND {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set64(op.rsv64(s) & op.rtv64(s));
 
         None
@@ -226,7 +227,7 @@ impl Instruction for AND {
 instruction_struct!(ANDI);
 
 impl Instruction for ANDI {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rt()].set64(op.rsv64(s) & (op.imm16() as u64));
 
         None
@@ -247,9 +248,9 @@ impl Instruction for ANDI {
 instruction_struct!(BEQ);
 
 impl Instruction for BEQ {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if op.rsv(s) == op.rtv(s) {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
         }
@@ -268,11 +269,13 @@ impl Instruction for BEQ {
 instruction_struct!(BEQL);
 
 impl Instruction for BEQL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if op.rsv(s) == op.rtv(s) {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
+            // Discard the instruction in the delay slot
             s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
+
             None
         }
     }
@@ -290,9 +293,9 @@ impl Instruction for BEQL {
 instruction_struct!(BGEZ);
 
 impl Instruction for BGEZ {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if (op.rsv(s) as i32) >= 0 {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
         }
@@ -306,11 +309,13 @@ impl Instruction for BGEZ {
 instruction_struct!(BGEZL);
 
 impl Instruction for BGEZL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if (op.rsv(s) as i32) >= 0 {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
+            // Discard the instruction in the delay slot
             s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
+
             None
         }
     }
@@ -323,14 +328,15 @@ impl Instruction for BGEZL {
 instruction_struct!(BGEZAL);
 
 impl Instruction for BGEZAL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         // Read before linking (matters when rs == 31)
         let rs = op.rsv(s);
 
+        // The return address in the instruction that follows the delay slot
         s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
         if (rs as i32) >= 0 {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
         }
@@ -345,9 +351,9 @@ impl Instruction for BGEZAL {
 instruction_struct!(BGTZ);
 
 impl Instruction for BGTZ {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if (op.rsv(s) as i32) > 0 {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
         }
@@ -361,9 +367,9 @@ impl Instruction for BGTZ {
 instruction_struct!(BLEZ);
 
 impl Instruction for BLEZ {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if (op.rsv(s) as i32) <= 0 {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
         }
@@ -377,11 +383,13 @@ impl Instruction for BLEZ {
 instruction_struct!(BLEZL);
 
 impl Instruction for BLEZL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if (op.rsv(s) as i32) <= 0 {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
+            // Discard the instruction in the delay slot
             s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
+
             None
         }
     }
@@ -394,9 +402,9 @@ impl Instruction for BLEZL {
 instruction_struct!(BLTZ);
 
 impl Instruction for BLTZ {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if (op.rsv(s) as i32) < 0 {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
         }
@@ -410,14 +418,15 @@ impl Instruction for BLTZ {
 instruction_struct!(BLTZAL);
 
 impl Instruction for BLTZAL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         // Read before linking (matters when rs == 31)
         let rs = op.rsv(s);
 
+        // The return address in the instruction that follows the delay slot
         s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
         if (rs as i32) < 0 {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
         }
@@ -431,11 +440,13 @@ impl Instruction for BLTZAL {
 instruction_struct!(BLTZL);
 
 impl Instruction for BLTZL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if (op.rsv(s) as i32) < 0 {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
+            // Discard the instruction in the delay slot
             s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
+
             None
         }
     }
@@ -448,9 +459,9 @@ impl Instruction for BLTZL {
 instruction_struct!(BNE);
 
 impl Instruction for BNE {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if op.rsv(s) != op.rtv(s) {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
         }
@@ -469,11 +480,13 @@ impl Instruction for BNE {
 instruction_struct!(BNEL);
 
 impl Instruction for BNEL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if op.rsv(s) != op.rtv(s) {
-            Some(DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
+            // Discard the instruction in the delay slot
             s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
+
             None
         }
     }
@@ -490,7 +503,7 @@ impl Instruction for BNEL {
 instruction_struct!(BREAK);
 
 impl Instruction for BREAK {
-    fn execute(&self, s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, _op: Opcode) -> Option<InstructionResult> {
         panic!("BREAK at {:08X}", s.cpu.regs.pc);
     }
 
@@ -502,7 +515,7 @@ impl Instruction for BREAK {
 instruction_struct!(CACHE);
 
 impl Instruction for CACHE {
-    fn execute(&self, _s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, _s: &mut System, _op: Opcode) -> Option<InstructionResult> {
         //TODO log::debug!("CACHE {:08X}", op.0);
         None
     }
@@ -520,7 +533,7 @@ impl Instruction for CACHE {
 instruction_struct!(DADD);
 
 impl Instruction for DADD {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let res = op.rsv64(s).wrapping_add(op.rtv64(s));
 
         s.cpu.regs.gpr[op.rd()].set64(res);
@@ -538,7 +551,7 @@ impl Instruction for DADD {
 instruction_struct!(DADDI);
 
 impl Instruction for DADDI {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let res = op.rsv64(s).wrapping_add(op.imm16() as i16 as i64 as u64);
 
         s.cpu.regs.gpr[op.rt()].set64(res);
@@ -556,7 +569,7 @@ impl Instruction for DADDI {
 instruction_struct!(DADDIU);
 
 impl Instruction for DADDIU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let res = op.rsv64(s).wrapping_add(op.imm16() as i16 as i64 as u64);
 
         s.cpu.regs.gpr[op.rt()].set64(res);
@@ -572,7 +585,7 @@ impl Instruction for DADDIU {
 instruction_struct!(DADDU);
 
 impl Instruction for DADDU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set64(op.rsv64(s).wrapping_add(op.rtv64(s)));
 
         None
@@ -588,7 +601,7 @@ impl Instruction for DADDU {
 instruction_struct!(DIV);
 
 impl Instruction for DIV {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let rsvs = s.cpu.regs.gpr[op.rs()].get() as i32;
         let rtvs = s.cpu.regs.gpr[op.rt()].get() as i32;
 
@@ -618,7 +631,7 @@ impl Instruction for DIV {
 instruction_struct!(DIVU);
 
 impl Instruction for DIVU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let rsv = s.cpu.regs.gpr[op.rs()].get();
         let rtv = s.cpu.regs.gpr[op.rt()].get();
 
@@ -641,7 +654,7 @@ impl Instruction for DIVU {
 instruction_struct!(DDIV);
 
 impl Instruction for DDIV {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let rsv = s.cpu.regs.gpr[op.rs()].get64() as i64;
         let rtv = s.cpu.regs.gpr[op.rt()].get64() as i64;
 
@@ -673,7 +686,7 @@ impl Instruction for DDIV {
 instruction_struct!(DDIVU);
 
 impl Instruction for DDIVU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let rsv = s.cpu.regs.gpr[op.rs()].get64();
         let rtv = s.cpu.regs.gpr[op.rt()].get64();
 
@@ -710,7 +723,7 @@ impl Instruction for DDIVU {
 instruction_struct!(DMULT);
 
 impl Instruction for DMULT {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let result = (op.rsv64(s) as i64 as i128) * (op.rtv64(s) as i64 as i128);
 
         s.cpu.regs.mult_hi.set64((result >> 64) as u64);
@@ -727,7 +740,7 @@ impl Instruction for DMULT {
 instruction_struct!(DMULTU);
 
 impl Instruction for DMULTU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let result = (op.rsv64(s) as u128) * (op.rtv64(s) as u128);
 
         s.cpu.regs.mult_hi.set64((result >> 64) as u64);
@@ -744,7 +757,7 @@ impl Instruction for DMULTU {
 instruction_struct!(DSLL);
 
 impl Instruction for DSLL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let data = op.rtv64(s) << op.shift();
 
         s.cpu.regs.gpr[op.rd()].set64(data);
@@ -760,7 +773,7 @@ impl Instruction for DSLL {
 instruction_struct!(DSLL32);
 
 impl Instruction for DSLL32 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let data = op.rtv64(s) << (op.shift() + 32);
 
         s.cpu.regs.gpr[op.rd()].set64(data);
@@ -776,7 +789,7 @@ impl Instruction for DSLL32 {
 instruction_struct!(DSLLV);
 
 impl Instruction for DSLLV {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let data = op.rtv64(s) << (op.rsv(s) & 0x3F);
 
         s.cpu.regs.gpr[op.rd()].set64(data);
@@ -792,7 +805,7 @@ impl Instruction for DSLLV {
 instruction_struct!(DSRA);
 
 impl Instruction for DSRA {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let data = (op.rtv64(s) as i64 >> op.shift()) as u64;
 
         s.cpu.regs.gpr[op.rd()].set64(data);
@@ -808,7 +821,7 @@ impl Instruction for DSRA {
 instruction_struct!(DSRA32);
 
 impl Instruction for DSRA32 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let data = (op.rtv64(s) as i64 >> (op.shift() + 32)) as u64;
 
         s.cpu.regs.gpr[op.rd()].set64(data);
@@ -824,7 +837,7 @@ impl Instruction for DSRA32 {
 instruction_struct!(DSRAV);
 
 impl Instruction for DSRAV {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let data = ((op.rtv64(s) as i64) >> (op.rsv(s) & 0x3F)) as u64;
 
         s.cpu.regs.gpr[op.rd()].set64(data);
@@ -840,7 +853,7 @@ impl Instruction for DSRAV {
 instruction_struct!(DSRL);
 
 impl Instruction for DSRL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let data = op.rtv64(s) >> op.shift();
 
         s.cpu.regs.gpr[op.rd()].set64(data);
@@ -856,7 +869,7 @@ impl Instruction for DSRL {
 instruction_struct!(DSRL32);
 
 impl Instruction for DSRL32 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let data = op.rtv64(s) >> (op.shift() + 32);
 
         s.cpu.regs.gpr[op.rd()].set64(data);
@@ -872,7 +885,7 @@ impl Instruction for DSRL32 {
 instruction_struct!(DSRLV);
 
 impl Instruction for DSRLV {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let data = op.rtv64(s) >> (op.rsv(s) & 0x3F);
 
         s.cpu.regs.gpr[op.rd()].set64(data);
@@ -888,7 +901,7 @@ impl Instruction for DSRLV {
 instruction_struct!(DSUB);
 
 impl Instruction for DSUB {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set64(op.rsv64(s).wrapping_sub(op.rtv64(s)));
 
         // TODO exception
@@ -904,7 +917,7 @@ impl Instruction for DSUB {
 instruction_struct!(DSUBU);
 
 impl Instruction for DSUBU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set64(op.rsv64(s).wrapping_sub(op.rtv64(s)));
 
         None
@@ -926,8 +939,11 @@ impl J {
 }
 
 impl Instruction for J {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        Some(DelayedBranching(J::target(s.cpu.regs.pc, op)))
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        Some(InstructionResult::DelayedBranching(J::target(
+            s.cpu.regs.pc,
+            op,
+        )))
     }
 
     // TODO cpu doesn't necessarily have the correct PC! just pass the PC?
@@ -939,10 +955,14 @@ impl Instruction for J {
 instruction_struct!(JAL);
 
 impl Instruction for JAL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        // The return address in the instruction that follows the delay slot
         s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
-        Some(DelayedBranching(J::target(s.cpu.regs.pc, op)))
+        Some(InstructionResult::DelayedBranching(J::target(
+            s.cpu.regs.pc,
+            op,
+        )))
     }
 
     // TODO cpu doesn't necessarily have the correct PC! just pass the PC?
@@ -954,13 +974,21 @@ impl Instruction for JAL {
 instruction_struct!(JALR);
 
 impl Instruction for JALR {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         // Read before linking (matters when rd == rs)
         let target = op.rsv(s);
 
+        if target & 3 != 0 {
+            log::error!("JALR {:X} is not aligned", target);
+            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
+                target,
+            )));
+        }
+
+        // The return address in the instruction that follows the delay slot
         s.cpu.regs.gpr[op.rd()].set(s.cpu.regs.pc.wrapping_add(8));
 
-        Some(DelayedBranching(target))
+        Some(InstructionResult::DelayedBranching(target))
     }
 
     // TODO cpu doesn't necessarily have the correct PC! just pass the PC?
@@ -977,15 +1005,17 @@ impl Instruction for JALR {
 instruction_struct!(JR);
 
 impl Instruction for JR {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let target = op.rsv(s);
 
         if target & 3 != 0 {
-            log::error!("JR unaligned address: {:08X}", target);
-            return None;
+            log::error!("JR {:X} is not aligned @ {:08X}", target, s.cpu.regs.pc);
+            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
+                target,
+            )));
         }
 
-        Some(DelayedBranching(op.rsv(s)))
+        Some(InstructionResult::DelayedBranching(target))
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
@@ -996,7 +1026,7 @@ impl Instruction for JR {
 instruction_struct!(LB);
 
 impl Instruction for LB {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
         let data = s.read::<u8>(addr) as i8 as i32 as u32;
@@ -1020,7 +1050,7 @@ impl Instruction for LB {
 instruction_struct!(LBU);
 
 impl Instruction for LBU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
         let data = s.read::<u8>(addr) as u32;
@@ -1044,13 +1074,14 @@ impl Instruction for LBU {
 instruction_struct!(LD);
 
 impl Instruction for LD {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
-        // TODO raise exception instead
         if addr & 3 != 0 {
-            log::error!("LW unaligned address: {:08X}", addr);
-            return None;
+            log::error!("LD {:X} is not aligned", addr);
+            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
+                addr,
+            )));
         }
 
         s.cpu.regs.gpr[op.rt()].set64(s.read::<u64>(addr));
@@ -1072,7 +1103,7 @@ impl Instruction for LD {
 instruction_struct!(LDC1);
 
 impl Instruction for LDC1 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let data = s.read::<u64>(op.offset_addr(s));
 
         if s.cop0.f_64() {
@@ -1096,7 +1127,7 @@ impl Instruction for LDC1 {
 instruction_struct!(LDL);
 
 impl Instruction for LDL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
         let base = addr & !7;
         let offset = addr & 7;
@@ -1127,7 +1158,7 @@ impl Instruction for LDL {
 instruction_struct!(LDR);
 
 impl Instruction for LDR {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
         let base = addr & !7;
         let offset = addr & 7;
@@ -1158,13 +1189,14 @@ impl Instruction for LDR {
 instruction_struct!(LH);
 
 impl Instruction for LH {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
-        // TODO raise exception instead
-        if addr & 1 == 1 {
-            log::error!("LH unaligned address: {:08X}", addr);
-            return None;
+        if addr & 1 != 0 {
+            log::error!("LH {:X} is not aligned", addr);
+            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
+                addr,
+            )));
         }
 
         let data = s.read::<u16>(addr) as i16 as i32 as u32;
@@ -1189,13 +1221,15 @@ instruction_struct!(LHU);
 
 // TODOM LHU @ 802efaa4 not working!
 impl Instruction for LHU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
         // TODO raise exception instead
         if addr & 1 != 0 {
-            log::error!("LHU unaligned address: {:08X}", addr);
-            return None;
+            log::error!("LHU {:X} is not aligned", addr);
+            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
+                addr,
+            )));
         }
 
         let data = s.read::<u16>(addr) as u32;
@@ -1218,7 +1252,7 @@ impl Instruction for LHU {
 instruction_struct!(LL);
 
 impl Instruction for LL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
         s.cpu.regs.load_linked_bit = true;
@@ -1243,7 +1277,7 @@ impl Instruction for LL {
 instruction_struct!(LUI);
 
 impl Instruction for LUI {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rt()].set((op.imm16() as u32) << 16);
 
         None
@@ -1257,12 +1291,14 @@ impl Instruction for LUI {
 instruction_struct!(LW);
 
 impl Instruction for LW {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
         if addr & 3 != 0 {
-            log::error!("LW unaligned address: {:08X}", addr);
-            return None;
+            log::error!("LW {:X} is not aligned @ {:08X}", addr, s.cpu.regs.pc);
+            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
+                addr,
+            )));
         }
 
         s.cpu.regs.gpr[op.rt()].set(s.read(addr));
@@ -1284,7 +1320,7 @@ impl Instruction for LW {
 instruction_struct!(LWC1);
 
 impl Instruction for LWC1 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
         let data = s.read::<u32>(addr);
 
@@ -1308,7 +1344,7 @@ impl Instruction for LWC1 {
 instruction_struct!(LWL);
 
 impl Instruction for LWL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
         let addr_base = addr & !3;
         let addr_offset = addr & 3;
@@ -1345,7 +1381,7 @@ impl Instruction for LWL {
 instruction_struct!(LWR);
 
 impl Instruction for LWR {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
         let addr_base = addr & !3;
@@ -1381,13 +1417,15 @@ impl Instruction for LWR {
 instruction_struct!(LWU);
 
 impl Instruction for LWU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
         // TODO raise exception instead
         if addr & 3 != 0 {
-            log::error!("LWU unaligned address: {:08X}", addr);
-            return None;
+            log::error!("LWU {:X} is not aligned", addr);
+            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
+                addr,
+            )));
         }
 
         s.cpu.regs.gpr[op.rt()].set64(s.read::<u32>(addr) as u64);
@@ -1411,7 +1449,7 @@ impl Instruction for LWU {
 instruction_struct!(MFHI);
 
 impl Instruction for MFHI {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set(s.cpu.regs.mult_hi.get());
 
         None
@@ -1425,7 +1463,7 @@ impl Instruction for MFHI {
 instruction_struct!(MFLO);
 
 impl Instruction for MFLO {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set(s.cpu.regs.mult_lo.get());
 
         None
@@ -1439,7 +1477,7 @@ impl Instruction for MFLO {
 instruction_struct!(MTHI);
 
 impl Instruction for MTHI {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.mult_hi.set64(s.cpu.regs.gpr[op.rs()].get64());
 
         None
@@ -1453,7 +1491,7 @@ impl Instruction for MTHI {
 instruction_struct!(MTLO);
 
 impl Instruction for MTLO {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.mult_lo.set64(s.cpu.regs.gpr[op.rs()].get64());
 
         None
@@ -1467,7 +1505,7 @@ impl Instruction for MTLO {
 instruction_struct!(MULT);
 
 impl Instruction for MULT {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let result = (op.rsv(s) as i32 as i64).wrapping_mul(op.rtv(s) as i32 as i64);
 
         s.cpu.regs.mult_hi.set((result >> 32) as u32); // TODO 64 -> sign extend res???
@@ -1484,7 +1522,7 @@ impl Instruction for MULT {
 instruction_struct!(MULTU);
 
 impl Instruction for MULTU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let result = (op.rsv(s) as u64) * (op.rtv(s) as u64);
 
         s.cpu.regs.mult_hi.set((result >> 32) as u32);
@@ -1501,7 +1539,7 @@ impl Instruction for MULTU {
 instruction_struct!(NOR);
 
 impl Instruction for NOR {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set64(!(op.rsv64(s) | op.rtv64(s)));
         None
     }
@@ -1514,7 +1552,7 @@ impl Instruction for NOR {
 instruction_struct!(OR);
 
 impl Instruction for OR {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set64(op.rsv64(s) | op.rtv64(s));
 
         None
@@ -1528,7 +1566,7 @@ impl Instruction for OR {
 instruction_struct!(ORI);
 
 impl Instruction for ORI {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rt()].set64(op.rsv64(s) | op.imm16() as u64);
 
         None
@@ -1547,7 +1585,7 @@ impl Instruction for ORI {
 instruction_struct!(SB);
 
 impl Instruction for SB {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
         let data = op.rtv(s) as u8;
 
@@ -1570,7 +1608,7 @@ impl Instruction for SB {
 instruction_struct!(SC);
 
 impl Instruction for SC {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rt()].set(s.cpu.regs.load_linked_bit as u32);
 
         if s.cpu.regs.load_linked_bit {
@@ -1599,18 +1637,16 @@ impl Instruction for SC {
 instruction_struct!(SD);
 
 impl Instruction for SD {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
-        // TODO raise exception instead
         if addr & 3 != 0 {
-            log::error!("LW unaligned address: {:08X}", addr);
-            return None;
+            return Some(InstructionResult::Exception(Exception::AddressErrorStore(
+                addr,
+            )));
         }
 
         s.write(addr, s.cpu.regs.gpr[op.rt()].get64());
-
-        // TODO addr exception?
 
         None
     }
@@ -1629,7 +1665,7 @@ impl Instruction for SD {
 instruction_struct!(SDC1);
 
 impl Instruction for SDC1 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
         if s.cop0.f_64() {
@@ -1638,8 +1674,6 @@ impl Instruction for SDC1 {
             s.write(addr + 4, s.cpu.regs.fpr[op.rt() + 1].get());
             s.write(addr, s.cpu.regs.fpr[op.rt()].get());
         }
-
-        // TODO addr exception?
 
         None
     }
@@ -1658,7 +1692,7 @@ impl Instruction for SDC1 {
 instruction_struct!(SDL);
 
 impl Instruction for SDL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
         let base = addr & !7;
@@ -1691,7 +1725,7 @@ impl Instruction for SDL {
 instruction_struct!(SDR);
 
 impl Instruction for SDR {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
         let base = addr & !7;
@@ -1724,12 +1758,13 @@ impl Instruction for SDR {
 instruction_struct!(SH);
 
 impl Instruction for SH {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
-        let addr = op.offset_addr(s); // TODO raise exception instead
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        let addr = op.offset_addr(s);
 
-        if addr & 1 == 1 {
-            log::error!("SH unaligned address: {:08X}", addr);
-            return None;
+        if addr & 1 != 0 {
+            return Some(InstructionResult::Exception(Exception::AddressErrorStore(
+                addr,
+            )));
         }
 
         let data = op.rtv(s) as u16;
@@ -1753,7 +1788,7 @@ impl Instruction for SH {
 instruction_struct!(SLL);
 
 impl Instruction for SLL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set(op.rtv(s) << op.shift());
 
         None
@@ -1773,7 +1808,7 @@ impl Instruction for SLL {
 instruction_struct!(SLLV);
 
 impl Instruction for SLLV {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set(op.rtv(s) << (op.rsv(s) & 0x1F));
 
         None
@@ -1787,7 +1822,7 @@ impl Instruction for SLLV {
 instruction_struct!(SLT);
 
 impl Instruction for SLT {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let rs = op.rsv64(s) as i64;
         let rt = op.rtv64(s) as i64;
 
@@ -1806,7 +1841,7 @@ impl Instruction for SLT {
 instruction_struct!(SLTI);
 
 impl Instruction for SLTI {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let rs = op.rsv64(s) as i64;
         let imm = op.imm16() as i16 as i64;
 
@@ -1830,7 +1865,7 @@ impl Instruction for SLTI {
 instruction_struct!(SLTIU);
 
 impl Instruction for SLTIU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let rs = op.rsv64(s);
         let imm = op.imm16() as i16 as i64 as u64;
 
@@ -1854,7 +1889,7 @@ impl Instruction for SLTIU {
 instruction_struct!(SLTU);
 
 impl Instruction for SLTU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let rs = op.rsv64(s);
         let rt = op.rtv64(s);
 
@@ -1873,7 +1908,7 @@ impl Instruction for SLTU {
 instruction_struct!(SRA);
 
 impl Instruction for SRA {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         // Hardware bug:
         // The high 32 bits of the full 64-bit register actually bleed into the low-bits when shifting.
         // The result is then truncated to 32-bits and sign-extended.
@@ -1893,7 +1928,7 @@ impl Instruction for SRA {
 instruction_struct!(SRAV);
 
 impl Instruction for SRAV {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         // hardware bug: same as SRA
 
         let res = op.rtv64(s) >> (op.rsv(s) & 0x1F) as i32 as i64 as u64;
@@ -1911,7 +1946,7 @@ impl Instruction for SRAV {
 instruction_struct!(SRL);
 
 impl Instruction for SRL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set(op.rtv(s) >> op.shift());
 
         None
@@ -1925,7 +1960,7 @@ impl Instruction for SRL {
 instruction_struct!(SRLV);
 
 impl Instruction for SRLV {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set(op.rtv(s) >> (op.rsv(s) & 0x1F));
 
         None
@@ -1939,7 +1974,7 @@ impl Instruction for SRLV {
 instruction_struct!(SUB);
 
 impl Instruction for SUB {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set(op.rsv(s).wrapping_sub(op.rtv(s)));
 
         None
@@ -1953,7 +1988,7 @@ impl Instruction for SUB {
 instruction_struct!(SUBU);
 
 impl Instruction for SUBU {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set(op.rsv(s).wrapping_sub(op.rtv(s)));
         None
     }
@@ -1966,13 +2001,13 @@ impl Instruction for SUBU {
 instruction_struct!(SW);
 
 impl Instruction for SW {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
-        // TODO raise exception instead
         if addr & 3 != 0 {
-            log::error!("LW unaligned address: {:08X}", addr);
-            return None;
+            return Some(InstructionResult::Exception(Exception::AddressErrorStore(
+                addr,
+            )));
         }
 
         s.write(addr, op.rtv(s));
@@ -1994,7 +2029,7 @@ impl Instruction for SW {
 instruction_struct!(SWC1);
 
 impl Instruction for SWC1 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
         if s.cop0.f_64() {
@@ -2022,7 +2057,7 @@ impl Instruction for SWC1 {
 instruction_struct!(SYNC);
 
 impl Instruction for SYNC {
-    fn execute(&self, _s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, _s: &mut System, _op: Opcode) -> Option<InstructionResult> {
         None
     }
 
@@ -2034,7 +2069,7 @@ impl Instruction for SYNC {
 instruction_struct!(SWL);
 
 impl Instruction for SWL {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
         let addr_base = addr & !3;
         let addr_offset = addr & 3;
@@ -2067,7 +2102,7 @@ impl Instruction for SWL {
 instruction_struct!(SWR);
 
 impl Instruction for SWR {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
         let base = addr & !3;
@@ -2101,7 +2136,7 @@ impl Instruction for SWR {
 instruction_struct!(TEQ);
 
 impl Instruction for TEQ {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if op.rsv64(s) == op.rtv64(s) {
             log::error!("NOT IMPLEMENTED: TEQ {} == {}", op.rsn(), op.rtn());
         }
@@ -2117,7 +2152,7 @@ impl Instruction for TEQ {
 instruction_struct!(XOR);
 
 impl Instruction for XOR {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rd()].set64(op.rsv64(s) ^ op.rtv64(s));
 
         None
@@ -2131,7 +2166,7 @@ impl Instruction for XOR {
 instruction_struct!(XORI);
 
 impl Instruction for XORI {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rt()].set64(op.rsv64(s) ^ op.imm16() as u64);
 
         None

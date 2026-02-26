@@ -3,8 +3,8 @@ use strum::{Display, EnumIter};
 use crate::{
     data::Value,
     events::{Event, EventType},
+    interrupt::Interrupt,
     map::Location,
-    mi::Interrupt,
     system::System,
 };
 
@@ -78,7 +78,7 @@ impl Ai {
             STATUS_REG => {
                 // Writing any value acknowledges the interrupt
 
-                s.map.mi.clear_pending_interrupt(Interrupt::Ai);
+                s.map.mi.clear_pending_interrupt(Interrupt::Ai, &mut s.cop0);
             }
             DACRATE_REG => {
                 data.write_reg(&mut s.map.ai.regs, addr.relative() & REG_MASK);
@@ -115,7 +115,7 @@ impl Ai {
 
         // Raise the interrupt when starting the transfer
 
-        s.map.mi.set_pending_interrupt(Interrupt::Ai);
+        s.map.mi.set_pending_interrupt(Interrupt::Ai, &mut s.cop0);
 
         s.events.push(Event {
             id: EventType::AiDmaTransferComplete,

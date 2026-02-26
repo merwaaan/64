@@ -1,4 +1,4 @@
-use super::{DelayedBranching, Disassembly, Instruction, Opcode, System};
+use super::{Disassembly, Instruction, InstructionResult, Opcode, System};
 use crate::{instruction_struct, instructions::UNKNOWN_};
 
 pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
@@ -30,7 +30,7 @@ pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
 instruction_struct!(DMFC0);
 
 impl Instruction for DMFC0 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rt()].set64(s.cop0.regs[op.rd()].get64());
 
         None
@@ -44,7 +44,7 @@ impl Instruction for DMFC0 {
 instruction_struct!(DMTC0);
 
 impl Instruction for DMTC0 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cop0.regs[op.rd()].set64(s.cpu.regs.gpr[op.rt()].get64());
 
         None
@@ -58,17 +58,13 @@ impl Instruction for DMTC0 {
 instruction_struct!(ERET);
 
 impl Instruction for ERET {
-    fn execute(&self, s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, _op: Opcode) -> Option<InstructionResult> {
         if s.cop0.erl() {
             unimplemented!("ERET in ERL mode");
             // s.cpu.regs.pc = s.cop0.error_epc() - 4; // TODO offset???
             // s.cop0.clear_erl();
         } else {
-            // if s.cop0.epc() != 0x80242da8 {
-            //     panic!("ERET in EXL mode @ {:08X}", s.cop0.epc());
-            // }
-            //panic!("ERET {:08X} @ {:08X}", s.cop0.epc(), s.cpu.regs.pc);
-            s.cpu.regs.pc = s.cop0.epc().wrapping_sub(4); // TODO offset???
+            s.cpu.regs.pc = s.cop0.epc().wrapping_sub(4); // TODO return specific value to signal that instead of adjusting PC?
             s.cop0.clear_exl();
         }
 
@@ -83,7 +79,7 @@ impl Instruction for ERET {
 instruction_struct!(MTC0);
 
 impl Instruction for MTC0 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let data = s.cpu.regs.gpr[op.rt()].get64();
 
         // TODO cause: only two last bits can be written! move to reg implem ???
@@ -107,7 +103,7 @@ impl Instruction for MTC0 {
 instruction_struct!(MFC0);
 
 impl Instruction for MFC0 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         s.cpu.regs.gpr[op.rt()].set(s.cop0.regs[op.rd()].get());
 
         None
@@ -121,7 +117,7 @@ impl Instruction for MFC0 {
 instruction_struct!(TLBP);
 
 impl Instruction for TLBP {
-    fn execute(&self, s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, _op: Opcode) -> Option<InstructionResult> {
         log::warn!("TLBP @ {:08X}", s.cpu.regs.pc);
 
         None
@@ -135,7 +131,7 @@ impl Instruction for TLBP {
 instruction_struct!(TLBR);
 
 impl Instruction for TLBR {
-    fn execute(&self, s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, _op: Opcode) -> Option<InstructionResult> {
         log::warn!(
             "TLBR @ {:08X} (index={})",
             s.cpu.regs.pc,
@@ -153,7 +149,7 @@ impl Instruction for TLBR {
 instruction_struct!(TLBWI);
 
 impl Instruction for TLBWI {
-    fn execute(&self, s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, _op: Opcode) -> Option<InstructionResult> {
         log::warn!(
             "TLBWI @ {:08X} (index={})",
             s.cpu.regs.pc,

@@ -3,6 +3,7 @@ use crate::cart::CartLocation;
 use crate::cop0::Cop0;
 use crate::data::Value;
 use crate::events::{Cycle, Event, EventType, Events};
+use crate::interrupt::Interrupt;
 use crate::map::Location;
 use crate::rsp::Rsp;
 use crate::{cart::Cart, cpu::CPU, map::Map};
@@ -61,14 +62,15 @@ impl System {
         s
     }
 
-    // NOTE: IPL starts at A4000040, executes the cart boot sequence, skipped for now
+    // NOTE: IPL starts at A4000040 and executes the boot sequence, skipped for now
     pub fn skip_ipl(&mut self) {
         self.cpu.regs.pc = 0xA4000040;
 
         // Setup the registers as IPL would have done
+        // https://n64.readthedocs.io/index.html#simulating-the-pif-rom
 
         self.cpu.regs.gpr[11].set(0xA4000040);
-        //TODO yes, disabled for diffself.regs.gpr[20].set(0x00000001);
+        self.cpu.regs.gpr[20].set(0x00000001);
         self.cpu.regs.gpr[22].set(0x0000003F);
         self.cpu.regs.gpr[29].set(0xA4001FF0);
 
@@ -76,41 +78,11 @@ impl System {
         self.cop0.regs[1].set(0x1F);
         self.cop0.regs[12].set(0x34000000);
         self.cop0.regs[15].set(0x00000B00);
-        self.cop0.regs[16].set(0x7006E463); // Required by lemmy startup test
-
-        // TODO temp p64 match
-        // self.cpu.regs.gpr[1].set(1);
-        // self.cpu.regs.gpr[2].set(0xEBDA536);
-        // self.cpu.regs.gpr[3].set(0xEBDA536);
-        // self.cpu.regs.gpr[4].set(0xA536);
-        // self.cpu.regs.gpr[5].set(0xC0F1D859);
-        // self.cpu.regs.gpr[6].set(0xA4001F0C);
-        // self.cpu.regs.gpr[7].set(0xA4001F08);
-        // self.cpu.regs.gpr[8].set(0x000000C0);
-        // self.cpu.regs.gpr[10].set(0x00000040);
-        // self.cpu.regs.gpr[11].set(0xA4000040);
-        // self.cpu.regs.gpr[12].set(0xED10D0B3);
-        // self.cpu.regs.gpr[13].set(0x1402A4CC);
-        // self.cpu.regs.gpr[14].set(0x2DE108EA);
-        // self.cpu.regs.gpr[15].set(0x3103E121);
-        // self.cpu.regs.gpr[23].set(0x6);
-        // self.cpu.regs.gpr[25].set(0x9DEBB54F);
-        // self.cpu.regs.gpr[29].set(0xA4001FF0);
-        // self.cpu.regs.gpr[31].set(0xA4001554);
-        // self.cop0.regs[4].set(0x007FFFF0);
-        // self.cop0.regs[8].set(0xFFFFFFFF);
-        // //self.cop0.regs[5].set(0x5000);
-        // self.cop0.regs[9].set(0x5000);
-        // self.cop0.regs[13].set(0x5C);
-        // self.cop0.regs[14].set(0xFFFFFFFF);
-        // self.cop0.regs[15].set(0x00000B22);
-        // self.cop0.regs[16].set(0x7006E463);
-        // self.cop0.regs[30].set(0xFFFFFFFF);
+        self.cop0.regs[16].set(0x7006E463); // TODO 7 required by lemmy startup test but not in doc
 
         // Copy the cart's boot code to memory
 
         // TODO which size?
-        // TODO rel???
         for i in 0..0x1000u32 {
             Rsp::write_dmem(
                 self,
@@ -133,50 +105,7 @@ impl System {
 
         Events::update(self);
 
-        // Check for pending interrupts
-
-        if self.cop0.ie() // Interrupts globally enabled    
-            && !self.cop0.exl() // Not currently handling an interrupt
-            && !self.cop0.erl()
-        // TODO??? error?
-        {
-            let mut ip = 0;
-
-            // IP2: MI interrupt
-
-            ip |= (self.map.mi.has_pending_unmasked_interrupt() as u32) << 2;
-
-            // TODO COUNT/COMPARE STUFF
-            //     ip |= 1 << 7; // IP7: XXXXXXXX
-
-            // Software interrupts, stored in CAUSE
-
-            ip |= (self.cop0.regs[13].get() >> 8) & 3; // IP0-5: Software interrupts
-
-            // Not masked?
-
-            if ip & (self.cop0.regs[12].get() >> 8) & 0xFF != 0 {
-                // Update IP in CAUSE
-
-                self.cop0.regs[13]
-                    .set64(self.cop0.regs[13].get64() & (!0xFFFF) | ((ip as u64) << 8));
-                // TODO BD
-                // TODO ExcCode currently 0 (= interrupt) but need other values for exceptions?
-
-                // Set EXL to prevent nested interrupts
-
-                self.cop0.set_exl();
-
-                // Save the return address
-                // TODO error EPC?
-
-                self.cop0.set_epc(self.cpu.regs.pc);
-
-                // Jump to the exception handler
-
-                self.cpu.regs.pc = 0x8000_0180; // TODO others?
-            }
-        }
+        Interrupt::check(self);
 
         // Breakpoints
 

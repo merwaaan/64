@@ -1,17 +1,12 @@
 use strum::{Display, EnumIter};
 
-use crate::{data::Value, map::Location, system::System};
-
-#[derive(Debug, Display, Clone, Copy, EnumIter)]
-#[repr(u32)]
-pub enum Interrupt {
-    Sp = 1,
-    Si = 1 << 1,
-    Ai = 1 << 2,
-    Vi = 1 << 3,
-    Pi = 1 << 4,
-    Dp = 1 << 5,
-}
+use crate::{
+    cop0::{self, Cop0},
+    data::Value,
+    interrupt::Interrupt,
+    map::Location,
+    system::System,
+};
 
 const START: u32 = 0x0430_0000;
 const END: u32 = 0x0440_0000;
@@ -168,6 +163,8 @@ impl Mi {
                 if trigger_bits & MASK_DP_SET == MASK_DP_SET {
                     *mask_reg |= Interrupt::Dp as u32;
                 }
+
+                Self::update_cause_register(&s.map.mi, &mut s.cop0);
             }
             _ => panic!(
                 "Invalid MI register write: {:08X} {:X} {:X}",
@@ -176,6 +173,19 @@ impl Mi {
                 reg
             ),
         }
+    }
+
+    /// Updates the CAUSE register when pending interrupts or masks change
+    fn update_cause_register(mi: &Mi, cop0: &mut Cop0) {
+        let mut cause = cop0.regs[cop0::Register::Cause as usize].get();
+
+        cause &= !0x400;
+
+        if mi.has_pending_unmasked_interrupt() {
+            cause |= 0x400;
+        }
+
+        cop0.regs[cop0::Register::Cause as usize].set(cause);
     }
 
     pub fn reg_info(addr: MiLocation) -> Option<&'static str> {
@@ -222,12 +232,16 @@ impl Mi {
 
     // INT_PENDING
 
-    pub fn set_pending_interrupt(&mut self, interrupt: Interrupt) {
+    pub fn set_pending_interrupt(&mut self, interrupt: Interrupt, cop0: &mut Cop0) {
         self.regs[Register::Interrupt as usize] |= interrupt as u32;
+
+        Self::update_cause_register(self, cop0);
     }
 
-    pub fn clear_pending_interrupt(&mut self, interrupt: Interrupt) {
+    pub fn clear_pending_interrupt(&mut self, interrupt: Interrupt, cop0: &mut Cop0) {
         self.regs[Register::Interrupt as usize] &= !(interrupt as u32);
+
+        Self::update_cause_register(self, cop0);
     }
 
     pub fn has_pending_interrupt(&self, interrupt: Interrupt) -> bool {

@@ -1,0 +1,46 @@
+use strum::{Display, EnumIter};
+
+use crate::{cop0, exception::Exception, system::System};
+
+#[derive(Debug, Clone, Copy, Display, EnumIter)]
+#[repr(u32)]
+pub enum Interrupt {
+    Sp = 1,
+    Si = 1 << 1,
+    Ai = 1 << 2,
+    Vi = 1 << 3,
+    Pi = 1 << 4,
+    Dp = 1 << 5,
+}
+
+impl Interrupt {
+    // Checks for pending interrupts ready to be raised
+    pub fn check(s: &mut System) {
+        // We can only raise interrupts if:
+        // - Interrupts are globally enabled
+        // - We are not currently handling an exception
+        // - We are not currently handling an error exception
+
+        let enabled = s.cop0.ie() && !s.cop0.exl() && !s.cop0.erl();
+
+        if enabled {
+            // Then, combine the interrupt mask and pending bits
+
+            let mask = s.cop0.interrupt_mask();
+            let pending = s.cop0.interrupt_pending();
+
+            let interrupts = mask & pending;
+
+            // IP2: MI interrupt
+
+            // TODO other bits?
+
+            // TODO COUNT/COMPARE STUFF
+            //     ip |= 1 << 7; // IP7: XXXXXXXX
+
+            if (interrupts & 4) != 0 {
+                Exception::Interrupt.raise(s);
+            }
+        }
+    }
+}

@@ -46,56 +46,78 @@ pub struct Cop0 {
 }
 
 impl Cop0 {
-    //
+    // STATUS register
 
     pub fn ie(&self) -> bool {
         self.regs[Register::Status as usize].get() & STATUS_IE_MASK != 0
     }
 
-    //
-
     pub fn erl(&self) -> bool {
         self.regs[Register::Status as usize].get() & STATUS_ERL_MASK != 0
     }
 
-    pub fn clear_erl(&mut self) {
+    // TODO set???
+    pub(crate) fn clear_erl(&mut self) {
         self.regs[Register::Status as usize]
             .set(self.regs[Register::Status as usize].get() & !STATUS_ERL_MASK);
     }
-
-    //
 
     pub fn exl(&self) -> bool {
         self.regs[Register::Status as usize].get() & STATUS_EXL_MASK != 0
     }
 
-    pub fn set_exl(&mut self) {
+    pub(crate) fn set_exl(&mut self) {
         self.regs[Register::Status as usize]
             .set(self.regs[Register::Status as usize].get() | STATUS_EXL_MASK);
     }
 
-    pub fn clear_exl(&mut self) {
+    pub(crate) fn clear_exl(&mut self) {
         self.regs[Register::Status as usize]
             .set(self.regs[Register::Status as usize].get() & !STATUS_EXL_MASK);
     }
 
-    //
+    pub(crate) fn interrupt_mask(&self) -> u32 {
+        (self.regs[Register::Status as usize].get() >> 8) & 0xFF
+    }
+
+    // CAUSE register
+
+    pub(crate) fn interrupt_pending(&self) -> u32 {
+        (self.regs[Register::Cause as usize].get() >> 8) & 0xFF
+    }
+
+    pub(crate) fn exception_in_branch_delay_slot(&self) -> bool {
+        self.regs[Register::Cause as usize].get() & 0x8000_0000 != 0
+    }
+
+    pub(crate) fn set_exception_in_branch_delay_slot(&mut self, value: bool) {
+        self.regs[Register::Cause as usize].set(
+            (self.regs[Register::Cause as usize].get() & 0x7FFF_FFFF) | ((value as u32) << 31),
+        );
+    }
+
+    pub(crate) fn set_exception_code(&mut self, value: u32) {
+        self.regs[Register::Cause as usize]
+            .set((self.regs[Register::Cause as usize].get() & !0x7C) | (value << 2));
+    }
+
+    // EPC register
 
     pub fn epc(&self) -> u32 {
         self.regs[Register::EPC as usize].get() // TODO 64/32?
     }
 
-    pub fn set_epc(&mut self, value: u32) {
+    pub(crate) fn set_epc(&mut self, value: u32) {
         self.regs[Register::EPC as usize].set(value);
     }
 
-    //
+    // ErrorEPC register
 
     pub fn error_epc(&self) -> u32 {
         self.regs[Register::ErrorEPC as usize].get() // TODO 64/32?
     }
 
-    pub fn set_error_epc(&mut self, value: u32) {
+    pub(crate) fn set_error_epc(&mut self, value: u32) {
         self.regs[Register::ErrorEPC as usize].set(value);
     }
 

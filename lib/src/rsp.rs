@@ -3,8 +3,8 @@ use strum::{Display, EnumIter};
 use crate::{
     data::Value,
     events::{Event, EventType},
+    interrupt::Interrupt,
     map::Location,
-    mi::Interrupt,
     system::System,
 };
 
@@ -259,7 +259,7 @@ impl Rsp {
 
         // Raise the interrupt
 
-        s.map.mi.set_pending_interrupt(Interrupt::Sp);
+        s.map.mi.set_pending_interrupt(Interrupt::Sp, &mut s.cop0);
     }
 }
 

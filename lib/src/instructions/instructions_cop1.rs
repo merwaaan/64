@@ -1,6 +1,6 @@
 #![allow(clippy::upper_case_acronyms)]
 
-use super::{DelayedBranching, Disassembly, Instruction, Opcode, System};
+use super::{Disassembly, Instruction, InstructionResult, Opcode, System};
 use crate::{instruction_struct, instructions::UNKNOWN_, registers::Registers};
 
 /// COP1 rs field (bits 25–21).
@@ -34,7 +34,7 @@ pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
 instruction_struct!(CFC1);
 
 impl Instruction for CFC1 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         assert!(op.fs() == 31); // TODO 0 too?
 
         s.cpu.regs.gpr[op.rt()].set(op.fsv(s));
@@ -54,7 +54,7 @@ impl Instruction for CFC1 {
 instruction_struct!(CTC1);
 
 impl Instruction for CTC1 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         assert!(op.fs() == 31); // TODO 0 too?
 
         s.cpu.regs.fcr = op.fsv(s);
@@ -77,7 +77,7 @@ impl Instruction for CTC1 {
 instruction_struct!(DMFC1);
 
 impl Instruction for DMFC1 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         // TODO unusable?
 
         let freg = op.fs();
@@ -99,7 +99,7 @@ impl Instruction for DMFC1 {
 instruction_struct!(DMTC1);
 
 impl Instruction for DMTC1 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         // TODO unusable?
 
         let freg = op.fs();
@@ -121,7 +121,7 @@ impl Instruction for DMTC1 {
 instruction_struct!(MFC1);
 
 impl Instruction for MFC1 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         // TODO unusable?
 
         let value = if s.cop0.f_64() || op.fs() & 1 == 0 {
@@ -143,7 +143,7 @@ impl Instruction for MFC1 {
 instruction_struct!(MTC1);
 
 impl Instruction for MTC1 {
-    fn execute(&self, s: &mut System, op: Opcode) -> Option<DelayedBranching> {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         // TODO unusable?
 
         let freg = op.fs();
@@ -169,7 +169,7 @@ impl Instruction for MTC1 {
 // instruction_struct!(DMFC1);
 
 // impl Instruction for DMFC1 {
-//     fn execute(&self, _s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+//     fn execute(&self, _s: &mut System, _op: Opcode) -> Option<InstructionResult> {
 //         log::debug!("DMFC1 (stub)");
 //         None
 //     }
@@ -186,7 +186,7 @@ impl Instruction for MTC1 {
 // instruction_struct!(DCFC1);
 
 // impl Instruction for DCFC1 {
-//     fn execute(&self, _s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+//     fn execute(&self, _s: &mut System, _op: Opcode) -> Option<InstructionResult> {
 //         log::debug!("DCFC1 (stub)");
 //         None
 //     }
@@ -203,7 +203,7 @@ impl Instruction for MTC1 {
 // instruction_struct!(DMTC1);
 
 // impl Instruction for DMTC1 {
-//     fn execute(&self, _s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+//     fn execute(&self, _s: &mut System, _op: Opcode) -> Option<InstructionResult> {
 //         log::debug!("DMTC1 (stub)");
 //         None
 //     }
@@ -220,7 +220,7 @@ impl Instruction for MTC1 {
 // instruction_struct!(DCTC1);
 
 // impl Instruction for DCTC1 {
-//     fn execute(&self, _s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+//     fn execute(&self, _s: &mut System, _op: Opcode) -> Option<InstructionResult> {
 //         log::debug!("DCTC1 (stub)");
 //         None
 //     }
@@ -237,7 +237,7 @@ impl Instruction for MTC1 {
 // instruction_struct!(BC1);
 
 // impl Instruction for BC1 {
-//     fn execute(&self, _s: &mut System, _op: Opcode) -> Option<DelayedBranching> {
+//     fn execute(&self, _s: &mut System, _op: Opcode) -> Option<InstructionResult> {
 //         log::debug!("BC1 (stub)");
 //         None
 //     }

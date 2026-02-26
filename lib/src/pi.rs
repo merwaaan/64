@@ -3,8 +3,8 @@ use strum::{Display, EnumIter};
 use crate::{
     data::Value,
     events::{Event, EventType},
+    interrupt::Interrupt,
     map::Location,
-    mi::Interrupt,
     system::System,
 };
 
@@ -110,7 +110,7 @@ impl Pi {
 
                 if (trigger_bits & 2) != 0 {
                     s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_COMPLETED_MASK;
-                    s.map.mi.clear_pending_interrupt(Interrupt::Pi);
+                    s.map.mi.clear_pending_interrupt(Interrupt::Pi, &mut s.cop0);
                 }
 
                 // Bit 0: clear the error
@@ -179,7 +179,7 @@ impl Pi {
 
         // Raise the interrupt
 
-        s.map.mi.set_pending_interrupt(Interrupt::Pi);
+        s.map.mi.set_pending_interrupt(Interrupt::Pi, &mut s.cop0);
     }
 
     pub fn reg_info(addr: PiLocation) -> Option<&'static str> {

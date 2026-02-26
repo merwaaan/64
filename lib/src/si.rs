@@ -1,6 +1,6 @@
 use strum::{Display, EnumIter};
 
-use crate::{data::Value, map::Location, mi::Interrupt, system::System};
+use crate::{data::Value, interrupt::Interrupt, map::Location, system::System};
 
 const START: u32 = 0x0480_0000;
 const END: u32 = 0x0490_0000;
@@ -80,7 +80,7 @@ impl Si {
             STATUS_REG => {
                 // Writing any value acknowledges the interrupt
 
-                s.map.mi.clear_pending_interrupt(Interrupt::Si);
+                s.map.mi.clear_pending_interrupt(Interrupt::Si, &mut s.cop0);
             }
             _ => unimplemented!("Write SI register @ {:08X}", addr.relative()),
         }
