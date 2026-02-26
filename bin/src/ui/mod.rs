@@ -133,6 +133,8 @@ impl eframe::App for Ui {
         // Handle inputs
 
         ctx.input(|input| {
+            // Keyboard
+
             if matches!(self.status, Status::Running) && input.key_pressed(Key::Enter) {
                 self.core_thread.send_command(Command::Pause);
             }
@@ -149,6 +151,17 @@ impl eframe::App for Ui {
 
             if input.key_pressed(Key::Escape) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+
+            // Dropped files
+
+            if let Some(file) = input.raw.dropped_files.first() {
+                if let Some(path) = &file.path {
+                    self.core_thread
+                        .send_command(Command::LoadRom(path.clone()));
+
+                    self.last_rom_path = Some(path.clone());
+                }
             }
         });
 

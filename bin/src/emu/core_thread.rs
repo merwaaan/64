@@ -232,7 +232,7 @@ impl CoreThread {
             if state.ui_settings.registers.is_some() {
                 let registers = RegistersUpdate {
                     cpu_regs: system.cpu.regs,
-                    cop0_regs: system.cop0.regs,
+                    cop0: system.cop0,
                 };
 
                 events.push(Event::RegistersUpdate(registers));

@@ -31,7 +31,7 @@ instruction_struct!(DMFC0);
 
 impl Instruction for DMFC0 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        s.cpu.regs.gpr[op.rt()].set64(s.cop0.regs[op.rd()].get64());
+        s.cpu.regs.gpr[op.rt()].set64(s.cop0.read(op.rd()).get64());
 
         None
     }
@@ -45,7 +45,7 @@ instruction_struct!(DMTC0);
 
 impl Instruction for DMTC0 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        s.cop0.regs[op.rd()].set64(s.cpu.regs.gpr[op.rt()].get64());
+        s.cop0.write64(op.rd(), op.rtv64(s));
 
         None
     }
@@ -80,17 +80,7 @@ instruction_struct!(MTC0);
 
 impl Instruction for MTC0 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        let data = s.cpu.regs.gpr[op.rt()].get64();
-
-        // TODO cause: only two last bits can be written! move to reg implem ???
-        // TODO not b0-1 but 8-9???? 0x0000_0300
-        // if op.rd() == 13 {
-        //     data = (data & 3) | (s.cop0.regs[13].get64() & 0xFFFF_FFFF_FFFF_FFFC);
-        // }
-
-        //log::info!("MTC0 {}, {:08X}", op.rd0n(), data);
-
-        s.cop0.regs[op.rd()].set64(data);
+        s.cop0.write(op.rd(), op.rtv(s));
 
         None
     }
@@ -104,7 +94,7 @@ instruction_struct!(MFC0);
 
 impl Instruction for MFC0 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        s.cpu.regs.gpr[op.rt()].set(s.cop0.regs[op.rd()].get());
+        s.cpu.regs.gpr[op.rt()].set(s.cop0.read(op.rd()).get());
 
         None
     }
@@ -135,7 +125,7 @@ impl Instruction for TLBR {
         log::warn!(
             "TLBR @ {:08X} (index={})",
             s.cpu.regs.pc,
-            s.cop0.regs[0].get()
+            s.cop0.read(0).get()
         );
 
         None
@@ -153,7 +143,7 @@ impl Instruction for TLBWI {
         log::warn!(
             "TLBWI @ {:08X} (index={})",
             s.cpu.regs.pc,
-            s.cop0.regs[0].get()
+            s.cop0.read(0).get()
         );
 
         None

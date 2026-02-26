@@ -7,6 +7,7 @@ pub use opcode::Opcode;
 
 mod instructions_cop0;
 mod instructions_cop1;
+mod instructions_cop2;
 mod instructions_cpu;
 mod opcode;
 
@@ -61,6 +62,7 @@ pub fn decode(opcode: Opcode) -> Option<&'static dyn Instruction> {
         0b000001 => instructions_cpu::decode_regimm(opcode),
         0b010000 => instructions_cop0::decode(opcode),
         0b010001 => instructions_cop1::decode(opcode),
+        0b010010 => instructions_cop2::decode(opcode),
         _ => instructions_cpu::decode_standard(opcode),
     }
 }

@@ -13,7 +13,7 @@ const END: u32 = 0x0470_0000;
 
 pub type PiLocation = Location<START, END>;
 
-const MASK: u32 = 0x1F;
+const MASK: u32 = 0x3F;
 
 #[derive(Debug, Display, Clone, Copy, EnumIter)]
 #[repr(u32)]
@@ -23,9 +23,14 @@ pub enum Register {
     ReadLen,
     WriteLen,
     Status,
-    DmaBusy,
-    DmaError,
-    DmaCompleted,
+    Dom1Lat,
+    Dom1Pwd,
+    Dom1Pgs,
+    Dom1Rls,
+    Dom2Lat,
+    Dom2Pwd,
+    Dom2Pgs,
+    Dom2Rls,
 }
 
 // TODO rm?
@@ -60,7 +65,7 @@ impl Pi {
 
         // TODO temp
         if addr.relative() > 0x13 {
-            panic!("Read PI register @ {:08X}", addr.relative());
+            log::warn!("Read to PI register {:08X}", addr.relative());
         }
 
         T::read_reg(&self.regs, addr.relative() & MASK)
@@ -71,22 +76,16 @@ impl Pi {
 
         match reg {
             DRAM_ADDR_REG => {
-                log::warn!("Write PI_DRAM_ADDR {:X}", data);
-
                 data.write_reg(&mut s.map.pi.regs, addr.relative() & MASK);
 
                 s.map.pi.regs[DRAM_ADDR_REG] &= 0x00FF_FFFE;
             }
             CART_ADDR_REG => {
-                log::warn!("Write PI_CART_ADDR {:X}", data);
-
                 data.write_reg(&mut s.map.pi.regs, addr.relative() & MASK);
 
                 s.map.pi.regs[CART_ADDR_REG] &= 0xFFFF_FFFE; // TODO auto updated after DMA transfer
             }
             READ_LEN_REG => {
-                log::warn!("Write PI_READ_LEN {:X}", data);
-
                 data.write_reg(&mut s.map.pi.regs, addr.relative() & MASK);
 
                 s.map.pi.regs[READ_LEN_REG] &= 0x00FF_FFFF;
@@ -94,8 +93,6 @@ impl Pi {
                 unimplemented!("Write to READ_LEN");
             }
             WRITE_LEN_REG => {
-                log::warn!("Write PI_WRITE_LEN {:X}", data);
-
                 data.write_reg(&mut s.map.pi.regs, addr.relative() & MASK);
 
                 s.map.pi.regs[WRITE_LEN_REG] &= 0x00FF_FFFF;
@@ -103,26 +100,27 @@ impl Pi {
                 Self::start_dma(s);
             }
             STATUS_REG => {
-                let trigger_bits: u32 = 0;
-                data.write_reg(&mut [trigger_bits], addr.relative() & 3);
+                let mut trigger_bits = [0u32];
+                data.write_reg(&mut trigger_bits, addr.relative() & 3);
 
                 // Bit 1: clear the interrupt
 
-                if (trigger_bits & 2) != 0 {
+                if (trigger_bits[0] & 2) != 0 {
                     s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_COMPLETED_MASK;
                     s.map.mi.clear_pending_interrupt(Interrupt::Pi, &mut s.cop0);
                 }
 
                 // Bit 0: clear the error
 
-                if (trigger_bits & 1) != 0 {
+                if (trigger_bits[0] & 1) != 0 {
                     s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_ERROR_MASK;
                 }
             }
-            _ => log::error!(
-                "Write PI register @ {:08X} NOT IMPLEMENTED",
-                addr.relative()
-            ),
+            _ => {
+                log::warn!("Write {:X?} to PI register {:08X}", data, addr.relative());
+
+                data.write_reg(&mut s.map.pi.regs, addr.relative() & MASK);
+            }
         }
     }
 
@@ -142,12 +140,6 @@ impl Pi {
 
         for offset in 0..length {
             let data = s.read::<u8>(s.map.pi.regs[CART_ADDR_REG] + offset);
-
-            // log::info!(
-            //     "PI DMA transfer: offset {:08X} data {:02X}",
-            //     dest_base + offset,
-            //     data
-            // );
 
             s.write::<u8>(dest_base + offset, data);
         }

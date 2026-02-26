@@ -59,7 +59,7 @@ impl Si {
             panic!("Read invalid SI register @ {:08X}", addr.relative());
         }
 
-        log::info!("Read SI register @ {:08X}", addr.relative());
+        log::warn!("Read SI register @ {:08X}", addr.relative());
 
         T::read_reg(&self.regs, addr.relative() & MASK)
     }
@@ -67,7 +67,7 @@ impl Si {
     pub fn write<T: Value>(s: &mut System, addr: SiLocation, data: T) {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
 
-        log::info!("Write SI register @ {:08X} {:X}", addr.relative(), data);
+        log::warn!("Write SI register @ {:08X} {:X}", addr.relative(), data);
 
         match reg {
             DRAM_ADDR_REG => {

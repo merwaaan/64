@@ -17,7 +17,7 @@ pub struct RegistersWidget {
 #[derive(Clone, Copy)]
 pub struct RegistersUpdate {
     pub cpu_regs: Registers,
-    pub cop0_regs: [Reg64; 32],
+    pub cop0: Cop0,
 }
 
 impl Widget for RegistersWidget {
@@ -59,7 +59,7 @@ impl Widget for RegistersWidget {
                             for col in 0..2 {
                                 let reg_index = row + col * 16;
                                 let name = format!("{:>8}", Cop0::reg_name(reg_index));
-                                let value = last_update.cop0_regs[reg_index].get64();
+                                let value = last_update.cop0.read(reg_index).get64();
 
                                 reg64(ui, name, value);
                             }

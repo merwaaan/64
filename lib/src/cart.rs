@@ -102,8 +102,6 @@ impl Cart {
     }
 
     pub fn write<T: Value>(s: &mut System, addr: CartLocation, data: T) {
-        log::warn!("write CART: {:08X} {:X}", addr.relative(), data);
-
         if (0x03FF_0020..0x03FF_0220).contains(&addr.relative()) {
             data.write_mem(
                 &mut s.map.cart.isviewer_buffer,
@@ -119,6 +117,8 @@ impl Cart {
             s.map.cart.isviewer_index = 0;
 
             log::info!("ISVIEWER: {}", s.map.cart.isviewer_log);
+        } else {
+            log::warn!("write CART: {:08X} {:X}", addr.relative(), data);
         }
     }
 }

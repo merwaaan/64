@@ -77,33 +77,30 @@ impl Mi {
 
         match reg {
             0 => {
-                let trigger_bits: u32 = 0;
-                data.write_reg(&mut [trigger_bits], addr.relative() & 3);
+                let mut trigger_bits = [0u32];
+                data.write_reg(&mut trigger_bits, addr.relative() & 3);
 
                 let mode_reg = &mut s.map.mi.regs[Register::Mode as usize];
 
-                if trigger_bits & MODE_WRITE_REPEAT_CLEAR_MASK != 0 {
+                if trigger_bits[0] & MODE_WRITE_REPEAT_CLEAR_MASK != 0 {
                     *mode_reg &= !MODE_WRITE_REPEAT_CLEAR_MASK;
-                }
-                if trigger_bits & MODE_WRITE_REPEAT_SET_MASK != 0 {
+                } else if trigger_bits[0] & MODE_WRITE_REPEAT_SET_MASK != 0 {
                     *mode_reg |= MODE_WRITE_REPEAT_SET_MASK;
                 }
 
-                if trigger_bits & MODE_WRITE_EBUS_CLEAR_MASK != 0 {
+                if trigger_bits[0] & MODE_WRITE_EBUS_CLEAR_MASK != 0 {
                     *mode_reg &= !MODE_WRITE_EBUS_CLEAR_MASK;
-                }
-                if trigger_bits & MODE_WRITE_EBUS_SET_MASK != 0 {
+                } else if trigger_bits[0] & MODE_WRITE_EBUS_SET_MASK != 0 {
                     *mode_reg |= MODE_WRITE_EBUS_SET_MASK;
                 }
 
-                if trigger_bits & MODE_WRITE_DP_CLEAR_MASK != 0 {
+                if trigger_bits[0] & MODE_WRITE_DP_CLEAR_MASK != 0 {
                     *mode_reg &= !(Interrupt::Dp as u32);
                 }
 
-                if trigger_bits & MODE_WRITE_UPPER_CLEAR_MASK != 0 {
+                if trigger_bits[0] & MODE_WRITE_UPPER_CLEAR_MASK != 0 {
                     *mode_reg &= !MODE_WRITE_UPPER_CLEAR_MASK;
-                }
-                if trigger_bits & MODE_WRITE_UPPER_SET_MASK != 0 {
+                } else if trigger_bits[0] & MODE_WRITE_UPPER_SET_MASK != 0 {
                     *mode_reg |= MODE_WRITE_UPPER_SET_MASK;
                 }
 
@@ -116,51 +113,47 @@ impl Mi {
                 log::warn!("Write MI_INTERRUPT {:X}", data);
             }
             3 => {
-                let trigger_bits: u32 = 0;
-                data.write_reg(&mut [trigger_bits], addr.relative() & 3);
+                log::warn!("Write MI_MASK {:X}", data);
+                let mut trigger_bits = [0u32];
+                data.write_reg(&mut trigger_bits, addr.relative() & 3);
 
                 let mask_reg = &mut s.map.mi.regs[Register::Mask as usize];
 
-                if trigger_bits & MASK_SP_CLEAR == MASK_SP_CLEAR {
+                // TODO write without conds?
+
+                if trigger_bits[0] & MASK_SP_CLEAR == MASK_SP_CLEAR {
                     *mask_reg &= !(Interrupt::Sp as u32);
-                }
-                if trigger_bits & MASK_SP_SET == MASK_SP_SET {
+                } else if trigger_bits[0] & MASK_SP_SET == MASK_SP_SET {
                     *mask_reg |= Interrupt::Sp as u32;
                 }
 
-                if trigger_bits & MASK_SI_CLEAR == MASK_SI_CLEAR {
+                if trigger_bits[0] & MASK_SI_CLEAR == MASK_SI_CLEAR {
                     *mask_reg &= !(Interrupt::Si as u32);
-                }
-                if trigger_bits & MASK_SI_SET == MASK_SI_SET {
+                } else if trigger_bits[0] & MASK_SI_SET == MASK_SI_SET {
                     *mask_reg |= Interrupt::Si as u32;
                 }
 
-                if trigger_bits & MASK_AI_CLEAR == MASK_AI_CLEAR {
+                if trigger_bits[0] & MASK_AI_CLEAR == MASK_AI_CLEAR {
                     *mask_reg &= !(Interrupt::Ai as u32);
-                }
-                if trigger_bits & MASK_AI_SET == MASK_AI_SET {
+                } else if trigger_bits[0] & MASK_AI_SET == MASK_AI_SET {
                     *mask_reg |= Interrupt::Ai as u32;
                 }
 
-                if trigger_bits & MASK_VI_CLEAR == MASK_VI_CLEAR {
+                if trigger_bits[0] & MASK_VI_CLEAR == MASK_VI_CLEAR {
                     *mask_reg &= !(Interrupt::Vi as u32);
-                }
-                if trigger_bits & MASK_VI_SET == MASK_VI_SET {
+                } else if trigger_bits[0] & MASK_VI_SET == MASK_VI_SET {
                     *mask_reg |= Interrupt::Vi as u32;
                 }
-                //s.map.mi.regs[MASK_REG] |= Interrupt::Vi as u32; /////////////s
 
-                if trigger_bits & MASK_PI_CLEAR == MASK_PI_CLEAR {
+                if trigger_bits[0] & MASK_PI_CLEAR == MASK_PI_CLEAR {
                     *mask_reg &= !(Interrupt::Pi as u32);
-                }
-                if trigger_bits & MASK_PI_SET == MASK_PI_SET {
+                } else if trigger_bits[0] & MASK_PI_SET == MASK_PI_SET {
                     *mask_reg |= Interrupt::Pi as u32;
                 }
 
-                if trigger_bits & MASK_DP_CLEAR == MASK_DP_CLEAR {
+                if trigger_bits[0] & MASK_DP_CLEAR == MASK_DP_CLEAR {
                     *mask_reg &= !(Interrupt::Dp as u32);
-                }
-                if trigger_bits & MASK_DP_SET == MASK_DP_SET {
+                } else if trigger_bits[0] & MASK_DP_SET == MASK_DP_SET {
                     *mask_reg |= Interrupt::Dp as u32;
                 }
 
@@ -177,15 +170,7 @@ impl Mi {
 
     /// Updates the CAUSE register when pending interrupts or masks change
     fn update_cause_register(mi: &Mi, cop0: &mut Cop0) {
-        let mut cause = cop0.regs[cop0::Register::Cause as usize].get();
-
-        cause &= !0x400;
-
-        if mi.has_pending_unmasked_interrupt() {
-            cause |= 0x400;
-        }
-
-        cop0.regs[cop0::Register::Cause as usize].set(cause);
+        cop0.set_ip2_interrupt(mi.has_pending_unmasked_interrupt());
     }
 
     pub fn reg_info(addr: MiLocation) -> Option<&'static str> {

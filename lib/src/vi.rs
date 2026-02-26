@@ -247,7 +247,12 @@ impl Vi {
         }
     }
 
-    pub fn framebuffer_address(&self) -> u32 {
+    pub(crate) fn color32(&self) -> bool {
+        self.regs[STATUS_REG] & 0b11 == 0b11
+        // TODO other modes?
+    }
+
+    pub(crate) fn framebuffer_address(&self) -> u32 {
         self.regs[FRAMEBUFFER_ADDR_REG]
     }
 
@@ -266,17 +271,34 @@ impl Vi {
 
         let mut data = Vec::with_capacity(width * height * 4);
 
-        for y in 0..height {
-            for x in 0..width {
-                let pixel: u32 = s.read(base_addr + ((y * width + x) * 4) as u32);
+        if s.map.vi.color32() {
+            for y in 0..height {
+                for x in 0..width {
+                    let pixel = s.read::<u32>(base_addr + ((y * width + x) * 4) as u32);
 
-                data.push((pixel >> 24) as u8);
-                data.push((pixel >> 16) as u8);
-                data.push((pixel >> 8) as u8);
-                data.push(0xFF); // TODO real val
+                    data.push((pixel >> 24) as u8);
+                    data.push((pixel >> 16) as u8);
+                    data.push((pixel >> 8) as u8);
+                    data.push(0xFF); // TODO real val
+                }
+            }
+        } else {
+            for y in 0..height {
+                for x in 0..width {
+                    let pixel = s.read::<u16>(base_addr + ((y * width + x) * 2) as u32);
+
+                    data.push(Self::b5_to_b8(pixel >> 11));
+                    data.push(Self::b5_to_b8(pixel >> 6));
+                    data.push(Self::b5_to_b8(pixel >> 1));
+                    data.push(0xFF); // TODO real val
+                }
             }
         }
 
         (data, width, height)
+    }
+
+    fn b5_to_b8(value: u16) -> u8 {
+        (((value & 0x1F) * 255) / 31) as u8
     }
 }

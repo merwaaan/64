@@ -49,7 +49,12 @@ pub fn decode_special(opcode: Opcode) -> Option<&'static dyn Instruction> {
         0x2D => &DADDU_,
         0x2E => &DSUB_,
         0x2F => &DSUBU_,
+        0x30 => &TGE_,
+        0x31 => &TGEU_,
+        0x32 => &TLT_,
+        0x33 => &TLTU_,
         0x34 => &TEQ_,
+        0x36 => &TNE_,
         0x38 => &DSLL_,
         0x3A => &DSRL_,
         0x3B => &DSRA_,
@@ -74,8 +79,15 @@ pub fn decode_regimm(opcode: Opcode) -> Option<&'static dyn Instruction> {
         0x01_0000 => &BGEZ_,
         0x02_0000 => &BLTZL_,
         0x03_0000 => &BGEZL_,
+        0x08_0000 => &TGEI_,
+        0x09_0000 => &TGEIU_,
+        0x0A_0000 => &TLTI_,
+        0x0B_0000 => &TLTIU_,
+        0x0C_0000 => &TEQI_,
+        0x0E_0000 => &TNEI_,
         0x10_0000 => &BLTZAL_,
         0x11_0000 => &BGEZAL_,
+        0x13_0000 => &BGEZALL_,
         _ => &UNKNOWN_,
     };
 
@@ -147,9 +159,16 @@ instruction_struct!(ADD);
 
 impl Instruction for ADD {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        s.cpu.regs.gpr[op.rd()].set(op.rsv(s).wrapping_add(op.rtv(s)));
+        let rs = op.rsv(s) as i32;
+        let rt = op.rtv(s) as i32;
 
-        None
+        match rs.checked_add(rt) {
+            Some(result) => {
+                s.cpu.regs.gpr[op.rd()].set(result as u32);
+                None
+            }
+            None => Some(InstructionResult::Exception(Exception::ArithmeticOverflow)),
+        }
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -161,9 +180,16 @@ instruction_struct!(ADDI);
 
 impl Instruction for ADDI {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        s.cpu.regs.gpr[op.rt()].set(op.rsv(s).wrapping_add(op.imm16() as i16 as u32));
+        let rs = op.rsv(s) as i32;
+        let imm = op.imm16() as i16 as i32;
 
-        None
+        match rs.checked_add(imm) {
+            Some(result) => {
+                s.cpu.regs.gpr[op.rt()].set(result as u32);
+                None
+            }
+            None => Some(InstructionResult::Exception(Exception::ArithmeticOverflow)),
+        }
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -181,6 +207,7 @@ instruction_struct!(ADDIU);
 impl Instruction for ADDIU {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let imm = (op.imm16() as i16 as i32) as u32;
+
         s.cpu.regs.gpr[op.rt()].set(op.rsv(s).wrapping_add(imm));
 
         None
@@ -249,7 +276,7 @@ instruction_struct!(BEQ);
 
 impl Instruction for BEQ {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if op.rsv(s) == op.rtv(s) {
+        if op.rsv64(s) == op.rtv64(s) {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
@@ -270,7 +297,7 @@ instruction_struct!(BEQL);
 
 impl Instruction for BEQL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if op.rsv(s) == op.rtv(s) {
+        if op.rsv64(s) == op.rtv64(s) {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             // Discard the instruction in the delay slot
@@ -294,7 +321,7 @@ instruction_struct!(BGEZ);
 
 impl Instruction for BGEZ {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if (op.rsv(s) as i32) >= 0 {
+        if (op.rsv64(s) as i64) >= 0 {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
@@ -310,7 +337,7 @@ instruction_struct!(BGEZL);
 
 impl Instruction for BGEZL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if (op.rsv(s) as i32) >= 0 {
+        if (op.rsv64(s) as i64) >= 0 {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             // Discard the instruction in the delay slot
@@ -330,12 +357,12 @@ instruction_struct!(BGEZAL);
 impl Instruction for BGEZAL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         // Read before linking (matters when rs == 31)
-        let rs = op.rsv(s);
+        let rs = op.rsv64(s) as i64;
 
         // The return address in the instruction that follows the delay slot
         s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
-        if (rs as i32) >= 0 {
+        if rs >= 0 {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
@@ -348,11 +375,37 @@ impl Instruction for BGEZAL {
     }
 }
 
+instruction_struct!(BGEZALL);
+
+impl Instruction for BGEZALL {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        // Read before linking (matters when rs == 31)
+        let rs = op.rsv64(s) as i64;
+
+        // The return address in the instruction that follows the delay slot
+        s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
+
+        if rs >= 0 {
+            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
+        } else {
+            // Discard the instruction in the delay slot
+            s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
+
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("BGEZALL {}, {:#06X}", op.rsn(), op.branch_offset()))
+        // TODO cond result?
+    }
+}
+
 instruction_struct!(BGTZ);
 
 impl Instruction for BGTZ {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if (op.rsv(s) as i32) > 0 {
+        if (op.rsv64(s) as i64) > 0 {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
@@ -368,7 +421,7 @@ instruction_struct!(BLEZ);
 
 impl Instruction for BLEZ {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if (op.rsv(s) as i32) <= 0 {
+        if (op.rsv64(s) as i64) <= 0 {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
@@ -384,7 +437,7 @@ instruction_struct!(BLEZL);
 
 impl Instruction for BLEZL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if (op.rsv(s) as i32) <= 0 {
+        if (op.rsv64(s) as i64) <= 0 {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             // Discard the instruction in the delay slot
@@ -403,7 +456,7 @@ instruction_struct!(BLTZ);
 
 impl Instruction for BLTZ {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if (op.rsv(s) as i32) < 0 {
+        if (op.rsv64(s) as i64) < 0 {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
@@ -420,12 +473,12 @@ instruction_struct!(BLTZAL);
 impl Instruction for BLTZAL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         // Read before linking (matters when rs == 31)
-        let rs = op.rsv(s);
+        let rs = op.rsv64(s) as i64;
 
         // The return address in the instruction that follows the delay slot
         s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
-        if (rs as i32) < 0 {
+        if rs < 0 {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
@@ -441,7 +494,7 @@ instruction_struct!(BLTZL);
 
 impl Instruction for BLTZL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if (op.rsv(s) as i32) < 0 {
+        if (op.rsv64(s) as i64) < 0 {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             // Discard the instruction in the delay slot
@@ -460,7 +513,7 @@ instruction_struct!(BNE);
 
 impl Instruction for BNE {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if op.rsv(s) != op.rtv(s) {
+        if op.rsv64(s) != op.rtv64(s) {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             None
@@ -481,7 +534,7 @@ instruction_struct!(BNEL);
 
 impl Instruction for BNEL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if op.rsv(s) != op.rtv(s) {
+        if op.rsv64(s) != op.rtv64(s) {
             Some(InstructionResult::DelayedBranching(op.branch_target(s)))
         } else {
             // Discard the instruction in the delay slot
@@ -534,13 +587,16 @@ instruction_struct!(DADD);
 
 impl Instruction for DADD {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        let res = op.rsv64(s).wrapping_add(op.rtv64(s));
+        let rs = op.rsv64(s) as i64;
+        let rt = op.rtv64(s) as i64;
 
-        s.cpu.regs.gpr[op.rd()].set64(res);
-
-        // TODO excpetion
-
-        None
+        match rs.checked_add(rt) {
+            Some(result) => {
+                s.cpu.regs.gpr[op.rd()].set64(result as u64);
+                None
+            }
+            None => Some(InstructionResult::Exception(Exception::ArithmeticOverflow)),
+        }
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -552,17 +608,20 @@ instruction_struct!(DADDI);
 
 impl Instruction for DADDI {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        let res = op.rsv64(s).wrapping_add(op.imm16() as i16 as i64 as u64);
+        let rs = op.rsv64(s) as i64;
+        let imm = op.imm16() as i16 as i64;
 
-        s.cpu.regs.gpr[op.rt()].set64(res);
-
-        // TODO excpetion
-
-        None
+        match rs.checked_add(imm) {
+            Some(result) => {
+                s.cpu.regs.gpr[op.rt()].set64(result as u64);
+                None
+            }
+            None => Some(InstructionResult::Exception(Exception::ArithmeticOverflow)),
+        }
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
-        Disassembly::new(format!("DADDI {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+        Disassembly::new(format!("DADDI {}, {}, {}", op.rtn(), op.rsn(), op.imm16()))
     }
 }
 
@@ -733,7 +792,7 @@ impl Instruction for DMULT {
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
-        Disassembly::new(format!("DMULTU {}, {}", op.rsn(), op.rtn()))
+        Disassembly::new(format!("DMULT {}, {}", op.rsn(), op.rtn()))
     }
 }
 
@@ -902,11 +961,16 @@ instruction_struct!(DSUB);
 
 impl Instruction for DSUB {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        s.cpu.regs.gpr[op.rd()].set64(op.rsv64(s).wrapping_sub(op.rtv64(s)));
+        let rs = op.rsv64(s) as i64;
+        let rt = op.rtv64(s) as i64;
 
-        // TODO exception
-
-        None
+        match rs.checked_sub(rt) {
+            Some(result) => {
+                s.cpu.regs.gpr[op.rd()].set64(result as u64);
+                None
+            }
+            None => Some(InstructionResult::Exception(Exception::ArithmeticOverflow)),
+        }
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -979,7 +1043,6 @@ impl Instruction for JALR {
         let target = op.rsv(s);
 
         if target & 3 != 0 {
-            log::error!("JALR {:X} is not aligned", target);
             return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
                 target,
             )));
@@ -1009,7 +1072,6 @@ impl Instruction for JR {
         let target = op.rsv(s);
 
         if target & 3 != 0 {
-            log::error!("JR {:X} is not aligned @ {:08X}", target, s.cpu.regs.pc);
             return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
                 target,
             )));
@@ -1077,8 +1139,7 @@ impl Instruction for LD {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
-        if addr & 3 != 0 {
-            log::error!("LD {:X} is not aligned", addr);
+        if addr & 7 != 0 {
             return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
                 addr,
             )));
@@ -1104,6 +1165,14 @@ instruction_struct!(LDC1);
 
 impl Instruction for LDC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if !s.cop0.cop1_usable() {
+            return Some(InstructionResult::Exception(
+                Exception::CoprocessorUnusable(1),
+            ));
+        }
+
+        // TODO align exception?
+
         let data = s.read::<u64>(op.offset_addr(s));
 
         if s.cop0.f_64() {
@@ -1193,7 +1262,6 @@ impl Instruction for LH {
         let addr = op.offset_addr(s);
 
         if addr & 1 != 0 {
-            log::error!("LH {:X} is not aligned", addr);
             return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
                 addr,
             )));
@@ -1226,7 +1294,6 @@ impl Instruction for LHU {
 
         // TODO raise exception instead
         if addr & 1 != 0 {
-            log::error!("LHU {:X} is not aligned", addr);
             return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
                 addr,
             )));
@@ -1295,7 +1362,6 @@ impl Instruction for LW {
         let addr = op.offset_addr(s);
 
         if addr & 3 != 0 {
-            log::error!("LW {:X} is not aligned @ {:08X}", addr, s.cpu.regs.pc);
             return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
                 addr,
             )));
@@ -1321,13 +1387,19 @@ instruction_struct!(LWC1);
 
 impl Instruction for LWC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if !s.cop0.cop1_usable() {
+            return Some(InstructionResult::Exception(
+                Exception::CoprocessorUnusable(1),
+            ));
+        }
+
         let addr = op.offset_addr(s);
         let data = s.read::<u32>(addr);
 
         if s.cop0.f_64() {
             s.cpu.regs.fpr[op.rt()].set64(data as u64);
         } else {
-            s.cpu.regs.fpr[op.rt() & !1].set64(data as u64);
+            s.cpu.regs.fpr[op.rt() & !1].set64(data as u64); // TODO wrong?
         }
 
         // TODO exceptions
@@ -1422,7 +1494,6 @@ impl Instruction for LWU {
 
         // TODO raise exception instead
         if addr & 3 != 0 {
-            log::error!("LWU {:X} is not aligned", addr);
             return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
                 addr,
             )));
@@ -1640,7 +1711,7 @@ impl Instruction for SD {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
-        if addr & 3 != 0 {
+        if addr & 7 != 0 {
             return Some(InstructionResult::Exception(Exception::AddressErrorStore(
                 addr,
             )));
@@ -1666,6 +1737,14 @@ instruction_struct!(SDC1);
 
 impl Instruction for SDC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if !s.cop0.cop1_usable() {
+            return Some(InstructionResult::Exception(
+                Exception::CoprocessorUnusable(1),
+            ));
+        }
+
+        // TODO align exception?
+
         let addr = op.offset_addr(s);
 
         if s.cop0.f_64() {
@@ -1975,9 +2054,16 @@ instruction_struct!(SUB);
 
 impl Instruction for SUB {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        s.cpu.regs.gpr[op.rd()].set(op.rsv(s).wrapping_sub(op.rtv(s)));
+        let rs = op.rsv(s) as i32;
+        let rt = op.rtv(s) as i32;
 
-        None
+        match rs.checked_sub(rt) {
+            Some(result) => {
+                s.cpu.regs.gpr[op.rd()].set(result as u32);
+                None
+            }
+            None => Some(InstructionResult::Exception(Exception::ArithmeticOverflow)),
+        }
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -2030,6 +2116,12 @@ instruction_struct!(SWC1);
 
 impl Instruction for SWC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if !s.cop0.cop1_usable() {
+            return Some(InstructionResult::Exception(
+                Exception::CoprocessorUnusable(1),
+            ));
+        }
+
         let addr = op.offset_addr(s);
 
         if s.cop0.f_64() {
@@ -2138,14 +2230,189 @@ instruction_struct!(TEQ);
 impl Instruction for TEQ {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if op.rsv64(s) == op.rtv64(s) {
-            log::error!("NOT IMPLEMENTED: TEQ {} == {}", op.rsn(), op.rtn());
+            Some(InstructionResult::Exception(Exception::Trap))
+        } else {
+            None
         }
-
-        None
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
         Disassembly::new(format!("TEQ {}, {}", op.rsn(), op.rtn()))
+    }
+}
+
+instruction_struct!(TEQI);
+
+impl Instruction for TEQI {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if (op.rsv64(s) as i64) == (op.imm16() as i16 as i64) {
+            Some(InstructionResult::Exception(Exception::Trap))
+        } else {
+            None
+        }
+    }
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("TEQI {}, {:#06X}", op.rsn(), op.imm16()))
+    }
+}
+
+instruction_struct!(TGE);
+
+impl Instruction for TGE {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if (op.rsv64(s) as i64) >= (op.rtv64(s) as i64) {
+            Some(InstructionResult::Exception(Exception::Trap))
+        } else {
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("TGE {}, {}", op.rsn(), op.rtn()))
+    }
+}
+
+instruction_struct!(TGEI);
+
+impl Instruction for TGEI {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if (op.rsv64(s) as i64) >= (op.imm16() as i16 as i64) {
+            Some(InstructionResult::Exception(Exception::Trap))
+        } else {
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("TGEI {}, {:#06X}", op.rsn(), op.imm16()))
+    }
+}
+
+instruction_struct!(TGEIU);
+
+impl Instruction for TGEIU {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if op.rsv64(s) >= op.imm16() as i16 as i64 as u64 {
+            Some(InstructionResult::Exception(Exception::Trap))
+        } else {
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("TGEIU {}, {:#06X}", op.rsn(), op.imm16()))
+    }
+}
+
+instruction_struct!(TGEU);
+
+impl Instruction for TGEU {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if op.rsv64(s) >= op.rtv64(s) {
+            Some(InstructionResult::Exception(Exception::Trap))
+        } else {
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("TGEU {}, {}", op.rsn(), op.rtn()))
+    }
+}
+
+instruction_struct!(TLT);
+
+impl Instruction for TLT {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if (op.rsv64(s) as i64) < (op.rtv64(s) as i64) {
+            Some(InstructionResult::Exception(Exception::Trap))
+        } else {
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("TLT {}, {}", op.rsn(), op.rtn()))
+    }
+}
+
+instruction_struct!(TLTI);
+
+impl Instruction for TLTI {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if (op.rsv64(s) as i64) < (op.imm16() as i16 as i64) {
+            Some(InstructionResult::Exception(Exception::Trap))
+        } else {
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("TLTI {}, {:#06X}", op.rsn(), op.imm16()))
+    }
+}
+
+instruction_struct!(TLTIU);
+
+impl Instruction for TLTIU {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if op.rsv64(s) < op.imm16() as i16 as i64 as u64 {
+            Some(InstructionResult::Exception(Exception::Trap))
+        } else {
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("TLTIU {}, {:#06X}", op.rsn(), op.imm16()))
+    }
+}
+
+instruction_struct!(TLTU);
+
+impl Instruction for TLTU {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if op.rsv64(s) < op.rtv64(s) {
+            Some(InstructionResult::Exception(Exception::Trap))
+        } else {
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("TLTU {}, {}", op.rsn(), op.rtn()))
+    }
+}
+
+instruction_struct!(TNE);
+
+impl Instruction for TNE {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if op.rsv64(s) != op.rtv64(s) {
+            Some(InstructionResult::Exception(Exception::Trap))
+        } else {
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("TNE {}, {}", op.rsn(), op.rtn()))
+    }
+}
+
+instruction_struct!(TNEI);
+
+impl Instruction for TNEI {
+    fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        if (op.rsv64(s) as i64) != (op.imm16() as i16 as i64) {
+            Some(InstructionResult::Exception(Exception::Trap))
+        } else {
+            None
+        }
+    }
+
+    fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
+        Disassembly::new(format!("TNEI {}, {:#06X}", op.rsn(), op.imm16()))
     }
 }
 

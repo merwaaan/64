@@ -76,6 +76,9 @@ pub struct Registers {
     pub fpr: [Reg64; 32],
     pub fcr: u32,
 
+    // TODO move out?
+    pub cop2: [Reg64; 32],
+
     pub mult_hi: Reg64,
     pub mult_lo: Reg64,
 
@@ -104,6 +107,8 @@ impl Registers {
 
             fpr: [Reg64::default(); 32],
             fcr: 0,
+
+            cop2: [Reg64::default(); 32],
 
             mult_hi: Reg64::default(),
             mult_lo: Reg64::default(),

@@ -1,7 +1,9 @@
 #![allow(clippy::upper_case_acronyms)]
 
 use super::{Disassembly, Instruction, InstructionResult, Opcode, System};
-use crate::{instruction_struct, instructions::UNKNOWN_, registers::Registers};
+use crate::{
+    exception::Exception, instruction_struct, instructions::UNKNOWN_, registers::Registers,
+};
 
 /// COP1 rs field (bits 25–21).
 fn cop1_rs(opcode: Opcode) -> u32 {
@@ -37,6 +39,12 @@ impl Instruction for CFC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         assert!(op.fs() == 31); // TODO 0 too?
 
+        if !s.cop0.cop1_usable() {
+            return Some(InstructionResult::Exception(
+                Exception::CoprocessorUnusable(1),
+            ));
+        }
+
         s.cpu.regs.gpr[op.rt()].set(op.fsv(s));
 
         None
@@ -56,6 +64,12 @@ instruction_struct!(CTC1);
 impl Instruction for CTC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         assert!(op.fs() == 31); // TODO 0 too?
+
+        if !s.cop0.cop1_usable() {
+            return Some(InstructionResult::Exception(
+                Exception::CoprocessorUnusable(1),
+            ));
+        }
 
         s.cpu.regs.fcr = op.fsv(s);
 
@@ -78,14 +92,18 @@ instruction_struct!(DMFC1);
 
 impl Instruction for DMFC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        // TODO unusable?
+        if !s.cop0.cop1_usable() {
+            return Some(InstructionResult::Exception(
+                Exception::CoprocessorUnusable(1),
+            ));
+        }
 
         let freg = op.fs();
 
         if s.cop0.f_64() {
             s.cpu.regs.gpr[op.rt()].set64(s.cpu.regs.fpr[freg].get64());
         } else {
-            s.cpu.regs.fpr[op.rt()].set64(s.cpu.regs.fpr[freg & !1].get64());
+            s.cpu.regs.gpr[op.rt()].set64(s.cpu.regs.fpr[freg & !1].get64());
         }
 
         None
@@ -100,7 +118,11 @@ instruction_struct!(DMTC1);
 
 impl Instruction for DMTC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        // TODO unusable?
+        if !s.cop0.cop1_usable() {
+            return Some(InstructionResult::Exception(
+                Exception::CoprocessorUnusable(1),
+            ));
+        }
 
         let freg = op.fs();
 
@@ -122,7 +144,11 @@ instruction_struct!(MFC1);
 
 impl Instruction for MFC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        // TODO unusable?
+        if !s.cop0.cop1_usable() {
+            return Some(InstructionResult::Exception(
+                Exception::CoprocessorUnusable(1),
+            ));
+        }
 
         let value = if s.cop0.f_64() || op.fs() & 1 == 0 {
             op.fsv(s)
@@ -144,7 +170,11 @@ instruction_struct!(MTC1);
 
 impl Instruction for MTC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        // TODO unusable?
+        if !s.cop0.cop1_usable() {
+            return Some(InstructionResult::Exception(
+                Exception::CoprocessorUnusable(1),
+            ));
+        }
 
         let freg = op.fs();
         let fval = s.cpu.regs.fpr[freg].get64();

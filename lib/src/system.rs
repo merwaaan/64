@@ -52,7 +52,7 @@ impl System {
 
         match s.load() {
             Ok(()) => {
-                log::info!("Breakpoints loaded");
+                log::debug!("Breakpoints loaded");
             }
             Err(e) => {
                 log::error!("Failed to load breakpoints: {}", e);
@@ -73,12 +73,6 @@ impl System {
         self.cpu.regs.gpr[20].set(0x00000001);
         self.cpu.regs.gpr[22].set(0x0000003F);
         self.cpu.regs.gpr[29].set(0xA4001FF0);
-
-        // TODO cop0 (readthedocs)
-        self.cop0.regs[1].set(0x1F);
-        self.cop0.regs[12].set(0x34000000);
-        self.cop0.regs[15].set(0x00000B00);
-        self.cop0.regs[16].set(0x7006E463); // TODO 7 required by lemmy startup test but not in doc
 
         // Copy the cart's boot code to memory
 

@@ -1,6 +1,6 @@
 use strum::{Display, EnumIter};
 
-use crate::{cop0, exception::Exception, system::System};
+use crate::{exception::Exception, system::System};
 
 #[derive(Debug, Clone, Copy, Display, EnumIter)]
 #[repr(u32)]
