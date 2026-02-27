@@ -44,6 +44,7 @@ pub enum Register {
 pub struct Cop0 {
     regs: [Reg64; 32],
 }
+// TODO bitfields or something?
 
 impl Default for Cop0 {
     fn default() -> Self {
@@ -70,12 +71,55 @@ impl Cop0 {
 
     pub(crate) fn write(&mut self, reg: usize, value: u32) {
         let mask = REG_WRITE_MASK[reg] as u32;
+
         self.regs[reg].set((self.regs[reg].get() & !mask) | (value & mask));
+
+        match reg {
+            // COUNT
+            9 => {
+                self.update_cause_register();
+            }
+            // COMPARE
+            11 => {
+                self.set_ip7_interrupt(false);
+                self.update_cause_register();
+            }
+            _ => {}
+        }
     }
 
     pub(crate) fn write64(&mut self, reg: usize, value: u64) {
         let mask = REG_WRITE_MASK[reg] as u64;
+
         self.regs[reg].set64((self.regs[reg].get64() & !mask) | (value & mask));
+
+        match reg {
+            // COUNT
+            9 => {
+                self.update_cause_register();
+            }
+            // COMPARE
+            11 => {
+                self.set_ip7_interrupt(false);
+                self.update_cause_register();
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn increment_count(&mut self) {
+        self.regs[Register::Count as usize]
+            .set(self.regs[Register::Count as usize].get().wrapping_add(1));
+
+        self.update_cause_register();
+    }
+
+    /// Updates the CAUSE register, must be called when COUNT or COMPARE change
+    fn update_cause_register(&mut self) {
+        if self.regs[Register::Count as usize].get() >= self.regs[Register::Compare as usize].get()
+        {
+            self.set_ip7_interrupt(true);
+        }
     }
 
     // BadVAddr register
@@ -157,6 +201,11 @@ impl Cop0 {
             .set((self.regs[Register::Cause as usize].get() & !0x400) | ((value as u32) << 10));
     }
 
+    fn set_ip7_interrupt(&mut self, value: bool) {
+        self.regs[Register::Cause as usize]
+            .set((self.regs[Register::Cause as usize].get() & !0x8000) | ((value as u32) << 15));
+    }
+
     // EPC register
 
     pub(crate) fn epc(&self) -> u32 {
@@ -177,10 +226,14 @@ impl Cop0 {
         self.regs[Register::ErrorEPC as usize].set(value);
     }
 
-    //
-
     pub(crate) fn f_64(&self) -> bool {
         self.regs[Register::Status as usize].get() & 0x4000_0000 != 0
+    }
+
+    // LLAddr register
+
+    pub(crate) fn set_ll_addr(&mut self, value: u32) {
+        self.regs[Register::LLAddr as usize].set(value >> 4);
     }
 
     // TODO just to_string enum?

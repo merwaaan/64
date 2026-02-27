@@ -14,7 +14,7 @@ pub enum Interrupt {
 }
 
 impl Interrupt {
-    // Checks for pending interrupts ready to be raised
+    /// Raises pending interrupts ready to be serviced
     pub fn check(s: &mut System) {
         // We can only raise interrupts if:
         // - Interrupts are globally enabled
@@ -31,14 +31,7 @@ impl Interrupt {
 
             let interrupts = mask & pending;
 
-            // IP2: MI interrupt
-
-            // TODO other bits?
-
-            // TODO COUNT/COMPARE STUFF
-            //     ip |= 1 << 7; // IP7: XXXXXXXX
-
-            if (interrupts & 4) != 0 {
+            if interrupts != 0 {
                 Exception::Interrupt.raise(s);
             }
         }

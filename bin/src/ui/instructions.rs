@@ -57,7 +57,7 @@ impl Widget for InstructionsWidget {
                 self.instructions = instructions.clone();
             }
             Event::RegistersUpdate(registers) => {
-                self.pc = registers.cpu_regs.pc;
+                self.pc = registers.cpu.regs.pc;
             }
             _ => {}
         }

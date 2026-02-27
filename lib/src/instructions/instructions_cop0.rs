@@ -61,12 +61,14 @@ impl Instruction for ERET {
     fn execute(&self, s: &mut System, _op: Opcode) -> Option<InstructionResult> {
         if s.cop0.erl() {
             unimplemented!("ERET in ERL mode");
-            // s.cpu.regs.pc = s.cop0.error_epc() - 4; // TODO offset???
-            // s.cop0.clear_erl();
+            //s.cpu.regs.pc = s.cop0.error_epc().wrapping_sub(4); // TODO return specific value to signal that instead of adjusting PC?
+            //s.cop0.clear_erl();
         } else {
             s.cpu.regs.pc = s.cop0.epc().wrapping_sub(4); // TODO return specific value to signal that instead of adjusting PC?
             s.cop0.clear_exl();
         }
+
+        s.cpu.regs.load_linked_bit = false;
 
         None
     }

@@ -58,13 +58,20 @@ pub struct Rsp {
     mem: Vec<u8>,
 
     pub regs: [u32; 8],
+
+    pub pc: u32,
 }
 
 impl Default for Rsp {
     fn default() -> Self {
+        let mut regs = [0; 8];
+
+        regs[Register::Status as usize] = 0x0000_0001; // TODO for lemmy
+
         Self {
             mem: vec![0; 0x2000],
-            regs: [0; 8],
+            regs,
+            pc: 0,
         }
     }
 }
@@ -86,64 +93,82 @@ impl Rsp {
     }
 
     pub fn read_reg<T: Value>(&self, addr: RspRegsLocation) -> T {
-        T::read_reg(&self.regs, addr.relative() & REG_MASK)
+        if addr.relative() < 0x4_0000 {
+            T::read_reg(&self.regs, addr.relative() & REG_MASK)
+        } else {
+            if (addr.relative() & 3) != 0 {
+                panic!("Unaligned RSP PC read: {:08X}", addr.relative());
+            }
+
+            T::default() // TODO PC
+        }
     }
 
     pub fn write_reg<T: Value>(s: &mut System, addr: RspRegsLocation, data: T) {
-        let reg = ((addr.relative() & REG_MASK) >> 2) as usize;
+        if addr.relative() < 0x4_0000 {
+            let reg = ((addr.relative() & REG_MASK) >> 2) as usize;
 
-        match reg {
-            0 => {
-                log::warn!("write SP_DMA_SPADDR {:X}", data);
+            match reg {
+                0 => {
+                    log::warn!("write SP_DMA_SPADDR {:X}", data);
 
-                // 11-bit SP address.
-                // Bits 0-2 cannot be written to so the address is always aligned to 8 bytes.
-                // Bit 12 is the "bank" (O = DMEM, 1 = IMEM).
+                    // 11-bit SP address.
+                    // Bits 0-2 cannot be written to so the address is always aligned to 8 bytes.
+                    // Bit 12 is the "bank" (O = DMEM, 1 = IMEM).
 
-                data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
+                    data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
 
-                s.map.rsp.regs[Register::DmaSpAddr as usize] &= 0x0000_1FF8;
+                    s.map.rsp.regs[Register::DmaSpAddr as usize] &= 0x0000_1FF8;
+                }
+                1 => {
+                    log::warn!("write SP_DMA_RAMADDR {:X}", data);
+
+                    // 24-bit RAM address.
+                    // Bits 0-2 cannot be written to so the address is always aligned to 8 bytes.
+
+                    // TODO reads should return the previous value until DMA starts?
+
+                    data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
+
+                    s.map.rsp.regs[Register::DmaRamAddr as usize] &= 0x00FF_FFF8;
+                }
+                2 => {
+                    log::warn!("write SP_DMA_RDLEN {:X}", data);
+
+                    data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
+
+                    Self::start_dma(s, DmaDirection::RamToSp);
+                }
+                3 => {
+                    log::warn!("write SP_DMA_WRLEN {:X}", data);
+
+                    data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
+
+                    Self::start_dma(s, DmaDirection::SpToRam);
+                }
+                4 => {
+                    log::error!("write SP_STATUS {:X}", data);
+                    // TODO!
+                }
+                5 => {
+                    log::error!("write SP_DMA_FULL {:X}", data);
+                }
+                6 => {
+                    log::error!("write SP_DMA_BUSY {:X}", data);
+                }
+                7 => {
+                    log::error!("write SP_SEMAPHORE {:X}", data);
+                }
+                _ => panic!("Invalid RSP register: {:08X}", reg),
             }
-            1 => {
-                log::warn!("write SP_DMA_RAMADDR {:X}", data);
-
-                // 24-bit RAM address.
-                // Bits 0-2 cannot be written to so the address is always aligned to 8 bytes.
-
-                // TODO reads should return the previous value until DMA starts?
-
-                data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
-
-                s.map.rsp.regs[Register::DmaRamAddr as usize] &= 0x00FF_FFF8;
+        } else {
+            if (addr.relative() & 3) != 0 {
+                panic!("Unaligned RSP PC write: {:08X}", addr.relative());
             }
-            2 => {
-                log::warn!("write SP_DMA_RDLEN {:X}", data);
 
-                data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
-
-                Self::start_dma(s, DmaDirection::RamToSp);
-            }
-            3 => {
-                log::warn!("write SP_DMA_WRLEN {:X}", data);
-
-                data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
-
-                Self::start_dma(s, DmaDirection::SpToRam);
-            }
-            4 => {
-                log::error!("write SP_STATUS {:X}", data);
-                // TODO!
-            }
-            5 => {
-                log::error!("write SP_DMA_FULL {:X}", data);
-            }
-            6 => {
-                log::error!("write SP_DMA_BUSY {:X}", data);
-            }
-            7 => {
-                log::error!("write SP_SEMAPHORE {:X}", data);
-            }
-            _ => panic!("Invalid RSP register: {:08X}", reg),
+            let mut pc = [s.map.rsp.pc];
+            data.write_reg(&mut pc, addr.relative() & 0x0000_0003);
+            s.map.rsp.pc = pc[0]; // TODO mask?
         }
     }
 

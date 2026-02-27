@@ -105,7 +105,6 @@ impl Vi {
     pub fn write<T: Value>(s: &mut System, addr: ViLocation, data: T) {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
 
-        log::warn!("Write VI register {:X} @ {:08X}", data, addr.relative());
         // TODO mask on w or r?
 
         match reg {
@@ -134,11 +133,11 @@ impl Vi {
             }
 
             CURRENT_SCANLINE_REG => {
-                // Writing anything to this register clears the Interrupt and resets the current scanline
+                // Writing anything to this register clears the interrupt and resets the current scanline
 
                 s.map.mi.clear_pending_interrupt(Interrupt::Vi, &mut s.cop0);
 
-                s.map.vi.regs[CURRENT_SCANLINE_REG] = 0; // TODO really?
+                //s.map.vi.regs[CURRENT_SCANLINE_REG] = 0; // TODO really?
             }
 
             BURST_REG => {
@@ -217,9 +216,9 @@ impl Vi {
         // Raise the interrupt
         // TODO >= or ==???
 
-        s.map.vi.regs[CURRENT_SCANLINE_REG] += 1;
+        s.map.vi.regs[CURRENT_SCANLINE_REG] += 1; // TODO miss 0?
 
-        if s.map.vi.regs[CURRENT_SCANLINE_REG] >= s.map.vi.regs[V_SYNC_REG] {
+        if s.map.vi.regs[CURRENT_SCANLINE_REG] == s.map.vi.regs[V_SYNC_REG] {
             s.map.vi.regs[CURRENT_SCANLINE_REG] = 0;
         }
 

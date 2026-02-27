@@ -23,7 +23,7 @@ impl Widget for BreakpointsWidget {
                 self.breakpoints = breakpoints.clone();
             }
             Event::RegistersUpdate(registers) => {
-                self.pc = registers.cpu_regs.pc;
+                self.pc = registers.cpu.regs.pc;
             }
             _ => {}
         }
@@ -33,7 +33,7 @@ impl Widget for BreakpointsWidget {
         let mut commands = Vec::new();
 
         Window::new("Breakpoints")
-            .default_pos([900.0, 1400.0])
+            .default_pos([1300.0, 1400.0])
             .show(ctx, |ui| {
                 Grid::new("breakpoints").show(ui, |ui| {
                     // Input

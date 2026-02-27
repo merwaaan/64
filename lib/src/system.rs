@@ -6,7 +6,7 @@ use crate::events::{Cycle, Event, EventType, Events};
 use crate::interrupt::Interrupt;
 use crate::map::Location;
 use crate::rsp::Rsp;
-use crate::{cart::Cart, cpu::CPU, map::Map};
+use crate::{cart::Cart, cpu::Cpu, map::Map};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
@@ -18,7 +18,7 @@ pub enum LoadError {
 
 pub struct System {
     // Components
-    pub cpu: CPU,
+    pub cpu: Cpu,
     pub cop0: Cop0,
     pub map: Map,
 
@@ -34,7 +34,7 @@ pub struct System {
 impl System {
     pub fn new(cart: Cart) -> Self {
         let mut s = Self {
-            cpu: CPU::default(),
+            cpu: Cpu::default(),
             cop0: Cop0::default(),
             map: Map::new(cart),
 
@@ -89,10 +89,14 @@ impl System {
     pub fn step(&mut self) -> bool {
         // Step the CPU
 
-        CPU::step(self);
+        Cpu::step(self);
 
         self.cycles += 2; //if self.odd { 2 } else { 1 };
         self.odd = !self.odd;
+
+        if self.odd {
+            self.cop0.increment_count(); // TODO proper timing
+        }
 
         // Events
         // TODO how many cycles?

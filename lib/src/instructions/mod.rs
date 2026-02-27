@@ -13,7 +13,10 @@ mod opcode;
 
 #[derive(Clone, Copy, Debug)]
 pub enum InstructionResult {
-    DelayedBranching(u32),
+    /// The instruction was a delayed branching.
+    /// If the branch was taken, contains the target address.
+    DelayedBranching(Option<u32>),
+    /// The instruction caused an exception
     Exception(Exception),
 }
 

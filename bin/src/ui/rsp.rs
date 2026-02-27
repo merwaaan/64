@@ -21,7 +21,7 @@ impl Widget for RspWidget {
 
     fn show(&mut self, ctx: &Context) -> Vec<Command> {
         Window::new("RSP")
-            .default_pos([100.0, 200.0])
+            .default_pos([1300.0, 500.0])
             .show(ctx, |ui| {
                 if let Some(rsp_regs) = &self.last_update {
                     let mut show_reg = |reg: Register| {

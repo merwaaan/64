@@ -73,8 +73,8 @@ pub struct Registers {
     pub gpr: [GPReg; 32],
 
     // TODO move out?
-    pub fpr: [Reg64; 32],
-    pub fcr: u32,
+    pub fpr: [Reg64; 32], // Data
+    pub fcr: u32,         // Control // TODO 0 = version?
 
     // TODO move out?
     pub cop2: [Reg64; 32],
@@ -82,18 +82,15 @@ pub struct Registers {
     pub mult_hi: Reg64,
     pub mult_lo: Reg64,
 
+    /// Atomic operation flag used used by set by LL, read by SC and cleared by ERET.
+    /// Referred as "LLbit" in the documentation.
+    // TODO should exceptions clear LL bit?
+    // TODO does MTC0 clear LL bit?
     pub load_linked_bit: bool,
-    pub load_linked_addr: u32,
 }
 
 impl Default for Registers {
     fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Registers {
-    pub fn new() -> Self {
         Self {
             pc: 0,
 
@@ -114,10 +111,11 @@ impl Registers {
             mult_lo: Reg64::default(),
 
             load_linked_bit: false,
-            load_linked_addr: 0,
         }
     }
+}
 
+impl Registers {
     pub fn f_rounding_mode(&self) -> RoundingMode {
         match self.fcr & 0x3 {
             0 => RoundingMode::Nearest,

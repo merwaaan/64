@@ -1,10 +1,10 @@
-use crate::system::System;
+use crate::{cop0, system::System};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Exception {
     Interrupt,
-    AddressErrorLoad(u32),
-    AddressErrorStore(u32),
+    AddressLoad(u32),
+    AddressStore(u32),
     CoprocessorUnusable(u32),
     ArithmeticOverflow,
     Trap,
@@ -12,8 +12,7 @@ pub enum Exception {
 
 impl Exception {
     pub fn raise(&self, s: &mut System) {
-        log::warn!("Exception {:?} at {:08X}", self, s.cpu.regs.pc);
-        let in_branch_delay = s.cpu.delayed_branching.is_some();
+        let in_branch_delay = s.cpu.in_branch_delay_slot();
 
         // Set EXL to prevent nested exceptions
 
@@ -28,7 +27,7 @@ impl Exception {
             let branch_delay_offset = (in_branch_delay as u32) << 2;
 
             let epc = s.cpu.regs.pc.wrapping_sub(branch_delay_offset);
-            log::error!("EPC @ {:08X} (offset: {:08X})", epc, branch_delay_offset);
+
             s.cop0.set_epc(epc);
         }
 
@@ -43,10 +42,10 @@ impl Exception {
         s.cop0.set_coprocessor_error(0);
 
         match self {
-            Exception::AddressErrorLoad(address) => {
+            Exception::AddressLoad(address) => {
                 s.cop0.set_bad_address(*address);
             }
-            Exception::AddressErrorStore(address) => {
+            Exception::AddressStore(address) => {
                 s.cop0.set_bad_address(*address);
             }
             Exception::CoprocessorUnusable(cop) => {
@@ -57,14 +56,22 @@ impl Exception {
 
         // Jump to the exception handler
 
-        s.cpu.regs.pc = 0x8000_0180; // TODO others?
+        s.cpu.regs.pc = 0x8000_0180;
+
+        // TODO others?
+        // TLB ex 32/64 bits cases
+        // BEV
+
+        if s.cop0.read(cop0::Register::Status as usize).get() & 0x0040_0000 != 0 {
+            panic!("BEV not supported");
+        }
     }
 
     pub fn exception_code(&self) -> u32 {
         match self {
             Exception::Interrupt => 0,
-            Exception::AddressErrorLoad(_) => 4,
-            Exception::AddressErrorStore(_) => 5,
+            Exception::AddressLoad(_) => 4,
+            Exception::AddressStore(_) => 5,
             Exception::CoprocessorUnusable(_) => 11,
             Exception::ArithmeticOverflow => 12,
             Exception::Trap => 13,

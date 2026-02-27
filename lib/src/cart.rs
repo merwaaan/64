@@ -7,7 +7,7 @@ use std::{
 use thiserror::Error;
 use zip::ZipArchive;
 
-use crate::{data::Value, map::Location, system::System};
+use crate::{data::Value, isviewer::IsViewer, map::Location, system::System};
 
 #[derive(Debug, Error)]
 pub enum CartError {
@@ -30,11 +30,7 @@ pub type CartLocation = Location<ROM_START, ROM_END>;
 pub struct Cart {
     data: Vec<u8>,
 
-    // TODO name?
-    // TODO to struct with push, flush funcs
-    isviewer_buffer: [u8; 0x200],
-    isviewer_index: usize,
-    isviewer_log: String,
+    pub isviewer: IsViewer,
 }
 
 impl Cart {
@@ -68,9 +64,7 @@ impl Cart {
 
         Ok(Self {
             data,
-            isviewer_buffer: [0; 0x200],
-            isviewer_index: 0,
-            isviewer_log: String::new(),
+            isviewer: IsViewer::default(),
         })
     }
 
@@ -103,20 +97,12 @@ impl Cart {
 
     pub fn write<T: Value>(s: &mut System, addr: CartLocation, data: T) {
         if (0x03FF_0020..0x03FF_0220).contains(&addr.relative()) {
-            data.write_mem(
-                &mut s.map.cart.isviewer_buffer,
-                addr.relative() - 0x03FF_0020,
-            );
-
-            s.map.cart.isviewer_index += T::BYTES;
+            s.map
+                .cart
+                .isviewer
+                .push(addr.relative() - 0x03FF_0020, data);
         } else if addr.relative() == 0x03FF_0014 {
-            let data =
-                String::from_utf8_lossy(&s.map.cart.isviewer_buffer[..s.map.cart.isviewer_index]);
-
-            s.map.cart.isviewer_log += &data;
-            s.map.cart.isviewer_index = 0;
-
-            log::info!("ISVIEWER: {}", s.map.cart.isviewer_log);
+            s.map.cart.isviewer.flush();
         } else {
             log::warn!("write CART: {:08X} {:X}", addr.relative(), data);
         }

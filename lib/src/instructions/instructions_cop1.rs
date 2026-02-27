@@ -37,6 +37,7 @@ instruction_struct!(CFC1);
 
 impl Instruction for CFC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        // This instruction is only defined when fs is 0 or 31
         assert!(op.fs() == 31); // TODO 0 too?
 
         if !s.cop0.cop1_usable() {
@@ -54,7 +55,7 @@ impl Instruction for CFC1 {
         Disassembly::new(format!(
             "CFC1 {}, {}",
             op.rtn(),
-            Registers::fpr_name(op.rd())
+            Registers::fpr_name(op.fs())
         ))
     }
 }
@@ -63,6 +64,7 @@ instruction_struct!(CTC1);
 
 impl Instruction for CTC1 {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        // This instruction is only defined when fs is 0 or 31
         assert!(op.fs() == 31); // TODO 0 too?
 
         if !s.cop0.cop1_usable() {
@@ -83,7 +85,7 @@ impl Instruction for CTC1 {
         Disassembly::new(format!(
             "CTC1 {}, {}",
             op.rtn(),
-            Registers::fpr_name(op.rd())
+            Registers::fpr_name(op.fs())
         ))
     }
 }

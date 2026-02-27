@@ -1,12 +1,9 @@
 use egui::{Context, Window};
-use n64::{
-    cop0::Cop0,
-    registers::{Reg64, Registers},
-};
+use n64::{cop0::Cop0, cpu::Cpu, registers::Registers};
 
 use crate::{
     emu::{command::Command, event::Event},
-    ui::{SettingUpdate, Widget, reg64},
+    ui::{SettingUpdate, Widget, reg32, reg64},
 };
 
 #[derive(Default)]
@@ -16,7 +13,7 @@ pub struct RegistersWidget {
 
 #[derive(Clone, Copy)]
 pub struct RegistersUpdate {
-    pub cpu_regs: Registers,
+    pub cpu: Cpu,
     pub cop0: Cop0,
 }
 
@@ -36,24 +33,35 @@ impl Widget for RegistersWidget {
             .default_pos([800.0, 100.0])
             .show(ctx, |ui| {
                 if let Some(last_update) = &self.last_update {
-                    reg64(ui, "PC", last_update.cpu_regs.pc as u64);
+                    reg64(ui, "STEP", last_update.cpu.step as u64);
+
+                    reg64(ui, "PC", last_update.cpu.regs.pc as u64);
 
                     ui.horizontal(|ui| {
-                        reg64(ui, "HI", last_update.cpu_regs.mult_hi.get64());
-                        reg64(ui, "LO", last_update.cpu_regs.mult_lo.get64());
+                        reg64(ui, "HI", last_update.cpu.regs.mult_hi.get64());
+                        reg64(ui, "LO", last_update.cpu.regs.mult_lo.get64());
                     });
+
+                    reg32(ui, "LLBit", last_update.cpu.regs.load_linked_bit as u32);
+
+                    // GPR
 
                     for row in 0..16 {
                         ui.horizontal(|ui| {
                             for col in 0..2 {
                                 let reg_index = row + col * 16;
                                 let name = Registers::gpr_name(reg_index);
-                                let value = last_update.cpu_regs.gpr[reg_index].get64();
+                                let value = last_update.cpu.regs.gpr[reg_index].get64();
 
                                 reg64(ui, name, value);
                             }
                         });
                     }
+
+                    ui.separator();
+
+                    // COP0
+
                     for row in 0..16 {
                         ui.horizontal(|ui| {
                             for col in 0..2 {
@@ -65,6 +73,24 @@ impl Widget for RegistersWidget {
                             }
                         });
                     }
+
+                    ui.separator();
+
+                    // COP1
+
+                    for row in 0..16 {
+                        ui.horizontal(|ui| {
+                            for col in 0..2 {
+                                let reg_index = row + col * 16;
+                                let name = format!("{:>3}", Registers::fpr_name(reg_index));
+                                let value = last_update.cpu.regs.fpr[reg_index].get64();
+
+                                reg64(ui, name, value);
+                            }
+                        });
+                    }
+
+                    reg32(ui, "FCR", last_update.cpu.regs.fcr);
                 }
             });
 

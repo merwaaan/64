@@ -276,11 +276,13 @@ instruction_struct!(BEQ);
 
 impl Instruction for BEQ {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if op.rsv64(s) == op.rtv64(s) {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
-        } else {
-            None
-        }
+        Some(InstructionResult::DelayedBranching(
+            if op.rsv64(s) == op.rtv64(s) {
+                Some(op.branch_target(s))
+            } else {
+                None
+            },
+        ))
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -298,9 +300,11 @@ instruction_struct!(BEQL);
 impl Instruction for BEQL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if op.rsv64(s) == op.rtv64(s) {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(Some(
+                op.branch_target(s),
+            )))
         } else {
-            // Discard the instruction in the delay slot
+            // Discard the instruction in the delay slot TODO return special val??
             s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
 
             None
@@ -321,11 +325,13 @@ instruction_struct!(BGEZ);
 
 impl Instruction for BGEZ {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if (op.rsv64(s) as i64) >= 0 {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
-        } else {
-            None
-        }
+        Some(InstructionResult::DelayedBranching(
+            if (op.rsv64(s) as i64) >= 0 {
+                Some(op.branch_target(s))
+            } else {
+                None
+            },
+        ))
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -338,9 +344,11 @@ instruction_struct!(BGEZL);
 impl Instruction for BGEZL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if (op.rsv64(s) as i64) >= 0 {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(Some(
+                op.branch_target(s),
+            )))
         } else {
-            // Discard the instruction in the delay slot
+            // Discard the instruction in the delay slot TODO return special val??
             s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
 
             None
@@ -359,14 +367,14 @@ impl Instruction for BGEZAL {
         // Read before linking (matters when rs == 31)
         let rs = op.rsv64(s) as i64;
 
-        // The return address in the instruction that follows the delay slot
+        // The return address is the instruction that follows the delay slot
         s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
-        if rs >= 0 {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
+        Some(InstructionResult::DelayedBranching(if rs >= 0 {
+            Some(op.branch_target(s))
         } else {
             None
-        }
+        }))
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -382,13 +390,15 @@ impl Instruction for BGEZALL {
         // Read before linking (matters when rs == 31)
         let rs = op.rsv64(s) as i64;
 
-        // The return address in the instruction that follows the delay slot
+        // The return address is the instruction that follows the delay slot
         s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
         if rs >= 0 {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(Some(
+                op.branch_target(s),
+            )))
         } else {
-            // Discard the instruction in the delay slot
+            // Discard the instruction in the delay slot TODO return special val??
             s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
 
             None
@@ -405,11 +415,13 @@ instruction_struct!(BGTZ);
 
 impl Instruction for BGTZ {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if (op.rsv64(s) as i64) > 0 {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
-        } else {
-            None
-        }
+        Some(InstructionResult::DelayedBranching(
+            if (op.rsv64(s) as i64) > 0 {
+                Some(op.branch_target(s))
+            } else {
+                None
+            },
+        ))
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -421,11 +433,13 @@ instruction_struct!(BLEZ);
 
 impl Instruction for BLEZ {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if (op.rsv64(s) as i64) <= 0 {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
-        } else {
-            None
-        }
+        Some(InstructionResult::DelayedBranching(
+            if (op.rsv64(s) as i64) <= 0 {
+                Some(op.branch_target(s))
+            } else {
+                None
+            },
+        ))
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -438,9 +452,11 @@ instruction_struct!(BLEZL);
 impl Instruction for BLEZL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if (op.rsv64(s) as i64) <= 0 {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(Some(
+                op.branch_target(s),
+            )))
         } else {
-            // Discard the instruction in the delay slot
+            // Discard the instruction in the delay slot TODO return special val??
             s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
 
             None
@@ -456,11 +472,13 @@ instruction_struct!(BLTZ);
 
 impl Instruction for BLTZ {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if (op.rsv64(s) as i64) < 0 {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
-        } else {
-            None
-        }
+        Some(InstructionResult::DelayedBranching(
+            if (op.rsv64(s) as i64) < 0 {
+                Some(op.branch_target(s))
+            } else {
+                None
+            },
+        ))
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -475,14 +493,14 @@ impl Instruction for BLTZAL {
         // Read before linking (matters when rs == 31)
         let rs = op.rsv64(s) as i64;
 
-        // The return address in the instruction that follows the delay slot
+        // The return address is the instruction that follows the delay slot
         s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
-        if rs < 0 {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
+        Some(InstructionResult::DelayedBranching(if rs < 0 {
+            Some(op.branch_target(s))
         } else {
             None
-        }
+        }))
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -495,9 +513,11 @@ instruction_struct!(BLTZL);
 impl Instruction for BLTZL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if (op.rsv64(s) as i64) < 0 {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(Some(
+                op.branch_target(s),
+            )))
         } else {
-            // Discard the instruction in the delay slot
+            // Discard the instruction in the delay slot TODO return special val??
             s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
 
             None
@@ -513,11 +533,13 @@ instruction_struct!(BNE);
 
 impl Instruction for BNE {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        if op.rsv64(s) != op.rtv64(s) {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
-        } else {
-            None
-        }
+        Some(InstructionResult::DelayedBranching(
+            if op.rsv64(s) != op.rtv64(s) {
+                Some(op.branch_target(s))
+            } else {
+                None
+            },
+        ))
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
@@ -535,9 +557,11 @@ instruction_struct!(BNEL);
 impl Instruction for BNEL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         if op.rsv64(s) != op.rtv64(s) {
-            Some(InstructionResult::DelayedBranching(op.branch_target(s)))
+            Some(InstructionResult::DelayedBranching(Some(
+                op.branch_target(s),
+            )))
         } else {
-            // Discard the instruction in the delay slot
+            // Discard the instruction in the delay slot TODO return special val??
             s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
 
             None
@@ -996,18 +1020,21 @@ instruction_struct!(J);
 
 impl J {
     fn target(pc: u32, op: Opcode) -> u32 {
+        // Because the target address is shifted left by 2, it cannot be unaligned and cause exceptions
+
         let hi = pc.wrapping_add(4) & 0xF000_0000;
         let lo = (op.0 & 0x03FF_FFFF) << 2;
+
         hi | lo
     }
 }
 
 impl Instruction for J {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        Some(InstructionResult::DelayedBranching(J::target(
+        Some(InstructionResult::DelayedBranching(Some(J::target(
             s.cpu.regs.pc,
             op,
-        )))
+        ))))
     }
 
     // TODO cpu doesn't necessarily have the correct PC! just pass the PC?
@@ -1020,13 +1047,13 @@ instruction_struct!(JAL);
 
 impl Instruction for JAL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        // The return address in the instruction that follows the delay slot
+        // The return address is the instruction that follows the delay slot
         s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
-        Some(InstructionResult::DelayedBranching(J::target(
+        Some(InstructionResult::DelayedBranching(Some(J::target(
             s.cpu.regs.pc,
             op,
-        )))
+        ))))
     }
 
     // TODO cpu doesn't necessarily have the correct PC! just pass the PC?
@@ -1042,16 +1069,12 @@ impl Instruction for JALR {
         // Read before linking (matters when rd == rs)
         let target = op.rsv(s);
 
-        if target & 3 != 0 {
-            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
-                target,
-            )));
-        }
-
-        // The return address in the instruction that follows the delay slot
+        // The return address is the instruction that follows the delay slot
         s.cpu.regs.gpr[op.rd()].set(s.cpu.regs.pc.wrapping_add(8));
 
-        Some(InstructionResult::DelayedBranching(target))
+        // If the target address is unaligned, it will cause an exception later, after the delay slot, when it's actually fetched
+
+        Some(InstructionResult::DelayedBranching(Some(target)))
     }
 
     // TODO cpu doesn't necessarily have the correct PC! just pass the PC?
@@ -1071,13 +1094,9 @@ impl Instruction for JR {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let target = op.rsv(s);
 
-        if target & 3 != 0 {
-            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
-                target,
-            )));
-        }
+        // If the target address is unaligned, it will cause an exception later, after the delay slot, when it's actually fetched
 
-        Some(InstructionResult::DelayedBranching(target))
+        Some(InstructionResult::DelayedBranching(Some(target)))
     }
 
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
@@ -1140,9 +1159,7 @@ impl Instruction for LD {
         let addr = op.offset_addr(s);
 
         if addr & 7 != 0 {
-            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
-                addr,
-            )));
+            return Some(InstructionResult::Exception(Exception::AddressLoad(addr)));
         }
 
         s.cpu.regs.gpr[op.rt()].set64(s.read::<u64>(addr));
@@ -1262,9 +1279,7 @@ impl Instruction for LH {
         let addr = op.offset_addr(s);
 
         if addr & 1 != 0 {
-            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
-                addr,
-            )));
+            return Some(InstructionResult::Exception(Exception::AddressLoad(addr)));
         }
 
         let data = s.read::<u16>(addr) as i16 as i32 as u32;
@@ -1294,9 +1309,7 @@ impl Instruction for LHU {
 
         // TODO raise exception instead
         if addr & 1 != 0 {
-            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
-                addr,
-            )));
+            return Some(InstructionResult::Exception(Exception::AddressLoad(addr)));
         }
 
         let data = s.read::<u16>(addr) as u32;
@@ -1322,10 +1335,18 @@ impl Instruction for LL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
 
+        if addr & 3 != 0 {
+            return Some(InstructionResult::Exception(Exception::AddressLoad(addr)));
+        }
+
+        s.cop0.set_ll_addr(addr);
         s.cpu.regs.load_linked_bit = true;
-        s.cpu.regs.load_linked_addr = addr;
+
+        // TODO physical or virtual address?
 
         s.cpu.regs.gpr[op.rt()].set(s.read(addr));
+
+        // TODO should we track LLAddr being overwritten by another LL?
 
         None
     }
@@ -1362,9 +1383,7 @@ impl Instruction for LW {
         let addr = op.offset_addr(s);
 
         if addr & 3 != 0 {
-            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
-                addr,
-            )));
+            return Some(InstructionResult::Exception(Exception::AddressLoad(addr)));
         }
 
         s.cpu.regs.gpr[op.rt()].set(s.read(addr));
@@ -1494,9 +1513,7 @@ impl Instruction for LWU {
 
         // TODO raise exception instead
         if addr & 3 != 0 {
-            return Some(InstructionResult::Exception(Exception::AddressErrorLoad(
-                addr,
-            )));
+            return Some(InstructionResult::Exception(Exception::AddressLoad(addr)));
         }
 
         s.cpu.regs.gpr[op.rt()].set64(s.read::<u32>(addr) as u64);
@@ -1680,16 +1697,19 @@ instruction_struct!(SC);
 
 impl Instruction for SC {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
+        let addr = op.offset_addr(s);
+
+        if addr & 3 != 0 {
+            return Some(InstructionResult::Exception(Exception::AddressStore(addr)));
+        }
+
+        let rt = op.rtv(s);
+
         s.cpu.regs.gpr[op.rt()].set(s.cpu.regs.load_linked_bit as u32);
 
         if s.cpu.regs.load_linked_bit {
-            let addr = op.offset_addr(s);
-            s.write(addr, op.rtv(s));
+            s.write(addr, rt);
         }
-
-        s.cpu.regs.load_linked_bit = false;
-
-        // TODO impl effects: ERET/write to addr/link addr changed
 
         None
     }
@@ -1712,9 +1732,7 @@ impl Instruction for SD {
         let addr = op.offset_addr(s);
 
         if addr & 7 != 0 {
-            return Some(InstructionResult::Exception(Exception::AddressErrorStore(
-                addr,
-            )));
+            return Some(InstructionResult::Exception(Exception::AddressStore(addr)));
         }
 
         s.write(addr, s.cpu.regs.gpr[op.rt()].get64());
@@ -1841,9 +1859,7 @@ impl Instruction for SH {
         let addr = op.offset_addr(s);
 
         if addr & 1 != 0 {
-            return Some(InstructionResult::Exception(Exception::AddressErrorStore(
-                addr,
-            )));
+            return Some(InstructionResult::Exception(Exception::AddressStore(addr)));
         }
 
         let data = op.rtv(s) as u16;
@@ -2091,9 +2107,7 @@ impl Instruction for SW {
         let addr = op.offset_addr(s);
 
         if addr & 3 != 0 {
-            return Some(InstructionResult::Exception(Exception::AddressErrorStore(
-                addr,
-            )));
+            return Some(InstructionResult::Exception(Exception::AddressStore(addr)));
         }
 
         s.write(addr, op.rtv(s));
@@ -2150,6 +2164,8 @@ instruction_struct!(SYNC);
 
 impl Instruction for SYNC {
     fn execute(&self, _s: &mut System, _op: Opcode) -> Option<InstructionResult> {
+        // Same as NOP
+
         None
     }
 

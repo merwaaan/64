@@ -1,12 +1,6 @@
 use strum::{Display, EnumIter};
 
-use crate::{
-    cop0::{self, Cop0},
-    data::Value,
-    interrupt::Interrupt,
-    map::Location,
-    system::System,
-};
+use crate::{cop0::Cop0, data::Value, interrupt::Interrupt, map::Location, system::System};
 
 const START: u32 = 0x0430_0000;
 const END: u32 = 0x0440_0000;
@@ -107,13 +101,11 @@ impl Mi {
                 // TODO repeat count
             }
             1 => {
-                // Not writable
+                // The interrupt register is read-only
             }
-            2 => {
-                log::warn!("Write MI_INTERRUPT {:X}", data);
-            }
+            2 => {}
             3 => {
-                log::warn!("Write MI_MASK {:X}", data);
+                //log::error!("Write to MI_MASK: {:08X}", data);
                 let mut trigger_bits = [0u32];
                 data.write_reg(&mut trigger_bits, addr.relative() & 3);
 
