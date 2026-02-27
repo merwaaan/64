@@ -10,6 +10,7 @@ use crate::{
         colors::Color,
         framebuffer::FramebufferWidget,
         instructions::{InstructionsSettings, InstructionsWidget},
+        isviewer::IsViewerWidget,
         memory::{MemorySettings, MemoryWidget},
         mi::MiWidget,
         registers::RegistersWidget,
@@ -25,6 +26,7 @@ pub mod breakpoints;
 pub mod colors;
 pub mod framebuffer;
 pub mod instructions;
+pub mod isviewer;
 pub mod memory;
 pub mod mi;
 pub mod registers;
@@ -90,6 +92,7 @@ impl Ui {
                 Box::new(RspWidget::default()),
                 Box::new(FramebufferWidget::default()),
                 Box::new(BreakpointsWidget::default()),
+                Box::new(IsViewerWidget::default()),
             ],
             core_thread,
             status: Status::Paused,

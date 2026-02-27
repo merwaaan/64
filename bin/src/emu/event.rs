@@ -16,5 +16,6 @@ pub enum Event {
     RspUpdate([u32; 8]),
     SiUpdate(Si),
     FramebufferUpdate(FramebufferUpdate),
+    IsViewerUpdate(String),
     BreakpointsUpdate(Breakpoints),
 }

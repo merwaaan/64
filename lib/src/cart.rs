@@ -7,7 +7,12 @@ use std::{
 use thiserror::Error;
 use zip::ZipArchive;
 
-use crate::{data::Value, isviewer::IsViewer, map::Location, system::System};
+use crate::{
+    data::Value,
+    isviewer::{IsViewer, IsViewerBufferLocation, IsViewerControlLocation},
+    map::Location,
+    system::System,
+};
 
 #[derive(Debug, Error)]
 pub enum CartError {
@@ -96,15 +101,22 @@ impl Cart {
     }
 
     pub fn write<T: Value>(s: &mut System, addr: CartLocation, data: T) {
-        if (0x03FF_0020..0x03FF_0220).contains(&addr.relative()) {
-            s.map
-                .cart
-                .isviewer
-                .push(addr.relative() - 0x03FF_0020, data);
-        } else if addr.relative() == 0x03FF_0014 {
-            s.map.cart.isviewer.flush();
-        } else {
-            log::warn!("write CART: {:08X} {:X}", addr.relative(), data);
+        match addr.absolute() {
+            // The IS-Viewer is mapped in the cart's region
+            IsViewerControlLocation::START..IsViewerControlLocation::END => {
+                s.map.cart.isviewer.flush();
+            }
+
+            IsViewerBufferLocation::START..IsViewerBufferLocation::END => {
+                s.map
+                    .cart
+                    .isviewer
+                    .push(IsViewerBufferLocation::from_absolute(addr.absolute()), data);
+            }
+
+            _ => {
+                log::warn!("write CART: {:08X} {:X}", addr.relative(), data);
+            }
         }
     }
 }

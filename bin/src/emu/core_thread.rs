@@ -91,12 +91,20 @@ impl CoreThread {
                     if result.is_err() {
                         log::warn!("Core loop panicked");
 
+                        // Notify the UI
+
                         event_tx
                             .send(Event::StatusUpdate(Status::Panicked))
                             .inspect_err(|error| {
                                 log::error!("Failed to send status update: {:?}", error)
                             })
                             .ok();
+
+                        // Send updates to reflect the last state
+
+                        for event in Self::create_update_events(&state) {
+                            let _ = event_tx.send(event);
+                        }
                     } else {
                         break;
                     }
@@ -231,7 +239,7 @@ impl CoreThread {
 
             if state.ui_settings.registers.is_some() {
                 let registers = RegistersUpdate {
-                    cpu_regs: system.cpu.regs,
+                    cpu: system.cpu,
                     cop0: system.cop0,
                 };
 
@@ -264,6 +272,9 @@ impl CoreThread {
             events.push(Event::AiUpdate(system.map.ai));
             events.push(Event::RspUpdate(system.map.rsp.regs));
             events.push(Event::SiUpdate(system.map.si));
+            events.push(Event::IsViewerUpdate(
+                system.map.cart.isviewer.get().to_string(),
+            ));
         }
 
         events
