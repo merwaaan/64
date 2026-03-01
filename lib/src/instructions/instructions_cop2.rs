@@ -97,7 +97,7 @@ impl Instruction for DMFC2 {
 
         let freg = op.fs();
 
-        if s.cop0.f_64() {
+        if s.cop0.f64() {
             s.cpu.regs.gpr[op.rt()].set64(s.cpu.regs.fpr[freg].get64());
         } else {
             s.cpu.regs.gpr[op.rt()].set64(s.cpu.regs.fpr[freg & !1].get64());
@@ -123,7 +123,7 @@ impl Instruction for DMTC2 {
 
         let freg = op.fs();
 
-        if s.cop0.f_64() {
+        if s.cop0.f64() {
             s.cpu.regs.fpr[freg].set64(op.rtv64(s));
         } else {
             s.cpu.regs.fpr[freg & !1].set64(op.rtv64(s));
@@ -147,7 +147,7 @@ impl Instruction for MFC2 {
             ));
         }
 
-        let value = if s.cop0.f_64() || op.fs() & 1 == 0 {
+        let value = if s.cop0.f64() || op.fs() & 1 == 0 {
             op.fsv(s)
         } else {
             (s.cpu.regs.fpr[op.fs() & !1].get64() >> 32) as u32
@@ -176,7 +176,7 @@ impl Instruction for MTC2 {
         let freg = op.fs();
         let fval = s.cpu.regs.fpr[freg].get64();
 
-        if s.cop0.f_64() || freg & 1 == 0 {
+        if s.cop0.f64() || freg & 1 == 0 {
             s.cpu.regs.fpr[freg].set64((fval & 0xFFFFFFFF_00000000) | (op.rtv(s) as u64));
         } else {
             s.cpu.regs.fpr[freg & !1]

@@ -226,8 +226,8 @@ impl Cop0 {
         self.regs[Register::ErrorEPC as usize].set(value);
     }
 
-    pub(crate) fn f_64(&self) -> bool {
-        self.regs[Register::Status as usize].get() & 0x4000_0000 != 0
+    pub(crate) fn f64(&self) -> bool {
+        self.regs[Register::Status as usize].get() & 0x0400_0000 != 0
     }
 
     // LLAddr register

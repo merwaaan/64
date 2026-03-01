@@ -1,4 +1,5 @@
 use crate::cop0::Cop0;
+use crate::cop1::Format;
 use crate::registers::Registers;
 use crate::system::System;
 
@@ -67,6 +68,24 @@ impl Opcode {
         Cop0::reg_name(self.rd())
     }
 
+    // ft
+
+    pub(crate) fn ft(&self) -> usize {
+        ((self.0 >> 16) & 0x1F) as usize
+    }
+
+    pub(crate) fn ftv(&self, s: &System) -> u32 {
+        s.cpu.regs.fpr[self.ft()].get()
+    }
+
+    pub(crate) fn ftv64(&self, s: &System) -> u64 {
+        s.cpu.regs.fpr[self.ft()].get64()
+    }
+
+    pub(crate) fn ftn(&self) -> &'static str {
+        Registers::fpr_name(self.ft())
+    }
+
     // fs
 
     pub(crate) fn fs(&self) -> usize {
@@ -77,8 +96,30 @@ impl Opcode {
         s.cpu.regs.fpr[self.fs()].get()
     }
 
+    pub(crate) fn fsv64(&self, s: &System) -> u64 {
+        s.cpu.regs.fpr[self.fs()].get64()
+    }
+
     pub(crate) fn fsn(&self) -> &'static str {
         Registers::fpr_name(self.fs())
+    }
+
+    // fd
+
+    pub(crate) fn fd(&self) -> usize {
+        ((self.0 >> 6) & 0x1F) as usize
+    }
+
+    pub(crate) fn fdv(&self, s: &System) -> u32 {
+        s.cpu.regs.fpr[self.fd()].get()
+    }
+
+    pub(crate) fn fdv64(&self, s: &System) -> u64 {
+        s.cpu.regs.fpr[self.fd()].get64()
+    }
+
+    pub(crate) fn fdn(&self) -> &'static str {
+        Registers::fpr_name(self.fd())
     }
 
     // base
@@ -122,5 +163,16 @@ impl Opcode {
     // Shift amount
     pub(crate) fn shift(&self) -> u32 {
         (self.0 >> 6) & 0x1F
+    }
+
+    // COP1 format
+    pub(crate) fn cop1_format(&self) -> Format {
+        match (self.0 >> 21) & 0x1F {
+            0x10 => Format::S,
+            0x11 => Format::D,
+            0x20 => Format::W,
+            0x21 => Format::L,
+            _ => unreachable!(),
+        }
     }
 }

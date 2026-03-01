@@ -2,6 +2,7 @@ pub mod ai;
 pub mod breakpoints;
 pub mod cart;
 pub mod cop0;
+pub mod cop1;
 pub mod cpu;
 pub mod data;
 pub mod dd;

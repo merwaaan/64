@@ -69,24 +69,24 @@ fn cop0(#[case] test_name: &str) {
     test(format!("CPUTest/CP0/{test_name}"));
 }
 
-// #[rstest]
-// #[case::abs("ABS/CP1ABS")]
-// #[case::add("ADD/CP1ADD")]
-// #[case::ceil("CEIL/CP1CEIL")]
-// #[case::fullmode("COP1FullMode/COP1FullMode")]
-// #[case::cvt("CVT/CP1CVT")]
-// #[case::div("DIV/CP1DIV")]
-// #[case::floor("FLOOR/CP1FLOOR")]
-// #[case::mul("MUL/CP1MUL")]
-// #[case::neg("NEG/CP1NEG")]
-// #[case::round("ROUND/CP1ROUND")]
-// #[case::sqrt("SQRT/CP1SQRT")]
-// #[case::sub("SUB/CP1SUB")]
-// #[case::trunc("TRUNC/CP1TRUNC")]
-// // TODO "C" group
-// fn cop1(#[case] test_name: &str) {
-//     test(format!("CPUTest/CP1/{test_name}"));
-// }
+#[rstest]
+#[case::abs("ABS/CP1ABS")]
+#[case::add("ADD/CP1ADD")]
+#[case::ceil("CEIL/CP1CEIL")]
+#[case::fullmode("COP1FullMode/COP1FullMode")]
+#[case::cvt("CVT/CP1CVT")]
+#[case::div("DIV/CP1DIV")]
+#[case::floor("FLOOR/CP1FLOOR")]
+#[case::mul("MUL/CP1MUL")]
+#[case::neg("NEG/CP1NEG")]
+#[case::round("ROUND/CP1ROUND")]
+#[case::sqrt("SQRT/CP1SQRT")]
+#[case::sub("SUB/CP1SUB")]
+#[case::trunc("TRUNC/CP1TRUNC")]
+// TODO "C" group
+fn cop1(#[case] test_name: &str) {
+    test(format!("CPUTest/CP1/{test_name}"));
+}
 
 // #[rstest]
 // #[case::dma("DMAAlignment-PI-ROM-FROM")]

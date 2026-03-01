@@ -3,8 +3,8 @@
 use super::{Disassembly, Instruction, InstructionResult, Opcode, System};
 
 use crate::exception::Exception;
-use crate::instruction_struct;
 use crate::instructions::UNKNOWN_;
+use crate::{cop1, instruction_struct};
 
 pub fn decode_special(opcode: Opcode) -> Option<&'static dyn Instruction> {
     debug_assert_eq!(opcode.group(), 0x00);
@@ -1170,7 +1170,7 @@ impl Instruction for LD {
         .with_address_hint(op.offset_addr(s))
     }
 }
-// TODO mvoe down
+
 instruction_struct!(LDC1);
 
 impl Instruction for LDC1 {
@@ -1189,21 +1189,17 @@ impl Instruction for LDC1 {
 
         let data = s.read::<u64>(addr);
 
-        if s.cop0.f_64() {
-            s.cpu.regs.fpr[op.rt()].set64(data);
+        if s.cop0.f64() {
+            cop1::set64_64mode(&mut s.cpu.regs.fpr, op.fs(), data);
         } else {
-            s.cpu.regs.fpr[op.rt()].set(data as u32);
-            s.cpu.regs.fpr[op.rt() + 1].set((data >> 32) as u32);
+            cop1::set64_32mode(&mut s.cpu.regs.fpr, op.fs(), data);
         }
-
-        // TODO exceptions
-        // TODO COP1 enabled?
 
         None
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
-        Disassembly::new(format!("LDC1 {}, {}({})", op.rtn(), op.imm16(), op.basen()))
+        Disassembly::new(format!("LDC1 {}, {}({})", op.ftn(), op.imm16(), op.basen()))
     }
 }
 
@@ -1398,7 +1394,7 @@ impl Instruction for LW {
         .with_address_hint(op.offset_addr(s))
     }
 }
-// TODO mvoe down
+
 instruction_struct!(LWC1);
 
 impl Instruction for LWC1 {
@@ -1417,22 +1413,19 @@ impl Instruction for LWC1 {
 
         let data = s.read::<u32>(addr);
 
-        let rt = op.rt();
+        s.cpu.regs.fpr[op.rt()].set(data);
 
-        if s.cop0.f_64() {
-            s.cpu.regs.fpr[rt].set(data);
-        } else if op.rt() & 1 == 0 {
-            s.cpu.regs.fpr[rt].set(data);
-        } else {
-            s.cpu.regs.fpr[rt & !1]
-                .set64((s.cpu.regs.fpr[op.rt() & !1].get64() & 0xFFFFFFFF) | ((data as u64) << 32));
-        }
+        // if s.cop0.f64() {
+        //     cop1::set32_64mode(&mut s.cpu.regs.fpr, op.fs(), data);
+        // } else {
+        //     cop1::set32_32mode(&mut s.cpu.regs.fpr, op.fs(), data);
+        // }
 
         None
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
-        Disassembly::new(format!("LWC1 {}, {}({})", op.rtn(), op.imm16(), op.basen()))
+        Disassembly::new(format!("LWC1 {}, {}({})", op.ftn(), op.imm16(), op.basen()))
     }
 }
 
@@ -1773,12 +1766,18 @@ impl Instruction for SDC1 {
             return Some(InstructionResult::Exception(Exception::AddressStore(addr)));
         }
 
-        if s.cop0.f_64() {
+        if s.cop0.f64() {
             s.write(addr, s.cpu.regs.fpr[op.rt()].get64());
         } else {
-            s.write(addr + 4, s.cpu.regs.fpr[op.rt() + 1].get());
-            s.write(addr, s.cpu.regs.fpr[op.rt()].get());
+            s.write(addr, s.cpu.regs.fpr[op.rt() + 1].get());
+            s.write(addr + 4, s.cpu.regs.fpr[op.rt()].get());
         }
+
+        // if s.cop0.f64() {
+        //     s.write(addr, cop1::get64_64mode(&s.cpu.regs.fpr, op.fs()));
+        // } else {
+        //     s.write(addr, cop1::get64_32mode(&s.cpu.regs.fpr, op.fs()));
+        // }
 
         None
     }
@@ -1786,9 +1785,9 @@ impl Instruction for SDC1 {
     fn disassemble(&self, s: &System, op: Opcode) -> Disassembly {
         Disassembly::new(format!(
             "SDC1 {}, {:#06X}({})",
-            op.rtn(),
+            op.ftn(),
             op.imm16(),
-            op.rsn()
+            op.basen()
         ))
         .with_address_hint(op.offset_addr(s))
     }
@@ -2150,15 +2149,7 @@ impl Instruction for SWC1 {
             return Some(InstructionResult::Exception(Exception::AddressStore(addr)));
         }
 
-        let rt = op.rt();
-
-        if s.cop0.f_64() {
-            s.write(addr, s.cpu.regs.fpr[rt].get());
-        } else if op.rt() & 1 == 0 {
-            s.write(addr, s.cpu.regs.fpr[rt].get());
-        } else {
-            s.write(addr, (s.cpu.regs.fpr[rt & !1].get64() >> 32) as u32);
-        }
+        s.write(addr, s.cpu.regs.fpr[op.rt()].get());
 
         None
     }
@@ -2166,7 +2157,7 @@ impl Instruction for SWC1 {
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
         Disassembly::new(format!(
             "SWC1 {}, {:#06X}({})",
-            op.rtn(),
+            op.ftn(),
             op.imm16(),
             op.basen()
         ))
