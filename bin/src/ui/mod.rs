@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
-use egui::{Context, Key, MenuBar, TopBottomPanel, UiKind};
+use egui::{Context, CursorIcon, Key, MenuBar, TopBottomPanel, UiKind};
 
 use crate::{
     emu::{command::Command, core_thread::CoreThread, event::Event},
     ui::{
         ai::AiWidget,
-        breakpoints::BreakpointsWidget,
         colors::Color,
+        events::EventsWidget,
         framebuffer::FramebufferWidget,
         instructions::{InstructionsSettings, InstructionsWidget},
         isviewer::IsViewerWidget,
@@ -22,8 +22,8 @@ use crate::{
 };
 
 pub mod ai;
-pub mod breakpoints;
 pub mod colors;
+pub mod events;
 pub mod framebuffer;
 pub mod instructions;
 pub mod isviewer;
@@ -59,11 +59,11 @@ pub trait Widget {
     fn show(&mut self, ctx: &Context) -> Vec<Command>;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Status {
     Running,
     Paused,
-    Panicked,
+    Panicked(String),
 }
 
 pub struct Ui {
@@ -91,7 +91,7 @@ impl Ui {
                 Box::new(AiWidget::default()),
                 Box::new(RspWidget::default()),
                 Box::new(FramebufferWidget::default()),
-                Box::new(BreakpointsWidget::default()),
+                Box::new(EventsWidget::default()),
                 Box::new(IsViewerWidget::default()),
             ],
             core_thread,
@@ -117,9 +117,8 @@ impl Ui {
 
     fn poll_core_thread(&mut self, ctx: &Context) {
         while let Some(event) = self.core_thread.poll_event() {
-            match &event {
-                Event::StatusUpdate(status) => self.status = *status,
-                _ => {}
+            if let Event::StatusUpdate(status) = &event {
+                self.status = status.clone();
             }
 
             for widget in self.widgets.iter_mut() {
@@ -158,13 +157,13 @@ impl eframe::App for Ui {
 
             // Dropped files
 
-            if let Some(file) = input.raw.dropped_files.first() {
-                if let Some(path) = &file.path {
-                    self.core_thread
-                        .send_command(Command::LoadRom(path.clone()));
+            if let Some(file) = input.raw.dropped_files.first()
+                && let Some(path) = &file.path
+            {
+                self.core_thread
+                    .send_command(Command::LoadRom(path.clone()));
 
-                    self.last_rom_path = Some(path.clone());
-                }
+                self.last_rom_path = Some(path.clone());
             }
         });
 
@@ -215,8 +214,12 @@ impl eframe::App for Ui {
 
                 // panicked :(
 
-                if matches!(self.status, Status::Panicked) {
-                    Text::new("⚠ Core panicked").color(Color::Error).show(ui);
+                if let Status::Panicked(error) = &self.status {
+                    Text::new("⚠ Core panicked")
+                        .color(Color::Error)
+                        .show(ui)
+                        .on_hover_text(error)
+                        .on_hover_cursor(CursorIcon::Help);
                 }
 
                 if let Some(rom_name) = &self.last_rom_path.as_ref().and_then(|p| p.file_name()) {

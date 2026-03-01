@@ -34,8 +34,8 @@ impl IsViewer {
         &self.text
     }
 
-    pub(crate) fn push<T: Value>(&mut self, location: IsViewerBufferLocation, data: T) {
-        data.write_mem(&mut self.buffer, location.relative());
+    pub(crate) fn push<T: Value>(&mut self, addr: IsViewerBufferLocation, data: T) {
+        data.write_mem(&mut self.buffer, addr.relative());
 
         self.buffer_size += T::BYTES;
     }

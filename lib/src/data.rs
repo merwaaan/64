@@ -5,7 +5,7 @@ use std::{
 
 // TODO wrapper type BE, NE?
 
-pub trait Value: Sized + Default + LowerHex + UpperHex + std::fmt::Debug {
+pub trait Value: Sized + Copy + Default + LowerHex + UpperHex + std::fmt::Debug {
     const BYTES: usize = mem::size_of::<Self>();
 
     fn read_mem(mem: &[u8], offset: u32) -> Self;
@@ -32,7 +32,7 @@ impl Value for u8 {
     fn write_reg(self, regs: &mut [u32], offset: u32) {
         let word = regs[(offset >> 2) as usize];
         let mut bytes = word.to_be_bytes();
-        bytes[(offset & 3) as usize] = self as u8;
+        bytes[(offset & 3) as usize] = self;
         regs[(offset >> 2) as usize] = u32::from_be_bytes(bytes);
     }
 }

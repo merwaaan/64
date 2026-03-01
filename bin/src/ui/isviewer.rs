@@ -1,4 +1,4 @@
-use egui::{Context, Label, Window};
+use egui::{Context, Label, ScrollArea, Window};
 
 use crate::emu::command::Command;
 use crate::{emu::event::Event, ui::Widget};
@@ -21,7 +21,9 @@ impl Widget for IsViewerWidget {
             .default_width(600.0)
             .show(ctx, |ui| {
                 if let Some(text) = &self.last_update {
-                    ui.add(Label::new(text).wrap());
+                    ScrollArea::vertical().show(ui, |ui| {
+                        ui.add(Label::new(text).wrap());
+                    });
                 }
             });
 

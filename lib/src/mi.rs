@@ -1,6 +1,17 @@
 use strum::{Display, EnumIter};
 
-use crate::{cop0::Cop0, data::Value, interrupt::Interrupt, map::Location, system::System};
+use crate::{cop0::Cop0, data::Value, map::Location, system::System};
+
+#[derive(Debug, Clone, Copy, Display, EnumIter)]
+#[repr(u32)]
+pub enum Interrupt {
+    Sp = 1,
+    Si = 1 << 1,
+    Ai = 1 << 2,
+    Vi = 1 << 3,
+    Pi = 1 << 4,
+    Dp = 1 << 5,
+}
 
 const START: u32 = 0x0430_0000;
 const END: u32 = 0x0440_0000;
@@ -210,12 +221,14 @@ impl Mi {
     // INT_PENDING
 
     pub fn set_pending_interrupt(&mut self, interrupt: Interrupt, cop0: &mut Cop0) {
+        //log::error!("SET PENDING INTERRUPT {:?}", interrupt);
         self.regs[Register::Interrupt as usize] |= interrupt as u32;
 
         Self::update_cause_register(self, cop0);
     }
 
     pub fn clear_pending_interrupt(&mut self, interrupt: Interrupt, cop0: &mut Cop0) {
+        //log::error!("CLEAR PENDING INTERRUPT {:?}", interrupt);
         self.regs[Register::Interrupt as usize] &= !(interrupt as u32);
 
         Self::update_cause_register(self, cop0);

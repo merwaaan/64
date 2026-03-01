@@ -2,11 +2,15 @@ use strum::{Display, EnumIter};
 
 use crate::{
     data::Value,
-    events::{Event, EventType},
-    interrupt::Interrupt,
+    events::{EventType, Events},
     map::Location,
+    mi::Interrupt,
     system::System,
 };
+
+/// Peripheral interface
+///
+/// Handles DMA transfers between RAM and Cartridge.
 
 const START: u32 = 0x0460_0000;
 const END: u32 = 0x0470_0000;
@@ -76,6 +80,7 @@ impl Pi {
 
         match reg {
             DRAM_ADDR_REG => {
+                log::error!("Write DRAM_ADDR {:X} @ {:08X}", data, addr.relative());
                 data.write_reg(&mut s.map.pi.regs, addr.relative() & MASK);
 
                 s.map.pi.regs[DRAM_ADDR_REG] &= 0x00FF_FFFE;
@@ -130,7 +135,7 @@ impl Pi {
         let length = s.map.pi.regs[WRITE_LEN_REG] + 1;
 
         log::info!(
-            "PI DMA transfer: {} bytes from CART {:08X} to DRAM {:08X}",
+            "PI DMA transfer: {} bytes from CART {:08X} to RAM {:08X}",
             length,
             s.map.pi.regs[CART_ADDR_REG],
             s.map.pi.regs[DRAM_ADDR_REG]
@@ -144,6 +149,10 @@ impl Pi {
             s.write::<u8>(dest_base + offset, data);
         }
 
+        s.map.pi.regs[DRAM_ADDR_REG] = s.map.pi.regs[DRAM_ADDR_REG].wrapping_add(length);
+
+        s.map.pi.regs[CART_ADDR_REG] = s.map.pi.regs[CART_ADDR_REG].wrapping_add(length);
+
         // Update the status register
 
         s.map.pi.regs[STATUS_REG] |= STATUS_DMA_BUSY_MASK;
@@ -152,14 +161,14 @@ impl Pi {
 
         // TODO schedule status update
 
-        s.events.push(Event {
-            id: EventType::PiDmaTransferComplete,
-            cycle: s.cycles
-                + (
-                    length / 8
-                    /*+ 100*//* TODO temp hack to match pj */
-                ) as usize,
-        });
+        Events::push(
+            s,
+            EventType::PiDmaTransferComplete,
+            (
+                length / 8
+                /*+ 100*//* TODO temp hack to match pj */
+            ) as usize,
+        );
     }
 
     pub fn dma_completed(s: &mut System) {

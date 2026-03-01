@@ -2,9 +2,9 @@ use strum::{Display, EnumIter};
 
 use crate::{
     data::Value,
-    events::{Event, EventType},
-    interrupt::Interrupt,
+    events::{EventType, Events},
     map::Location,
+    mi::Interrupt,
     system::System,
 };
 
@@ -45,17 +45,20 @@ const FRAMEBUFFER_ADDR_MASK: u32 = 0x00FF_FFFF;
 
 const WIDTH_REG: usize = 2;
 const WIDTH_LO: u32 = (WIDTH_REG as u32) << 2;
-pub const WIDTH_MASK: u32 = 0x0FFF;
+const WIDTH_MASK: u32 = 0x0FFF;
 
 const INTERRUPT_SCANLINE_REG: usize = 3;
 const INTERRUPT_SCANLINE_LO: u32 = (INTERRUPT_SCANLINE_REG as u32) << 2;
-pub const INTERRUPT_SCANLINE_MASK: u32 = 0x03FF;
+const INTERRUPT_SCANLINE_MASK: u32 = 0x03FF;
 
 const CURRENT_SCANLINE_REG: usize = 4;
 //const CURRENT_SCANLINE_LO: u32 = (CURRENT_SCANLINE_REG as u32) << 2;
 
 const BURST_REG: usize = 5;
-const V_SYNC_REG: usize = 6;
+
+const V_SYNC_REG: usize = 6; // TODO rn V_TOTAL?
+const V_SYNC_MASK: u32 = 0x03FF;
+
 const H_SYNC_REG: usize = 7;
 const H_SYNC_LEAP_REG: usize = 8;
 const H_VIDEO_REG: usize = 9;
@@ -76,7 +79,7 @@ impl Default for Vi {
     fn default() -> Self {
         Self {
             regs: [
-                0, 0, 0, 0, 0, 0, 0x271, // TODO PAL = 20D?
+                0, 0, 0, 0, 0, 0, 0, //0x271, // TODO PAL = 20D?
                 0, 0, 0, 0, 0, 0, 0,
             ],
         }
@@ -133,11 +136,9 @@ impl Vi {
             }
 
             CURRENT_SCANLINE_REG => {
-                // Writing anything to this register clears the interrupt and resets the current scanline
+                // Writing anything to this register clears the interrupt
 
                 s.map.mi.clear_pending_interrupt(Interrupt::Vi, &mut s.cop0);
-
-                //s.map.vi.regs[CURRENT_SCANLINE_REG] = 0; // TODO really?
             }
 
             BURST_REG => {
@@ -148,6 +149,8 @@ impl Vi {
                 // TODO
 
                 data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+
+                s.map.vi.regs[V_SYNC_REG] &= V_SYNC_MASK;
             }
 
             H_SYNC_REG => {
@@ -216,20 +219,20 @@ impl Vi {
         // Raise the interrupt
         // TODO >= or ==???
 
-        s.map.vi.regs[CURRENT_SCANLINE_REG] += 1; // TODO miss 0?
-
         if s.map.vi.regs[CURRENT_SCANLINE_REG] == s.map.vi.regs[V_SYNC_REG] {
             s.map.vi.regs[CURRENT_SCANLINE_REG] = 0;
         }
+
+        s.map.vi.regs[CURRENT_SCANLINE_REG] =
+            s.map.vi.regs[CURRENT_SCANLINE_REG].wrapping_add(1) & 0x3FF;
 
         if s.map.vi.regs[CURRENT_SCANLINE_REG] == s.map.vi.regs[INTERRUPT_SCANLINE_REG] {
             s.map.mi.set_pending_interrupt(Interrupt::Vi, &mut s.cop0);
         }
 
-        s.events.push(Event {
-            id: EventType::ViScanlineComplete,
-            cycle: s.cycles + 1000, // TODO!!!
-        });
+        // Schedule the next scanline
+
+        Events::push(s, EventType::ViScanlineComplete, 1587); // TODO
     }
 
     pub fn address_info(addr: ViLocation) -> Option<&'static str> {

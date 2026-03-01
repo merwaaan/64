@@ -30,5 +30,15 @@ impl Pif {
         log::error!("write PIF RAM: {:08X} {:X}", addr.relative(), data);
 
         data.write_mem(&mut s.map.pif.data, addr.relative());
+
+        // TODO could be offset dep on width?
+        if addr.relative() == 0x3C {
+            log::error!("PIF COMMAND??? {:X}", data);
+
+            s.map.pif.data[0x3C] = 0;
+            s.map.pif.data[0x3D] = 0; // TODO single byte or word?
+            s.map.pif.data[0x3E] = 0;
+            s.map.pif.data[0x3F] = 0;
+        }
     }
 }

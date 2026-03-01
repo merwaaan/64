@@ -1,4 +1,4 @@
-use egui::RichText;
+use egui::{Response, RichText};
 
 use crate::ui::colors::Color;
 
@@ -42,7 +42,7 @@ impl Text {
         Self { reverse, ..self }
     }
 
-    pub fn show(self, ui: &mut egui::Ui) {
+    pub fn show(self, ui: &mut egui::Ui) -> Response {
         let mut text = RichText::new(self.text).monospace();
 
         if self.bold {
@@ -63,6 +63,6 @@ impl Text {
             text = text.background_color(self.color);
         }
 
-        ui.label(text);
+        ui.label(text)
     }
 }

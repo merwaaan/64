@@ -89,7 +89,7 @@ impl Cop0 {
     }
 
     pub(crate) fn write64(&mut self, reg: usize, value: u64) {
-        let mask = REG_WRITE_MASK[reg] as u64;
+        let mask = REG_WRITE_MASK[reg];
 
         self.regs[reg].set64((self.regs[reg].get64() & !mask) | (value & mask));
 
@@ -107,7 +107,7 @@ impl Cop0 {
         }
     }
 
-    pub(crate) fn increment_count(&mut self) {
+    pub(crate) fn increment_timer(&mut self) {
         self.regs[Register::Count as usize]
             .set(self.regs[Register::Count as usize].get().wrapping_add(1));
 
@@ -116,7 +116,7 @@ impl Cop0 {
 
     /// Updates the CAUSE register, must be called when COUNT or COMPARE change
     fn update_cause_register(&mut self) {
-        if self.regs[Register::Count as usize].get() >= self.regs[Register::Compare as usize].get()
+        if self.regs[Register::Count as usize].get() == self.regs[Register::Compare as usize].get()
         {
             self.set_ip7_interrupt(true);
         }
@@ -158,8 +158,8 @@ impl Cop0 {
             .set(self.regs[Register::Status as usize].get() & !STATUS_EXL_MASK);
     }
 
-    pub(crate) fn interrupt_mask(&self) -> u32 {
-        (self.regs[Register::Status as usize].get() >> 8) & 0xFF
+    pub(crate) fn interrupt_mask(&self) -> u8 {
+        ((self.regs[Register::Status as usize].get() >> 8) & 0xFF) as u8
     }
 
     pub(crate) fn cop1_usable(&self) -> bool {
@@ -192,8 +192,8 @@ impl Cop0 {
         );
     }
 
-    pub(crate) fn interrupt_pending(&self) -> u32 {
-        (self.regs[Register::Cause as usize].get() >> 8) & 0xFF
+    pub(crate) fn interrupt_pending(&self) -> u8 {
+        ((self.regs[Register::Cause as usize].get() >> 8) & 0xFF) as u8
     }
 
     pub(crate) fn set_ip2_interrupt(&mut self, value: bool) {
@@ -265,7 +265,7 @@ const REG_WRITE_MASK: [u64; 32] = [
     WRITABLE,
     WRITABLE,
     WRITABLE,
-    0xFFFFFFFF_FFF7FFFF, // Status: bit 19 is read-only
+    0xFFFFFFFF_FFF7FFFF, // Status: bit 19 is read-only TODO really?
     0x00000000_00000300, // Cause: only bits for IP0-1 are writable
     WRITABLE,
     READ_ONLY, // PrId

@@ -2,7 +2,7 @@ use crate::{cop0, system::System};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Exception {
-    Interrupt,
+    Interrupt(u8), // u8 = interrupt bits
     AddressLoad(u32),
     AddressStore(u32),
     CoprocessorUnusable(u32),
@@ -12,6 +12,8 @@ pub enum Exception {
 
 impl Exception {
     pub fn raise(&self, s: &mut System) {
+        //log::error!("EXCEPTION {:?}", self);
+
         let in_branch_delay = s.cpu.in_branch_delay_slot();
 
         // Set EXL to prevent nested exceptions
@@ -58,6 +60,8 @@ impl Exception {
 
         s.cpu.regs.pc = 0x8000_0180;
 
+        s.cpu.regs.load_linked_bit = false; // TODO not documented anywhere???
+
         // TODO others?
         // TLB ex 32/64 bits cases
         // BEV
@@ -67,14 +71,47 @@ impl Exception {
         }
     }
 
-    pub fn exception_code(&self) -> u32 {
+    fn exception_code(&self) -> u32 {
         match self {
-            Exception::Interrupt => 0,
+            Exception::Interrupt(_) => 0,
             Exception::AddressLoad(_) => 4,
             Exception::AddressStore(_) => 5,
             Exception::CoprocessorUnusable(_) => 11,
             Exception::ArithmeticOverflow => 12,
             Exception::Trap => 13,
         }
+    }
+
+    /// Raises pending interrupts ready to be serviced
+    pub fn check_interrupts(s: &mut System) -> bool {
+        // We can only raise interrupts if:
+        // - Interrupts are globally enabled
+        // - We are not currently handling an exception
+        // - We are not currently handling an error exception
+
+        if s.cop0.ie() && !s.cop0.exl() && !s.cop0.erl() {
+            // Combine the interrupt mask (Cause register) and the pending bits (Status register).
+            // if any pending interrupt is unmasked, raise it.
+            //
+            // Common interrupts sources:
+            // - Software interrupts (set by programs via MTC0)
+            // - MI (should have set ip2 when its internal pending interrupts are unmasked)
+            // - Timer aka Count/Compare (should have set ip7 when the timer ends)
+
+            // TODO document other interrupt bits?
+
+            let mask = s.cop0.interrupt_mask();
+            let pending = s.cop0.interrupt_pending();
+
+            let interrupts = mask & pending;
+
+            if interrupts != 0 {
+                Exception::Interrupt(interrupts).raise(s);
+
+                return true;
+            }
+        }
+
+        false
     }
 }

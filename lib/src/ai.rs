@@ -2,11 +2,15 @@ use strum::{Display, EnumIter};
 
 use crate::{
     data::Value,
-    events::{Event, EventType},
-    interrupt::Interrupt,
+    events::{EventType, Events},
     map::Location,
+    mi::Interrupt,
     system::System,
 };
+
+/// Audio interface
+///
+/// TODO doc
 
 const START: u32 = 0x0450_0000;
 const END: u32 = 0x0460_0000;
@@ -117,10 +121,11 @@ impl Ai {
 
         s.map.mi.set_pending_interrupt(Interrupt::Ai, &mut s.cop0);
 
-        s.events.push(Event {
-            id: EventType::AiDmaTransferComplete,
-            cycle: s.cycles + 10000, // TODO random lol
-        });
+        Events::push(
+            s,
+            EventType::AiDmaTransferComplete,
+            1000, // TODO random lol
+        );
     }
 
     pub fn dma_completed(s: &mut System) {

@@ -661,7 +661,12 @@ impl Instruction for DADDIU {
     }
 
     fn disassemble(&self, _s: &System, op: Opcode) -> Disassembly {
-        Disassembly::new(format!("DADDIU {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+        Disassembly::new(format!(
+            "DADDIU {}, {}, {:#06X}",
+            op.rtn(),
+            op.rsn(),
+            op.imm16()
+        ))
     }
 }
 
@@ -743,6 +748,7 @@ impl Instruction for DDIV {
 
         if rtv == 0 {
             s.cpu.regs.mult_hi.set64(rsv as u64);
+
             s.cpu
                 .regs
                 .mult_lo
@@ -752,6 +758,7 @@ impl Instruction for DDIV {
                 .regs
                 .mult_hi
                 .set64((rsv).overflowing_rem(rtv).0 as u64);
+
             s.cpu
                 .regs
                 .mult_lo
@@ -770,29 +777,15 @@ instruction_struct!(DDIVU);
 
 impl Instruction for DDIVU {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        let rsv = s.cpu.regs.gpr[op.rs()].get64();
-        let rtv = s.cpu.regs.gpr[op.rt()].get64();
+        let rs = op.rsv64(s);
+        let rt = op.rtv64(s);
 
-        if rtv == 0 {
-            s.cpu.regs.mult_hi.set64(rsv);
+        if rt == 0 {
+            s.cpu.regs.mult_hi.set64(rs);
             s.cpu.regs.mult_lo.set64(u64::MAX);
         } else {
-            s.cpu.regs.mult_hi.set64((rsv).overflowing_rem(rtv).0);
-            s.cpu.regs.mult_lo.set64((rsv).overflowing_div(rtv).0);
-
-            // println!(
-            //     "DDIVU {:X}, {:X}, {:X}, {:X}",
-            //     rsv,
-            //     rtv,
-            //     (rsv).overflowing_div(rtv).0,
-            //     (rsv).overflowing_rem(rtv).0
-            // );
-
-            // println!(
-            //     "mult_hi: {:X}, mult_lo: {:X}",
-            //     s.cpu.regs.mult_hi.get64(),
-            //     s.cpu.regs.mult_lo.get64()
-            // );
+            s.cpu.regs.mult_hi.set64((rs).overflowing_rem(rt).0);
+            s.cpu.regs.mult_lo.set64((rs).overflowing_div(rt).0);
         }
 
         None
@@ -1188,9 +1181,13 @@ impl Instruction for LDC1 {
             ));
         }
 
-        // TODO align exception?
+        let addr = op.offset_addr(s);
 
-        let data = s.read::<u64>(op.offset_addr(s));
+        if addr & 7 != 0 {
+            return Some(InstructionResult::Exception(Exception::AddressLoad(addr)));
+        }
+
+        let data = s.read::<u64>(addr);
 
         if s.cop0.f_64() {
             s.cpu.regs.fpr[op.rt()].set64(data);
@@ -1215,14 +1212,14 @@ instruction_struct!(LDL);
 impl Instruction for LDL {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         let addr = op.offset_addr(s);
-        let base = addr & !7;
-        let offset = addr & 7;
+        let addr_base = addr & !7;
+        let addr_offset = addr & 7;
 
-        let mut dword = s.read::<u64>(base);
+        let mut dword = s.read::<u64>(addr_base);
 
-        if offset != 0 {
-            dword <<= offset * 8;
-            dword |= op.rtv64(s) & !(u64::MAX << (8 * offset));
+        if addr_offset != 0 {
+            dword <<= addr_offset * 8;
+            dword |= op.rtv64(s) & !(u64::MAX << (8 * addr_offset));
         }
 
         s.cpu.regs.gpr[op.rt()].set64(dword);
@@ -1413,16 +1410,23 @@ impl Instruction for LWC1 {
         }
 
         let addr = op.offset_addr(s);
-        let data = s.read::<u32>(addr);
 
-        if s.cop0.f_64() {
-            s.cpu.regs.fpr[op.rt()].set64(data as u64);
-        } else {
-            s.cpu.regs.fpr[op.rt() & !1].set64(data as u64); // TODO wrong?
+        if addr & 3 != 0 {
+            return Some(InstructionResult::Exception(Exception::AddressLoad(addr)));
         }
 
-        // TODO exceptions
-        // TODO COP1 enabled?
+        let data = s.read::<u32>(addr);
+
+        let rt = op.rt();
+
+        if s.cop0.f_64() {
+            s.cpu.regs.fpr[rt].set(data);
+        } else if op.rt() & 1 == 0 {
+            s.cpu.regs.fpr[rt].set(data);
+        } else {
+            s.cpu.regs.fpr[rt & !1]
+                .set64((s.cpu.regs.fpr[op.rt() & !1].get64() & 0xFFFFFFFF) | ((data as u64) << 32));
+        }
 
         None
     }
@@ -1538,7 +1542,7 @@ instruction_struct!(MFHI);
 
 impl Instruction for MFHI {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        s.cpu.regs.gpr[op.rd()].set(s.cpu.regs.mult_hi.get());
+        s.cpu.regs.gpr[op.rd()].set64(s.cpu.regs.mult_hi.get64());
 
         None
     }
@@ -1552,7 +1556,7 @@ instruction_struct!(MFLO);
 
 impl Instruction for MFLO {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        s.cpu.regs.gpr[op.rd()].set(s.cpu.regs.mult_lo.get());
+        s.cpu.regs.gpr[op.rd()].set64(s.cpu.regs.mult_lo.get64());
 
         None
     }
@@ -1566,7 +1570,7 @@ instruction_struct!(MTHI);
 
 impl Instruction for MTHI {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        s.cpu.regs.mult_hi.set64(s.cpu.regs.gpr[op.rs()].get64());
+        s.cpu.regs.mult_hi.set64(op.rsv64(s));
 
         None
     }
@@ -1580,7 +1584,7 @@ instruction_struct!(MTLO);
 
 impl Instruction for MTLO {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
-        s.cpu.regs.mult_lo.set64(s.cpu.regs.gpr[op.rs()].get64());
+        s.cpu.regs.mult_lo.set64(op.rsv64(s));
 
         None
     }
@@ -1711,6 +1715,8 @@ impl Instruction for SC {
             s.write(addr, rt);
         }
 
+        s.cpu.regs.load_linked_bit = false; // TODO not documented anywhere???
+
         None
     }
 
@@ -1761,9 +1767,11 @@ impl Instruction for SDC1 {
             ));
         }
 
-        // TODO align exception?
-
         let addr = op.offset_addr(s);
+
+        if addr & 7 != 0 {
+            return Some(InstructionResult::Exception(Exception::AddressStore(addr)));
+        }
 
         if s.cop0.f_64() {
             s.write(addr, s.cpu.regs.fpr[op.rt()].get64());
@@ -2008,7 +2016,7 @@ impl Instruction for SRA {
         // The high 32 bits of the full 64-bit register actually bleed into the low-bits when shifting.
         // The result is then truncated to 32-bits and sign-extended.
 
-        let res = op.rtv64(s) >> op.shift() as i32 as i64 as u64;
+        let res = (op.rtv64(s) >> op.shift()) as i32 as i64 as u64;
 
         s.cpu.regs.gpr[op.rd()].set64(res);
 
@@ -2026,7 +2034,7 @@ impl Instruction for SRAV {
     fn execute(&self, s: &mut System, op: Opcode) -> Option<InstructionResult> {
         // hardware bug: same as SRA
 
-        let res = op.rtv64(s) >> (op.rsv(s) & 0x1F) as i32 as i64 as u64;
+        let res = (op.rtv64(s) >> (op.rsv(s) & 0x1F)) as i32 as i64 as u64;
 
         s.cpu.regs.gpr[op.rd()].set64(res);
 
@@ -2138,14 +2146,19 @@ impl Instruction for SWC1 {
 
         let addr = op.offset_addr(s);
 
-        if s.cop0.f_64() {
-            s.write(addr, s.cpu.regs.fpr[op.rt()].get());
-        } else {
-            s.write(addr, s.cpu.regs.fpr[op.rt() & !1].get());
+        if addr & 3 != 0 {
+            return Some(InstructionResult::Exception(Exception::AddressStore(addr)));
         }
 
-        // TODO exceptions
-        // TODO COP1 enabled?
+        let rt = op.rt();
+
+        if s.cop0.f_64() {
+            s.write(addr, s.cpu.regs.fpr[rt].get());
+        } else if op.rt() & 1 == 0 {
+            s.write(addr, s.cpu.regs.fpr[rt].get());
+        } else {
+            s.write(addr, (s.cpu.regs.fpr[rt & !1].get64() >> 32) as u32);
+        }
 
         None
     }

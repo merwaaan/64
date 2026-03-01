@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, collections::BinaryHeap};
 
-use crate::{ai::Ai, pi::Pi, rsp::Rsp, system::System, vi::Vi};
+use crate::{ai::Ai, pi::Pi, rsp::Rsp, si::Si, system::System, vi::Vi};
 
 pub type Cycle = usize;
 
@@ -9,6 +9,7 @@ pub enum EventType {
     AiDmaTransferComplete,
     PiDmaTransferComplete,
     RspDmaTransferComplete,
+    SiDmaTransferComplete,
     ViScanlineComplete,
 }
 
@@ -52,6 +53,9 @@ impl Event {
             EventType::RspDmaTransferComplete => {
                 Rsp::dma_completed(s);
             }
+            EventType::SiDmaTransferComplete => {
+                Si::dma_completed(s);
+            }
             EventType::ViScanlineComplete => {
                 Vi::scanline_completed(s);
             }
@@ -61,38 +65,36 @@ impl Event {
 
 #[derive(Default)]
 pub struct Events {
-    pub events: BinaryHeap<Event>,
+    events: BinaryHeap<Event>,
 }
 
 impl Events {
-    pub fn push(&mut self, event: Event) {
-        self.events.push(event);
+    pub(crate) fn push(s: &mut System, event: EventType, in_cycles: Cycle) {
+        s.events.events.push(Event {
+            id: event,
+            cycle: s.cycles + in_cycles,
+        });
     }
 
-    pub fn update(s: &mut System) {
+    pub(crate) fn update(s: &mut System) {
         while let Some(event) = s.events.pop_if_ready(s.cycles) {
             event.handle(s);
         }
     }
 
-    fn pop_if_ready(&mut self, now: Cycle) -> Option<Event> {
+    pub(crate) fn pop_if_ready(&mut self, now: Cycle) -> Option<Event> {
         let event = self.events.peek()?;
 
-        if event.cycle <= now {
+        if now >= event.cycle {
             self.events.pop()
         } else {
             None
         }
     }
 
-    // pub fn update(&mut self) {
-    //     while let Some(event) = self.events.peek() {
-    //         if event.cycle <= self.cycles {
-    //             event.handle(s);
-    //             self.events.pop();
-    //         } else {
-    //             break;
-    //         }
-    //     }
-    // }
+    pub fn snapshot(&self) -> Vec<(EventType, Cycle)> {
+        let mut v: Vec<_> = self.events.iter().map(|e| (e.id, e.cycle)).collect();
+        v.sort_by_key(|&(_, c)| c);
+        v
+    }
 }

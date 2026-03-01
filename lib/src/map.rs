@@ -9,7 +9,7 @@ use crate::{
     pi::{Pi, PiLocation},
     pif::{Pif, PifRamLocation},
     rdram::{Rdram, RdramInterfaceLocation, RdramLocation, RdramRegsLocation},
-    rsp::{Rsp, RspDmemLocation, RspImemLocation, RspRegsLocation},
+    rsp::{Rsp, RspMemLocation, RspRegsLocation},
     si::{Si, SiLocation},
     system::System,
     vi::{Vi, ViLocation},
@@ -21,7 +21,7 @@ use crate::{
 /// Memory map sections can define their own locations:
 ///
 /// ```
-/// pub type RspDmemLocation = Location<0x0400_0000, 0x0401_0000>;
+/// pub type RspDmemLocation = Location<0x0400_0000, 0x0400_1000>;
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct Location<const START: u32, const END: u32>(u32);
@@ -69,8 +69,7 @@ impl<const START: u32, const END: u32> Location<START, END> {
 pub enum MapLocation {
     Rdram(RdramLocation),
     RdramRegs(RdramRegsLocation),
-    RspDmem(RspDmemLocation),
-    RspImem(RspImemLocation),
+    RspMem(RspMemLocation),
     RspRegs(RspRegsLocation),
     Dp(DpLocation),
     Mi(MiLocation),
@@ -128,11 +127,8 @@ impl Map {
             RdramRegsLocation::START..RdramRegsLocation::END => Some(MapLocation::RdramRegs(
                 RdramRegsLocation::from_absolute(addr),
             )),
-            RspDmemLocation::START..RspDmemLocation::END => {
-                Some(MapLocation::RspDmem(RspDmemLocation::from_absolute(addr)))
-            }
-            RspImemLocation::START..RspImemLocation::END => {
-                Some(MapLocation::RspImem(RspImemLocation::from_absolute(addr)))
+            RspMemLocation::START..RspMemLocation::END => {
+                Some(MapLocation::RspMem(RspMemLocation::from_absolute(addr)))
             }
             RspRegsLocation::START..RspRegsLocation::END => {
                 Some(MapLocation::RspRegs(RspRegsLocation::from_absolute(addr)))
@@ -177,7 +173,8 @@ impl Map {
 
     pub fn read<T: Value>(s: &System, addr: u32) -> T {
         // TODO optim, do not check on the fast path
-        Self::try_read(s, addr).unwrap_or_else(|| panic!("Invalid read address: {:08X}", addr))
+        Self::try_read(s, addr)
+            .unwrap_or_else(|| panic!("Invalid read address: {:08X} @ {:08X}", addr, s.cpu.regs.pc))
     }
 
     pub fn try_read<T: Value>(s: &System, addr: u32) -> Option<T> {
@@ -186,8 +183,7 @@ impl Map {
         match location {
             Some(MapLocation::Rdram(addr)) => Some(s.map.rdram.read(addr)),
             Some(MapLocation::RdramRegs(addr)) => Some(s.map.rdram.read_reg(addr)),
-            Some(MapLocation::RspDmem(addr)) => Some(s.map.rsp.read_dmem(addr)),
-            Some(MapLocation::RspImem(addr)) => Some(s.map.rsp.read_imem(addr)),
+            Some(MapLocation::RspMem(addr)) => Some(s.map.rsp.read_mem(addr)),
             Some(MapLocation::RspRegs(addr)) => Some(s.map.rsp.read_reg(addr)),
             Some(MapLocation::Dp(addr)) => Some(s.map.dp.read(addr)),
             Some(MapLocation::Mi(addr)) => Some(s.map.mi.read(addr)),
@@ -211,8 +207,7 @@ impl Map {
         match location {
             Some(MapLocation::Rdram(addr)) => Rdram::write(s, addr, data),
             Some(MapLocation::RdramRegs(addr)) => Rdram::write_reg(s, addr, data),
-            Some(MapLocation::RspDmem(addr)) => Rsp::write_dmem(s, addr, data),
-            Some(MapLocation::RspImem(addr)) => Rsp::write_imem(s, addr, data),
+            Some(MapLocation::RspMem(addr)) => Rsp::write_mem(s, addr, data),
             Some(MapLocation::RspRegs(addr)) => Rsp::write_reg(s, addr, data),
             Some(MapLocation::Dp(addr)) => Dp::write(s, addr, data),
             Some(MapLocation::Mi(addr)) => Mi::write(s, addr, data),

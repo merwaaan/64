@@ -9,7 +9,6 @@ pub mod dp;
 pub mod events;
 pub mod exception;
 pub mod instructions;
-pub mod interrupt;
 pub mod isviewer;
 pub mod map;
 pub mod mi;

@@ -3,8 +3,14 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
-struct Breakpoint {
+pub struct Breakpoint {
     enabled: bool,
+}
+
+impl Breakpoint {
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
@@ -30,6 +36,10 @@ impl Breakpoints {
 
     pub fn should_break(&self, address: u32) -> bool {
         self.breakpoints.get(&address).is_some_and(|b| b.enabled) // TODO if None, return true?b
+    }
+
+    pub fn get(&self, address: u32) -> Option<&Breakpoint> {
+        self.breakpoints.get(&address)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (u32, bool)> {

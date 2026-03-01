@@ -2,8 +2,7 @@ use crate::breakpoints::Breakpoints;
 use crate::cart::CartLocation;
 use crate::cop0::Cop0;
 use crate::data::Value;
-use crate::events::{Cycle, Event, EventType, Events};
-use crate::interrupt::Interrupt;
+use crate::events::{Cycle, EventType, Events};
 use crate::map::Location;
 use crate::rsp::Rsp;
 use crate::{cart::Cart, cpu::Cpu, map::Map};
@@ -24,7 +23,7 @@ pub struct System {
 
     // Scheduling
     pub cycles: Cycle,
-    pub events: Events,
+    pub(crate) events: Events,
     odd: bool, // TODO temp hack to time CPU
 
     // Debugger
@@ -45,10 +44,11 @@ impl System {
             breakpoints: Breakpoints::default(),
         };
 
-        s.events.push(Event {
-            id: EventType::ViScanlineComplete,
-            cycle: 1000, // TODO!!!
-        });
+        // Schedule the first scanline
+
+        Events::push(&mut s, EventType::ViScanlineComplete, 1587); // TODO!
+
+        // Load the breakpoints
 
         match s.load() {
             Ok(()) => {
@@ -78,7 +78,7 @@ impl System {
 
         // TODO which size?
         for i in 0..0x1000u32 {
-            Rsp::write_dmem(
+            Rsp::write_mem(
                 self,
                 Location::from_relative(i),
                 self.map.cart.read::<u8>(CartLocation::from_relative(i)),
@@ -95,15 +95,13 @@ impl System {
         self.odd = !self.odd;
 
         if self.odd {
-            self.cop0.increment_count(); // TODO proper timing
+            self.cop0.increment_timer(); // TODO proper timing
         }
 
         // Events
         // TODO how many cycles?
 
         Events::update(self);
-
-        Interrupt::check(self);
 
         // Breakpoints
 
@@ -126,6 +124,12 @@ impl System {
     pub fn write<T: Value>(&mut self, addr: u32, data: T) {
         Map::write(self, addr, data); // TODO  Map:: really needed???
     }
+
+    pub fn pending_events(&self) -> Vec<(EventType, Cycle)> {
+        self.events.snapshot()
+    }
+
+    // Breakpoints
 
     pub fn breakpoints(&self) -> &Breakpoints {
         &self.breakpoints

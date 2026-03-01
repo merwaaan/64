@@ -94,7 +94,10 @@ impl CoreThread {
                         // Notify the UI
 
                         event_tx
-                            .send(Event::StatusUpdate(Status::Panicked))
+                            .send(Event::StatusUpdate(Status::Panicked(format!(
+                                "{:?}",
+                                result.unwrap_err()
+                            ))))
                             .inspect_err(|error| {
                                 log::error!("Failed to send status update: {:?}", error)
                             })
@@ -268,13 +271,23 @@ impl CoreThread {
 
             // TODO conditional
             events.push(Event::MiUpdate(system.map.mi));
+
             events.push(Event::ViUpdate(system.map.vi));
+
             events.push(Event::AiUpdate(system.map.ai));
+
             events.push(Event::RspUpdate(system.map.rsp.regs));
+
             events.push(Event::SiUpdate(system.map.si));
+
             events.push(Event::IsViewerUpdate(
                 system.map.cart.isviewer.get().to_string(),
             ));
+
+            events.push(Event::CoreEventsUpdate {
+                current_cycle: system.cycles,
+                pending: system.pending_events(),
+            });
         }
 
         events

@@ -1,4 +1,11 @@
-use n64::{ai::Ai, breakpoints::Breakpoints, mi::Mi, si::Si, vi::Vi};
+use n64::{
+    ai::Ai,
+    breakpoints::Breakpoints,
+    events::{Cycle, EventType},
+    mi::Mi,
+    si::Si,
+    vi::Vi,
+};
 
 use crate::ui::{
     Status, framebuffer::FramebufferUpdate, instructions::InstructionData, memory::MemoryUpdate,
@@ -18,4 +25,8 @@ pub enum Event {
     FramebufferUpdate(FramebufferUpdate),
     IsViewerUpdate(String),
     BreakpointsUpdate(Breakpoints),
+    CoreEventsUpdate {
+        current_cycle: Cycle,
+        pending: Vec<(EventType, Cycle)>,
+    },
 }
