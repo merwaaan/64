@@ -1,3 +1,4 @@
 [workspace]
-members = ["lib", "bin"]
+members = ["core", "app", "runner"]
+default-members = ["core", "app"]
 resolver = "3"
