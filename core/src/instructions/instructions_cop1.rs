@@ -1,8 +1,10 @@
 use super::{DisassembleFn, Disassembly, ExecuteFn, InstructionResult, Opcode, System};
 use crate::{
+    check_cop_usable,
     cop1::{self, Format},
     exception::Exception,
     inst,
+    instructions::InstructionEffect,
     registers::Registers,
 };
 
@@ -25,136 +27,146 @@ pub fn decode(opcode: Opcode) -> Option<(ExecuteFn, DisassembleFn)> {
             0x03 => inst!(bc1tl),
             _ => return None,
         },
-        _ => match opcode.0 & 0x3F {
-            0x00 => inst!(add),
-            0x01 => inst!(sub),
-            0x02 => inst!(mul),
-            0x03 => inst!(div),
-            0x04 => inst!(sqrt),
-            0x05 => inst!(abs),
-            0x06 => inst!(mov),
-            0x07 => inst!(neg),
-            0x08 => inst!(round),
-            0x09 => inst!(trunc),
-            0x0A => inst!(ceil),
-            0x0B => inst!(floor),
-            0x0C => inst!(round),
-            0x0D => inst!(trunc),
-            0x0E => inst!(ceil),
-            0x0F => inst!(floor),
-            0x20 => inst!(cvt),
-            0x21 => inst!(cvt),
-            0x24 => inst!(cvt),
-            0x25 => inst!(cvt),
-            0x30 => inst!(c),
-            0x31 => inst!(c),
-            0x32 => inst!(c),
-            0x33 => inst!(c),
-            0x34 => inst!(c),
-            0x35 => inst!(c),
-            0x36 => inst!(c),
-            0x37 => inst!(c),
-            0x38 => inst!(c),
-            0x39 => inst!(c),
-            0x3A => inst!(c),
-            0x3B => inst!(c),
-            0x3C => inst!(c),
-            0x3D => inst!(c),
-            0x3E => inst!(c),
-            0x3F => inst!(c),
-            _ => return None,
-        },
+        _ => {
+            // Expands to `inst!(name)` for the valid formats
+            macro_rules! inst_fmt {
+                ($name:ident; $($fmt:path),* $(,)?) => {
+                    {
+                        match opcode.cop1_format() {
+                            $( Some($fmt) )|* => inst!($name),
+                            _ => return None,
+                        }
+                    }
+                };
+            }
+
+            match opcode.0 & 0x3F {
+                0x00 => inst_fmt!(add; Format::Float32, Format::Float64),
+                0x01 => inst_fmt!(sub; Format::Float32, Format::Float64),
+                0x02 => inst_fmt!(mul; Format::Float32, Format::Float64),
+                0x03 => inst_fmt!(div; Format::Float32, Format::Float64),
+                0x04 => inst_fmt!(sqrt; Format::Float32, Format::Float64),
+                0x05 => inst_fmt!(abs; Format::Float32, Format::Float64),
+                0x06 => inst_fmt!(mov; Format::Float32, Format::Float64),
+                0x07 => inst_fmt!(neg; Format::Float32, Format::Float64),
+                0x08 => inst_fmt!(round; Format::Float32, Format::Float64),
+                0x09 => inst_fmt!(trunc; Format::Float32, Format::Float64),
+                0x0A => inst_fmt!(ceil; Format::Float32, Format::Float64),
+                0x0B => inst_fmt!(floor; Format::Float32, Format::Float64),
+                0x0C => inst_fmt!(round; Format::Float32, Format::Float64),
+                0x0D => inst_fmt!(trunc; Format::Float32, Format::Float64),
+                0x0E => inst_fmt!(ceil; Format::Float32, Format::Float64),
+                0x0F => inst_fmt!(floor; Format::Float32, Format::Float64),
+                0x20 => {
+                    inst_fmt!(cvt; Format::Float32, Format::Float64, Format::Int32, Format::Int64)
+                }
+                0x21 => {
+                    inst_fmt!(cvt; Format::Float32, Format::Float64,  Format::Int32, Format::Int64)
+                }
+                0x24 => {
+                    inst_fmt!(cvt;Format::Float32, Format::Float64,  Format::Int32, Format::Int64)
+                }
+                0x25 => {
+                    inst_fmt!(cvt;Format::Float32, Format::Float64,  Format::Int32, Format::Int64)
+                }
+                0x30 => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x31 => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x32 => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x33 => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x34 => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x35 => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x36 => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x37 => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x38 => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x39 => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x3A => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x3B => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x3C => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x3D => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x3E => inst_fmt!(c; Format::Float32, Format::Float64),
+                0x3F => inst_fmt!(c; Format::Float32, Format::Float64),
+                _ => return None,
+            }
+        }
     })
 }
 
-fn abs_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn abs_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     match op.cop1_format() {
-        Format::Float32 => {
+        Some(Format::Float32) => {
             s.cop1.set32(
                 op.fd(),
                 f32::from_bits(op.fsv(s)).abs().to_bits(),
                 s.cop0.f64(),
             );
         }
-        Format::Float64 => {
+        Some(Format::Float64) => {
             s.cop1.set64(
                 op.fd(),
                 f64::from_bits(op.fsv64(s)).abs().to_bits(),
                 s.cop0.f64(),
             );
         }
-        _ => unimplemented!("ABS with format {}", op.cop1_format()),
+        _ => unimplemented!("ABS with invalid format {:08X}", op.0),
     }
 
     s.cop1.fcr31.set_exception_cause(cop1::Cause::default());
 
-    None
+    Ok(None)
 }
 
 fn abs_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!(
         "ABS.{} {},{}",
-        op.cop1_format(),
+        op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn()
     ))
 }
 
-fn add_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn add_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     match op.cop1_format() {
-        Format::Float32 => {
+        Some(Format::Float32) => {
             let ft = f32::from_bits(op.ftv(s));
             let fs = f32::from_bits(op.fsv(s));
             s.cop1.set32(op.fd(), (ft + fs).to_bits(), s.cop0.f64());
         }
-        Format::Float64 => {
+        Some(Format::Float64) => {
             let ft = f64::from_bits(op.ftv64(s));
             let fs = f64::from_bits(op.fsv64(s));
             s.cop1.set64(op.fd(), (ft + fs).to_bits(), s.cop0.f64());
         }
-        _ => unimplemented!("ADD with format {}", op.cop1_format()),
+        _ => unimplemented!("ADD with invalid format {:08X}", op.0),
     }
 
     s.cop1.fcr31.set_exception_cause(cop1::Cause::default());
 
-    None
+    Ok(None)
 }
 
 fn add_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!(
         "ADD.{} {}, {}, {}",
-        op.cop1_format(),
+        op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn(),
         op.ftn()
     ))
 }
 
-fn bc1f_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn bc1f_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     if !s.cop1.fcr31.comparison_result() {
-        Some(InstructionResult::DelayedBranching(Some(
+        Ok(Some(InstructionEffect::DelayedBranching(Some(
             op.branch_target(s),
-        )))
+        ))))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -162,22 +174,18 @@ fn bc1f_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!("BC1F {:#06X}", op.branch_offset()))
 }
 
-fn bc1fl_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn bc1fl_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     if !s.cop1.fcr31.comparison_result() {
-        Some(InstructionResult::DelayedBranching(Some(
+        Ok(Some(InstructionEffect::DelayedBranching(Some(
             op.branch_target(s),
-        )))
+        ))))
     } else {
         // Discard the instruction in the delay slot TODO return special val??
         s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
 
-        None
+        Ok(None)
     }
 }
 
@@ -185,19 +193,15 @@ fn bc1fl_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!("BC1FL {:#06X}", op.branch_offset()))
 }
 
-fn bc1t_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn bc1t_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     if s.cop1.fcr31.comparison_result() {
-        Some(InstructionResult::DelayedBranching(Some(
+        Ok(Some(InstructionEffect::DelayedBranching(Some(
             op.branch_target(s),
-        )))
+        ))))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -205,22 +209,18 @@ fn bc1t_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!("BC1T {:#06X}", op.branch_offset()))
 }
 
-fn bc1tl_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn bc1tl_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     if s.cop1.fcr31.comparison_result() {
-        Some(InstructionResult::DelayedBranching(Some(
+        Ok(Some(InstructionEffect::DelayedBranching(Some(
             op.branch_target(s),
-        )))
+        ))))
     } else {
         // Discard the instruction in the delay slot TODO return special val??
         s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
 
-        None
+        Ok(None)
     }
 }
 
@@ -249,12 +249,8 @@ fn generic_comparison<T: Comparable>(
     comparison: cop1::Comparison,
     fs: T,
     ft: T,
-) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     let unordered = fs.is_nan() || ft.is_nan();
 
@@ -292,38 +288,38 @@ fn generic_comparison<T: Comparable>(
         .fcr31
         .set_exception_cause(cop1::Cause::default().with_invalid_operation(signal));
 
-    None
+    Ok(None)
 }
 
-fn c_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn c_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     match op.cop1_format() {
-        Format::Float32 => {
+        Some(Format::Float32) => {
             let fs = f32::from_bits(s.cop1.get32(op.fs(), s.cop0.f64()));
             let ft = f32::from_bits(s.cop1.get32(op.ft(), s.cop0.f64()));
 
             generic_comparison(s, op.cop1_comparison(), fs, ft)
         }
-        Format::Float64 => {
+        Some(Format::Float64) => {
             let fs = f64::from_bits(s.cop1.get64(op.fs(), s.cop0.f64()));
             let ft = f64::from_bits(s.cop1.get64(op.ft(), s.cop0.f64()));
 
             generic_comparison(s, op.cop1_comparison(), fs, ft)
         }
-        _ => unimplemented!("C with format {}", op.cop1_format()),
+        _ => unimplemented!("C with invalid format {:08X}", op.0),
     }
 }
 
 fn c_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("C.{}.{}", op.cop1_comparison(), op.cop1_format(),))
+    Disassembly::new(format!(
+        "C.{}.{}",
+        op.cop1_comparison(),
+        op.cop1_format().unwrap(),
+    ))
 }
 
-fn ceil_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
+fn ceil_execute(s: &mut System, op: Opcode) -> InstructionResult {
     generic_rounding_execute::<Ceil>(s, op)
 }
 
@@ -331,18 +327,18 @@ fn ceil_disassemble(s: &System, op: Opcode) -> Disassembly {
     generic_rounding_disassemble::<Ceil>(s, op)
 }
 
-fn cfc1_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    assert!(op.fs() == 31);
+fn cfc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    // TODO enforce 0-31 in decode?
 
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
+    check_cop_usable!(1, s);
+
+    match op.fs() {
+        0 => s.cpu.regs.gpr[op.rt()].set(s.cop1.fcr0),
+        31 => s.cpu.regs.gpr[op.rt()].set(s.cop1.fcr31.read()),
+        _ => unreachable!("CFC1 with invalid fs {}", op.fs()),
     }
 
-    s.cpu.regs.gpr[op.rt()].set(s.cop1.fcr31.read());
-
-    None
+    Ok(None)
 }
 
 fn cfc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
@@ -353,32 +349,28 @@ fn cfc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
     ))
 }
 
-fn ctc1_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    assert!(op.fs() == 31);
+fn ctc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    // TODO enforce 0-31 in decode?
 
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
+    check_cop_usable!(1, s);
+
+    match op.fs() {
+        0 => {}
+        31 => s.cop1.fcr31.write(op.rtv(s)),
+        _ => unreachable!("CTC1 with invalid fs {}", op.fs()),
     }
 
-    s.cop1.fcr31.write(op.rtv(s));
-
-    None
+    Ok(None)
 }
 
 fn ctc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!("CTC1 {}, FCR{}", op.rtn(), op.fs()))
 }
 
-fn cvt_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn cvt_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
-    let input_format = op.cop1_format();
+    let input_format = op.cop1_format().unwrap();
 
     let output_format = match op.0 & 0x3F {
         0b100000 => Format::Float32,
@@ -389,6 +381,9 @@ fn cvt_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
     };
 
     match (output_format, input_format) {
+        // f32 from f32
+        (Format::Float32, Format::Float32) => { /* NOP */ }
+
         // f32 from f64
         (Format::Float32, Format::Float64) => s.cop1.set32(
             op.fd(),
@@ -414,6 +409,9 @@ fn cvt_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
             (f32::from_bits(op.fsv(s)) as f64).to_bits(),
             s.cop0.f64(),
         ),
+
+        // f64 from f64
+        (Format::Float64, Format::Float64) => { /* NOP */ }
 
         // f64 from i32
         (Format::Float64, Format::Int32) => {
@@ -441,7 +439,14 @@ fn cvt_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
             s.cop0.f64(),
         ),
 
-        ////---------------------------------------
+        // i32 from i32
+        (Format::Int32, Format::Int32) => { /* NOP */ }
+
+        // i32 from i64
+        (Format::Int32, Format::Int64) => {
+            // TODO
+            log::error!("CVT.W.L not implemented");
+        }
 
         // i64 from f32
         (Format::Int64, Format::Float32) => s.cop1.set64(
@@ -456,92 +461,88 @@ fn cvt_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
             f64::from_bits(op.fsv64(s)) as i64 as u64,
             s.cop0.f64(),
         ),
-        _ => unimplemented!("CVT.{}.{}", output_format, input_format),
+
+        // i64 from i32
+        (Format::Int64, Format::Int32) => {
+            // TODO
+            log::error!("CVT.L.W not implemented");
+        }
+
+        // i64 from i64
+        (Format::Int64, Format::Int64) => { /* NOP */ }
     }
 
-    None
+    Ok(None)
 }
 
 fn cvt_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!(
         "CVT.{} {}, {}",
-        op.cop1_format(),
+        op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn()
     ))
 }
 
-fn div_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn div_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     match op.cop1_format() {
-        Format::Float32 => {
+        Some(Format::Float32) => {
             let ft = f32::from_bits(op.ftv(s));
             let fs = f32::from_bits(op.fsv(s));
 
             s.cop1.set32(op.fd(), (fs / ft).to_bits(), s.cop0.f64());
         }
-        Format::Float64 => {
+        Some(Format::Float64) => {
             let ft = f64::from_bits(op.ftv64(s));
             let fs = f64::from_bits(op.fsv64(s));
 
             s.cop1.set64(op.fd(), (fs / ft).to_bits(), s.cop0.f64());
         }
-        _ => unimplemented!("DIV with format {}", op.cop1_format()),
+        _ => unimplemented!("DIV with invalid format {:08X}", op.0),
     }
 
-    None
+    Ok(None)
 }
 
 fn div_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!(
         "DIV.{} {}, {}, {}",
-        op.cop1_format(),
+        op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn(),
         op.ftn()
     ))
 }
 
-fn dmfc1_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn dmfc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     let value = s.cop1.get64(op.fs(), s.cop0.f64());
 
     s.cpu.regs.gpr[op.rt()].set64(value);
 
-    None
+    Ok(None)
 }
 
 fn dmfc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!("DMFC1 {}, {}", op.rtn(), op.fsn()))
 }
 
-fn dmtc1_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn dmtc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     s.cop1.set64(op.fs(), op.rtv64(s), s.cop0.f64());
 
-    None
+    Ok(None)
 }
 
 fn dmtc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!("DMTC1 {}, {}", op.rtn(), op.fsn()))
 }
 
-fn floor_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
+fn floor_execute(s: &mut System, op: Opcode) -> InstructionResult {
     generic_rounding_execute::<Floor>(s, op)
 }
 
@@ -549,139 +550,119 @@ fn floor_disassemble(s: &System, op: Opcode) -> Disassembly {
     generic_rounding_disassemble::<Floor>(s, op)
 }
 
-fn mfc1_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn mfc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     let value = s.cop1.get32(op.fs(), s.cop0.f64());
 
     s.cpu.regs.gpr[op.rt()].set(value);
 
-    None
+    Ok(None)
 }
 
 fn mfc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!("MFC1 {}, {}", op.rtn(), op.fsn()))
 }
 
-fn mov_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn mov_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     match op.cop1_format() {
-        Format::Float32 => s.cop1.set32(op.fd(), op.fsv(s), s.cop0.f64()),
-        Format::Float64 => s.cop1.set64(op.fd(), op.fsv64(s), s.cop0.f64()),
-        _ => unimplemented!("MOV with format {}", op.cop1_format()),
+        Some(Format::Float32) => s.cop1.set32(op.fd(), op.fsv(s), s.cop0.f64()),
+        Some(Format::Float64) => s.cop1.set64(op.fd(), op.fsv64(s), s.cop0.f64()),
+        _ => unimplemented!("MOV with invalid format {:08X}", op.0),
     }
 
-    None
+    Ok(None)
 }
 
 fn mov_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!(
         "MOV.{} {},{}",
-        op.cop1_format(),
+        op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn()
     ))
 }
 
-fn mtc1_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn mtc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     s.cop1.set32(op.fs(), op.rtv(s), s.cop0.f64());
 
-    None
+    Ok(None)
 }
 
 fn mtc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!("MTC1 {}, {}", op.rtn(), op.fsn()))
 }
 
-fn mul_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn mul_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     match op.cop1_format() {
-        Format::Float32 => {
+        Some(Format::Float32) => {
             let ft = f32::from_bits(op.ftv(s));
             let fs = f32::from_bits(op.fsv(s));
 
             s.cop1.set32(op.fd(), (ft * fs).to_bits(), s.cop0.f64());
         }
-        Format::Float64 => {
+        Some(Format::Float64) => {
             let ft = f64::from_bits(op.ftv64(s));
             let fs = f64::from_bits(op.fsv64(s));
 
             s.cop1.set64(op.fd(), (ft * fs).to_bits(), s.cop0.f64());
         }
-        _ => unimplemented!("MUL with format {}", op.cop1_format()),
+        _ => unimplemented!("MUL with invalid format {:08X}", op.0),
     }
 
-    None
+    Ok(None)
 }
 
 fn mul_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!(
         "MUL.{} {}, {}, {}",
-        op.cop1_format(),
+        op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn(),
         op.ftn()
     ))
 }
 
-fn neg_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn neg_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     match op.cop1_format() {
-        Format::Float32 => {
+        Some(Format::Float32) => {
             s.cop1.set32(
                 op.fd(),
                 (-f32::from_bits(op.fsv(s))).to_bits(),
                 s.cop0.f64(),
             );
         }
-        Format::Float64 => {
+        Some(Format::Float64) => {
             s.cop1.set64(
                 op.fd(),
                 (-f64::from_bits(op.fsv64(s))).to_bits(),
                 s.cop0.f64(),
             );
         }
-        _ => unimplemented!("NEG with format {}", op.cop1_format()),
+        _ => unimplemented!("NEG with invalid format {:08X}", op.0),
     }
 
-    None
+    Ok(None)
 }
 
 fn neg_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!(
         "NEG.{} {},{}",
-        op.cop1_format(),
+        op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn()
     ))
 }
 
-fn round_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
+fn round_execute(s: &mut System, op: Opcode) -> InstructionResult {
     generic_rounding_execute::<Round>(s, op)
 }
 
@@ -689,80 +670,72 @@ fn round_disassemble(s: &System, op: Opcode) -> Disassembly {
     generic_rounding_disassemble::<Round>(s, op)
 }
 
-fn sqrt_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn sqrt_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     match op.cop1_format() {
-        Format::Float32 => {
+        Some(Format::Float32) => {
             s.cop1.set32(
                 op.fd(),
                 f32::from_bits(op.fsv(s)).sqrt().to_bits(),
                 s.cop0.f64(),
             );
         }
-        Format::Float64 => {
+        Some(Format::Float64) => {
             s.cop1.set64(
                 op.fd(),
                 f64::from_bits(op.fsv64(s)).sqrt().to_bits(),
                 s.cop0.f64(),
             );
         }
-        _ => unimplemented!("SQRT with format {}", op.cop1_format()),
+        _ => unimplemented!("SQRT with invalid format {:08X}", op.0),
     }
 
-    None
+    Ok(None)
 }
 
 fn sqrt_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!(
         "SQRT.{} {}, {}",
-        op.cop1_format(),
+        op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn()
     ))
 }
 
-fn sub_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn sub_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
     match op.cop1_format() {
-        Format::Float32 => {
+        Some(Format::Float32) => {
             let ft = f32::from_bits(op.ftv(s));
             let fs = f32::from_bits(op.fsv(s));
 
             s.cop1.set32(op.fd(), (fs - ft).to_bits(), s.cop0.f64());
         }
-        Format::Float64 => {
+        Some(Format::Float64) => {
             let ft = f64::from_bits(op.ftv64(s));
             let fs = f64::from_bits(op.fsv64(s));
 
             s.cop1.set64(op.fd(), (fs - ft).to_bits(), s.cop0.f64());
         }
-        _ => unimplemented!("SUB with format {}", op.cop1_format()),
+        _ => unimplemented!("SUB with invalid format {:08X}", op.0),
     }
 
-    None
+    Ok(None)
 }
 
 fn sub_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!(
         "SUB.{} {}, {}, {}",
-        op.cop1_format(),
+        op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn(),
         op.ftn()
     ))
 }
 
-fn trunc_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
+fn trunc_execute(s: &mut System, op: Opcode) -> InstructionResult {
     generic_rounding_execute::<Trunc>(s, op)
 }
 
@@ -841,17 +814,10 @@ impl Rounding for Round {
 }
 
 // TODO const generics?
-fn generic_rounding_execute<ROUNDING: Rounding>(
-    s: &mut System,
-    op: Opcode,
-) -> Option<InstructionResult> {
-    if !s.cop0.cop1_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(1),
-        ));
-    }
+fn generic_rounding_execute<ROUNDING: Rounding>(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
 
-    let input_format = op.cop1_format();
+    let input_format = op.cop1_format().unwrap();
 
     let output_format = if (op.0 & ROUNDING::L_MASK) == ROUNDING::L_MASK {
         Format::Int64
@@ -891,7 +857,7 @@ fn generic_rounding_execute<ROUNDING: Rounding>(
         _ => unimplemented!("{}.{}.{}", ROUNDING::NAME, output_format, input_format),
     }
 
-    None
+    Ok(None)
 }
 
 fn generic_rounding_disassemble<ROUNDING: Rounding>(_s: &System, op: Opcode) -> Disassembly {
@@ -905,7 +871,7 @@ fn generic_rounding_disassemble<ROUNDING: Rounding>(_s: &System, op: Opcode) -> 
         "{}.{}.{} {},{}",
         ROUNDING::NAME,
         output_format,
-        op.cop1_format(),
+        op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn()
     ))

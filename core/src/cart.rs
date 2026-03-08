@@ -12,7 +12,7 @@ use crate::{
     data::Value,
     is_supported_rom_file,
     isviewer::{IsViewer, IsViewerBufferLocation, IsViewerControlLocation},
-    map::Location,
+    location::Location,
     system::System,
 };
 
@@ -41,8 +41,9 @@ pub struct Cart {
 }
 
 impl Cart {
+    #[must_use]
     pub fn load(path: &Path) -> Result<Self, CartError> {
-        let mut data = load_rom(path)?;
+        let mut data = load_file(path)?;
 
         // Convert to big-endian, the native N64 format
 
@@ -98,20 +99,19 @@ impl Cart {
     //     self.data[0x3F]
     // }
 
-    pub fn read<T: Value>(&self, addr: CartLocation) -> T {
-        T::read_mem(&self.data, addr.relative() % (self.data.len() as u32)) // TODO mod = costly?
+    pub fn read<T: Value>(s: &System, addr: CartLocation) -> T {
+        T::read_mem(&s.cart.data, addr.relative() % (s.cart.data.len() as u32)) // TODO mod = costly?
     }
 
     pub fn write<T: Value>(s: &mut System, addr: CartLocation, data: T) {
         match addr.absolute() {
             // The IS-Viewer is mapped in the cart's region
             IsViewerControlLocation::START..IsViewerControlLocation::END => {
-                s.map.cart.isviewer.flush();
+                s.cart.isviewer.flush();
             }
 
             IsViewerBufferLocation::START..IsViewerBufferLocation::END => {
-                s.map
-                    .cart
+                s.cart
                     .isviewer
                     .push(IsViewerBufferLocation::from_absolute(addr.absolute()), data);
             }
@@ -123,7 +123,7 @@ impl Cart {
     }
 }
 
-fn load_rom(path: &Path) -> Result<Vec<u8>, CartError> {
+fn load_file(path: &Path) -> Result<Vec<u8>, CartError> {
     let mut data = Vec::new();
 
     if is_supported_rom_file(path) {

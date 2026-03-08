@@ -1,7 +1,6 @@
 use egui::{Context, Label, ScrollArea, Window};
 
-use crate::emu::command::Command;
-use crate::{emu::event::Event, ui::Widget};
+use crate::{emu::{command::Command, event::Event}, ui::Widget};
 
 #[derive(Default)]
 pub struct IsViewerWidget {

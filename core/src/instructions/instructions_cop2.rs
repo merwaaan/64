@@ -1,5 +1,5 @@
 use super::{DisassembleFn, Disassembly, ExecuteFn, InstructionResult, Opcode, System};
-use crate::{exception::Exception, inst, registers::Registers};
+use crate::{check_cop_usable, exception::Exception, inst, registers::Registers};
 
 fn cop2_rs(opcode: Opcode) -> u32 {
     (opcode.0 >> 21) & 0x1F
@@ -19,18 +19,13 @@ pub fn decode(opcode: Opcode) -> Option<(ExecuteFn, DisassembleFn)> {
     })
 }
 
-fn cfc2_execute(s: &mut System, op: Opcode) -> Option<InstructionResult> {
-    assert!(op.fs() == 31);
+fn cfc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
+    check_cop_usable!(2, s);
 
-    if !s.cop0.cop2_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(2),
-        ));
-    }
+    log::error!("UNIMPLEMENTED CFC2");
+    // s.cpu.regs.gpr[op.rt()].set(op.fsv(s));
 
-    s.cpu.regs.gpr[op.rt()].set(op.fsv(s));
-
-    None
+    Ok(None)
 }
 
 fn cfc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
@@ -41,16 +36,12 @@ fn cfc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
     ))
 }
 
-fn ctc2_execute(s: &mut System, _op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop2_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(2),
-        ));
-    }
+fn ctc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
+    check_cop_usable!(2, s);
 
     log::error!("UNIMPLEMENTED CTC2");
 
-    None
+    Ok(None)
 }
 
 fn ctc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
@@ -61,64 +52,48 @@ fn ctc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
     ))
 }
 
-fn dmfc2_execute(s: &mut System, _op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop2_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(2),
-        ));
-    }
+fn dmfc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
+    check_cop_usable!(2, s);
 
     log::error!("UNIMPLEMENTED DMFC2");
 
-    None
+    Ok(None)
 }
 
 fn dmfc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!("DMFC2 {}, {}", op.rtn(), op.fsn()))
 }
 
-fn dmtc2_execute(s: &mut System, _op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop2_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(2),
-        ));
-    }
+fn dmtc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
+    check_cop_usable!(2, s);
 
     log::error!("UNIMPLEMENTED DMTC2");
 
-    None
+    Ok(None)
 }
 
 fn dmtc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!("DMTC2 {}, {}", op.rtn(), op.rd0n()))
 }
 
-fn mfc2_execute(s: &mut System, _op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop2_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(2),
-        ));
-    }
+fn mfc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
+    check_cop_usable!(2, s);
 
     log::error!("UNIMPLEMENTED MFC2");
 
-    None
+    Ok(None)
 }
 
 fn mfc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!("MFC2 {}, {}", op.rtn(), op.rd0n()))
 }
 
-fn mtc2_execute(s: &mut System, _op: Opcode) -> Option<InstructionResult> {
-    if !s.cop0.cop2_usable() {
-        return Some(InstructionResult::Exception(
-            Exception::CoprocessorUnusable(2),
-        ));
-    }
+fn mtc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
+    check_cop_usable!(2, s);
 
     log::error!("UNIMPLEMENTED MTC2");
 
-    None
+    Ok(None)
 }
 
 fn mtc2_disassemble(_s: &System, op: Opcode) -> Disassembly {

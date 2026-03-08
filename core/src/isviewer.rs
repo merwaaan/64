@@ -1,4 +1,4 @@
-use crate::{data::Value, map::Location};
+use crate::{data::Value, location::Location};
 
 pub type IsViewerControlLocation = Location<0x13FF_0014, 0x13FF_0018>;
 pub type IsViewerBufferLocation = Location<0x13FF_0020, 0x13FF_0220>;

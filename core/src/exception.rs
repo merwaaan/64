@@ -3,9 +3,14 @@ use crate::{cop0, system::System};
 #[derive(Debug, Clone, Copy)]
 pub enum Exception {
     Interrupt(u8), // u8 = interrupt bits
+    TlbModification,
+    TlbMissLoad,
+    TlbMissStore,
     AddressLoad(u32),
     AddressStore(u32),
+    Syscall,
     Breakpoint,
+    // TODO ReservedInstruction
     CoprocessorUnusable(u32),
     ArithmeticOverflow,
     Trap,
@@ -31,7 +36,7 @@ impl Exception {
 
             let epc = s.cpu.regs.pc.wrapping_sub(branch_delay_offset);
 
-            s.cop0.set_epc(epc);
+            s.cop0.set_exception_pc(epc);
         }
 
         // TODO ERL???
@@ -46,10 +51,10 @@ impl Exception {
 
         match self {
             Exception::AddressLoad(address) => {
-                s.cop0.set_bad_address(*address);
+                s.cop0.set_bad_virtual_address(*address);
             }
             Exception::AddressStore(address) => {
-                s.cop0.set_bad_address(*address);
+                s.cop0.set_bad_virtual_address(*address);
             }
             Exception::CoprocessorUnusable(cop) => {
                 s.cop0.set_coprocessor_error(*cop);
@@ -75,8 +80,12 @@ impl Exception {
     fn exception_code(&self) -> u32 {
         match self {
             Exception::Interrupt(_) => 0,
+            Exception::TlbModification => 1,
+            Exception::TlbMissLoad => 2,
+            Exception::TlbMissStore => 3,
             Exception::AddressLoad(_) => 4,
             Exception::AddressStore(_) => 5,
+            Exception::Syscall => 8,
             Exception::Breakpoint => 9,
             Exception::CoprocessorUnusable(_) => 11,
             Exception::ArithmeticOverflow => 12,
@@ -116,4 +125,33 @@ impl Exception {
 
         false
     }
+}
+
+/// Checks address alignment.
+/// Returns an exception if unaligned, convenient for instruction implementations.
+#[macro_export]
+macro_rules! check_aligned {
+    (load, $addr:expr, $mask:expr) => {
+        if ($addr & $mask) != 0 {
+            return Err(Exception::AddressLoad($addr));
+        }
+    };
+    (store, $addr:expr, $mask:expr) => {
+        if ($addr & $mask) != 0 {
+            return Err(Exception::AddressStore($addr));
+        }
+    };
+}
+
+/// Checks coprocessor usability.
+/// Returns an exception if unusable, convenient for instruction implementations.
+#[macro_export]
+macro_rules! check_cop_usable {
+    ($cop:literal, $s:expr) => {
+        paste::paste! {
+            if !$s.cop0.[<cop $cop _usable>]() {
+                return Err(Exception::CoprocessorUnusable($cop));
+            }
+        }
+    };
 }

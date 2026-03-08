@@ -3,10 +3,10 @@ use strum::{Display, EnumIter};
 use crate::{
     data::Value,
     events::{EventType, Events},
-    map::Location,
+    location::Location,
     mi::Interrupt,
     pif::{Pif, PifRamLocation},
-    system::System,
+    system::{Address, System},
 };
 
 /// Serial interface
@@ -58,7 +58,7 @@ pub struct Si {
 }
 
 impl Si {
-    pub fn read<T: Value>(&self, addr: SiLocation) -> T {
+    pub fn read<T: Value>(s: &System, addr: SiLocation) -> T {
         // TODO depends???
 
         // TODO temp
@@ -66,73 +66,81 @@ impl Si {
             panic!("Read invalid SI register @ {:08X}", addr.relative());
         }
 
-        T::read_reg(&self.regs, addr.relative() & MASK)
+        T::read_reg(&s.si.regs, addr.relative() & MASK)
     }
 
     pub fn write<T: Value>(s: &mut System, addr: SiLocation, data: T) {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
 
+        // TODO possible to write mult regs???
+        debug_assert!(T::BYTES <= 4, "Writing to multiple SI registers");
+
         match reg {
             DRAM_ADDR_REG => {
-                data.write_reg(&mut s.map.si.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.si.regs, addr.relative() & MASK);
 
-                s.map.si.regs[DRAM_ADDR_REG] &= 0x00FF_FFFF;
+                s.si.regs[DRAM_ADDR_REG] &= 0x00FF_FFFF;
             }
             PIF_ADDR_READ64_REG => {
-                data.write_reg(&mut s.map.si.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.si.regs, addr.relative() & MASK);
 
-                s.map.si.regs[PIF_ADDR_READ64_REG] &= 0x00FF_FFFC;
+                s.si.regs[PIF_ADDR_READ64_REG] &= 0x00FF_FFFC;
 
                 Self::start_dma(s, DmaDirection::PifToRam);
             }
             PIF_ADDR_WRITE64_REG => {
-                data.write_reg(&mut s.map.si.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.si.regs, addr.relative() & MASK);
 
-                s.map.si.regs[PIF_ADDR_READ64_REG] &= 0x00FF_FFFC;
+                s.si.regs[PIF_ADDR_WRITE64_REG] &= 0x00FF_FFFC;
 
                 Self::start_dma(s, DmaDirection::RamToPif);
             }
             STATUS_REG => {
                 // Read-only but writing any value clears the interrupt
 
-                s.map.si.regs[STATUS_REG] &= !STATUS_INTERRUPT_MASK;
+                s.si.regs[STATUS_REG] &= !STATUS_INTERRUPT_MASK;
 
-                s.map.mi.clear_pending_interrupt(Interrupt::Si, &mut s.cop0);
+                s.mi.clear_pending_interrupt(Interrupt::Si, &mut s.cop0);
             }
             _ => unimplemented!("Write SI register @ {:08X}", addr.relative()),
         }
     }
 
     fn start_dma(s: &mut System, dir: DmaDirection) {
-        s.map.si.regs[STATUS_REG] |= STATUS_DMA_BUSY_MASK;
+        s.si.regs[STATUS_REG] |= STATUS_DMA_BUSY_MASK;
         // TODO IO busy?
-        s.map.si.regs[STATUS_REG] &= !STATUS_DMA_ERROR_MASK; // TODO not needed if we never set it
-        s.map.si.regs[STATUS_REG] |= STATUS_INTERRUPT_MASK;
+        s.si.regs[STATUS_REG] &= !STATUS_DMA_ERROR_MASK; // TODO not needed if we never set it
+        s.si.regs[STATUS_REG] |= STATUS_INTERRUPT_MASK;
 
         match dir {
             DmaDirection::PifToRam => {
                 // log::info!(
                 //     "SI DMA transfer: PIF {:08X} to RAM {:08X}",
-                //     s.map.si.regs[PIF_ADDR_READ64_REG],
-                //     s.map.si.regs[DRAM_ADDR_REG],
+                //     s.si.regs[PIF_ADDR_READ64_REG],
+                //     s.si.regs[DRAM_ADDR_REG],
                 // );
 
                 for i in 0..64 {
-                    let data = s.map.pif.read(PifRamLocation::from_relative(i));
+                    let data = Pif::read(s, PifRamLocation::from_relative(i));
 
-                    s.write::<u8>(s.map.si.regs[DRAM_ADDR_REG] + i, data);
+                    s.write::<u8>(Address::p(s.si.regs[DRAM_ADDR_REG] + i), data)
+                        .expect("SI DMA PIF to RAM write failed");
+                    // TODO stop if fails?
                 }
             }
             DmaDirection::RamToPif => {
                 // log::info!(
                 //     "SI DMA transfer: RAM {:08X} to PIF {:08X}",
-                //     s.map.si.regs[DRAM_ADDR_REG],
-                //     s.map.si.regs[PIF_ADDR_READ64_REG]
+                //     s.si.regs[DRAM_ADDR_REG],
+                //     s.si.regs[PIF_ADDR_READ64_REG]
                 // );
 
                 for offset in 0..64 {
                     // TODO limited to RAM? could we just read wider?
-                    let data = s.read::<u8>(s.map.si.regs[DRAM_ADDR_REG] + offset);
+                    let data = s
+                        .read::<u8>(Address::p(s.si.regs[DRAM_ADDR_REG] + offset))
+                        .expect("SI DMA RAM to PIF read failed");
+                    // TODO stop if fails?
 
                     Pif::write(s, PifRamLocation::from_relative(offset), data);
                 }
@@ -141,18 +149,18 @@ impl Si {
 
         // TODO IO?
 
-        Events::push(s, EventType::SiDmaTransferComplete, 10); // TODO???
+        Events::push(s, EventType::SiDmaTransferComplete, 10_000); // TODO which value?
     }
 
     pub fn dma_completed(s: &mut System) {
         // Update the status register
 
-        s.map.si.regs[STATUS_REG] &= !STATUS_DMA_BUSY_MASK;
+        s.si.regs[STATUS_REG] &= !STATUS_DMA_BUSY_MASK;
         // TODO IO busy?
 
         // Raise the interrupt
 
-        s.map.mi.set_pending_interrupt(Interrupt::Si, &mut s.cop0);
+        s.mi.set_pending_interrupt(Interrupt::Si, &mut s.cop0);
     }
 
     // TODO dma_completed

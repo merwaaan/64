@@ -1,6 +1,6 @@
 use strum::{Display, EnumIter};
 
-use crate::{cop0::Cop0, data::Value, map::Location, system::System};
+use crate::{cop0::Cop0, data::Value, location::Location, system::System};
 
 #[derive(Debug, Clone, Copy, Display, EnumIter)]
 #[repr(u32)]
@@ -73,43 +73,50 @@ impl Default for Mi {
 }
 
 impl Mi {
-    pub fn read<T: Value>(&self, addr: MiLocation) -> T {
-        T::read_reg(&self.regs, addr.relative() & MASK)
+    pub fn read<T: Value>(_s: &System, addr: MiLocation) -> T {
+        T::read_reg(&_s.mi.regs, addr.relative() & MASK)
     }
 
     pub fn write<T: Value>(s: &mut System, addr: MiLocation, data: T) {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
+
+        // TODO possible to write mult regs???
+        debug_assert!(T::BYTES <= 4, "Writing to multiple SI registers");
 
         match reg {
             0 => {
                 let mut trigger_bits = [0u32];
                 data.write_reg(&mut trigger_bits, addr.relative() & 3);
 
-                let mode_reg = &mut s.map.mi.regs[Register::Mode as usize];
+                let mut mode_reg = s.mi.regs[Register::Mode as usize];
 
                 if trigger_bits[0] & MODE_WRITE_REPEAT_CLEAR_MASK != 0 {
-                    *mode_reg &= !MODE_WRITE_REPEAT_CLEAR_MASK;
+                    mode_reg &= !MODE_WRITE_REPEAT_CLEAR_MASK;
                 } else if trigger_bits[0] & MODE_WRITE_REPEAT_SET_MASK != 0 {
-                    *mode_reg |= MODE_WRITE_REPEAT_SET_MASK;
+                    mode_reg |= MODE_WRITE_REPEAT_SET_MASK;
                 }
 
                 if trigger_bits[0] & MODE_WRITE_EBUS_CLEAR_MASK != 0 {
-                    *mode_reg &= !MODE_WRITE_EBUS_CLEAR_MASK;
+                    mode_reg &= !MODE_WRITE_EBUS_CLEAR_MASK;
                 } else if trigger_bits[0] & MODE_WRITE_EBUS_SET_MASK != 0 {
-                    *mode_reg |= MODE_WRITE_EBUS_SET_MASK;
+                    mode_reg |= MODE_WRITE_EBUS_SET_MASK;
                 }
 
                 if trigger_bits[0] & MODE_WRITE_DP_CLEAR_MASK != 0 {
-                    *mode_reg &= !(Interrupt::Dp as u32);
+                    mode_reg &= !(Interrupt::Dp as u32);
                 }
 
                 if trigger_bits[0] & MODE_WRITE_UPPER_CLEAR_MASK != 0 {
-                    *mode_reg &= !MODE_WRITE_UPPER_CLEAR_MASK;
+                    mode_reg &= !MODE_WRITE_UPPER_CLEAR_MASK;
                 } else if trigger_bits[0] & MODE_WRITE_UPPER_SET_MASK != 0 {
-                    *mode_reg |= MODE_WRITE_UPPER_SET_MASK;
+                    mode_reg |= MODE_WRITE_UPPER_SET_MASK;
                 }
 
                 // TODO repeat count
+
+                s.mi.regs[Register::Mode as usize] = mode_reg;
+
+                Self::update_cause_register(&mut s.mi, &mut s.cop0);
             }
             1 => {
                 // The interrupt register is read-only
@@ -120,7 +127,7 @@ impl Mi {
                 let mut trigger_bits = [0u32];
                 data.write_reg(&mut trigger_bits, addr.relative() & 3);
 
-                let mask_reg = &mut s.map.mi.regs[Register::Mask as usize];
+                let mask_reg = &mut s.mi.regs[Register::Mask as usize];
 
                 // TODO write without conds?
 
@@ -160,7 +167,7 @@ impl Mi {
                     *mask_reg |= Interrupt::Dp as u32;
                 }
 
-                Self::update_cause_register(&s.map.mi, &mut s.cop0);
+                Self::update_cause_register(&s.mi, &mut s.cop0);
             }
             _ => panic!(
                 "Invalid MI register write: {:08X} {:X} {:X}",
@@ -258,8 +265,8 @@ impl Mi {
 }
 
 pub struct Versions {
-    pub rsp: u8,
-    pub rdp: u8,
+    pub sp: u8,
+    pub dp: u8,
     pub rac: u8,
     pub io: u8,
 }

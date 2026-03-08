@@ -1,9 +1,11 @@
 use crate::{
     exception::Exception,
-    instructions::{InstructionResult, Opcode, decode},
+    instructions::{InstructionEffect, Opcode, decode},
     registers::Registers,
-    system::System,
+    system::{Address, System},
 };
+
+pub const FREQUENCY: f64 = 93_750_000.0;
 
 #[derive(Default, Copy, Clone)]
 pub struct Cpu {
@@ -14,67 +16,48 @@ pub struct Cpu {
     /// - Inner Option: whether the branch was taken
     delayed_branching: Option<Option<u32>>,
 
-    pub step: usize,
-
-    nop_count: usize,
+    pub cycles: usize, // TODO priv
 }
 
 impl Cpu {
     pub fn step(s: &mut System) {
         // Decode and execute the current instruction
 
-        let instruction = s.read(s.cpu.regs.pc);
+        let instruction = s
+            .read(Address::v(s.cpu.regs.pc))
+            .expect("Invalid instruction address"); // TODO handle exception
 
         let opcode = Opcode(instruction);
 
         let handler = decode(opcode);
 
-        // if opcode.0 == 0 {
-        //     s.cpu.nop_count += 1;
-        // } else {
-        //     s.cpu.nop_count = 0;
-        // }
-
-        // if s.cpu.step > 0x2E88000 {
-        //     log::error!(
-        //         "opcode: {:08X} {} @ {:08X}",
-        //         opcode.0,
-        //         handler.unwrap().disassemble(s, opcode).mnemonics,
-        //         s.cpu.regs.pc
-        //     );
-        // }
-
-        if s.cpu.nop_count > 100 {
-            panic!("Nop loop at {:08X}", s.cpu.regs.pc);
-        }
-
-        let instruction_result = match handler {
+        let result = match handler {
             Some((execute, _)) => execute(s, opcode),
             None => {
                 panic!(
                     "Unknown instruction {:08X} at {:08X} / {}",
-                    instruction, s.cpu.regs.pc, s.cpu.step
+                    instruction, s.cpu.regs.pc, s.cpu.cycles
                 );
             }
         };
 
         // Advance the PC
 
-        match instruction_result {
-            Some(InstructionResult::DelayedBranching(target)) => {
+        match result {
+            Ok(Some(InstructionEffect::DelayedBranching(target))) => {
                 Self::advance_pc(s);
 
                 s.cpu.delayed_branching = Some(target);
             }
-            Some(InstructionResult::Exception(exception)) => {
+            Ok(None) => {
+                Self::advance_pc(s);
+            }
+            Err(exception) => {
                 exception.raise(s);
 
                 // Forget about the delayed branching, we don't want the branch to be taken anymore!
                 // (AFTER raising, the exception handling needs to know about it to set the BD bit of CAUSE)
                 s.cpu.delayed_branching = None;
-            }
-            None => {
-                Self::advance_pc(s);
             }
         }
 
@@ -84,9 +67,9 @@ impl Cpu {
             s.cpu.delayed_branching = None;
         }
 
-        // TODO rm
+        // Count cycles
 
-        s.cpu.step += 1;
+        s.cpu.cycles = s.cpu.cycles.wrapping_add(1);
     }
 
     #[inline(always)]
@@ -94,7 +77,7 @@ impl Cpu {
         if let Some(Some(target)) = s.cpu.delayed_branching.take() {
             s.cpu.regs.pc = target;
 
-            // Handle unaligned target addresses
+            // Raise an exception if the target address is unaligned
 
             if target & 3 != 0 {
                 Exception::AddressLoad(target).raise(s);

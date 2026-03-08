@@ -1,4 +1,4 @@
-use crate::{data::Value, map::Location, system::System};
+use crate::{data::Value, location::Location, system::System};
 
 const REG_START: u32 = 0x0410_0000;
 const REG_END: u32 = 0x0420_0000;
@@ -22,7 +22,7 @@ pub struct Dp {
 }
 
 impl Dp {
-    pub fn read<T: Value>(&self, addr: DpLocation) -> T {
+    pub fn read<T: Value>(_s: &System, addr: DpLocation) -> T {
         log::warn!("Read DP register @ {:08X} UNIMPLEMENTED", addr.relative());
 
         T::default()
@@ -31,15 +31,18 @@ impl Dp {
     pub fn write<T: Value>(s: &mut System, addr: DpLocation, data: T) {
         log::warn!("Write DP register @ {:08X} {:X}", addr.relative(), data);
 
+        // TODO possible to write mult regs???
+        debug_assert!(T::BYTES <= 4, "Writing to multiple DP registers");
+
         match (addr.relative() >> 2) & MASK {
             START_REG => {
-                data.write_reg(&mut s.map.dp.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.dp.regs, addr.relative() & MASK);
             }
             END_REG => {
-                data.write_reg(&mut s.map.dp.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.dp.regs, addr.relative() & MASK);
             }
             STATUS_REG => {
-                data.write_reg(&mut s.map.dp.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.dp.regs, addr.relative() & MASK);
             }
             _ => panic!(
                 "Invalid DP register write: {:08X} {:X}",
@@ -51,8 +54,8 @@ impl Dp {
 
     // fn start_dma(s: &mut System, direction: DmaDirection) {
     //     let length_reg = match direction {
-    //         DmaDirection::RamToSp => s.map.rsp.regs[Register::DmaRdLen as usize],
-    //         DmaDirection::SpToRam => s.map.rsp.regs[Register::DmaWrLen as usize],
+    //         DmaDirection::RamToSp => s.rsp.regs[Register::DmaRdLen as usize],
+    //         DmaDirection::SpToRam => s.rsp.regs[Register::DmaWrLen as usize],
     //     };
 
     //     // Number of bytes to copy per "row"
@@ -69,8 +72,8 @@ impl Dp {
 
     //     let skips = (length_reg >> 20) & !7;
 
-    //     let mut ram_addr = s.map.rsp.regs[Register::DmaRamAddr as usize] & 0x00FF_FFF8;
-    //     let mut sp_addr = s.map.rsp.regs[Register::DmaSpAddr as usize] & 0x0000_1FF8;
+    //     let mut ram_addr = s.rsp.regs[Register::DmaRamAddr as usize] & 0x00FF_FFF8;
+    //     let mut sp_addr = s.rsp.regs[Register::DmaSpAddr as usize] & 0x0000_1FF8;
 
     //     let sp_bank_offset = sp_addr & 0x100;
 
@@ -89,7 +92,7 @@ impl Dp {
     //                 for byte in 0..bytes_per_row {
     //                     let data = s.read::<u8>(ram_addr + byte);
 
-    //                     s.map.rsp.mem[(sp_addr + byte) as usize] = data;
+    //                     s.rsp.mem[(sp_addr + byte) as usize] = data;
     //                 }
 
     //                 // The transper wraps around the current bank
@@ -110,7 +113,7 @@ impl Dp {
 
     //             for _ in 0..rows {
     //                 for byte in 0..bytes_per_row {
-    //                     let data = s.map.rsp.mem[(sp_addr + byte) as usize];
+    //                     let data = s.rsp.mem[(sp_addr + byte) as usize];
 
     //                     s.write::<u8>(ram_addr + byte, data);
     //                 }
@@ -126,8 +129,8 @@ impl Dp {
 
     //     // Update the status register
 
-    //     s.map.rsp.regs[Register::Status as usize] |= STATUS_DMA_BUSY;
-    //     s.map.rsp.regs[Register::Status as usize] &= !STATUS_DMA_FULL;
+    //     s.rsp.regs[Register::Status as usize] |= STATUS_DMA_BUSY;
+    //     s.rsp.regs[Register::Status as usize] &= !STATUS_DMA_FULL;
 
     //     // TODO reset count to 0!
     //     // TODO IO busy?
@@ -144,11 +147,11 @@ impl Dp {
     // pub fn dma_completed(s: &mut System) {
     //     // Update the status register
 
-    //     s.map.rsp.regs[Register::Status as usize] &= !STATUS_DMA_BUSY;
+    //     s.rsp.regs[Register::Status as usize] &= !STATUS_DMA_BUSY;
     //     // TODO IO busy?
 
     //     // Raise the interrupt
 
-    //     s.map.mi.set_pending_interrupt(Interrupt::Sp);
+    //     s.mi.set_pending_interrupt(Interrupt::Sp);
     // }
 }

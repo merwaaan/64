@@ -15,7 +15,7 @@ pub struct MemorySettings {
 impl Default for MemorySettings {
     fn default() -> Self {
         Self {
-            address: 0x1FC0_07C0,
+            address: 0x0000_0000,
             rows: 8,
         }
     }

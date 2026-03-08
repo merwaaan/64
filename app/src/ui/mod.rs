@@ -14,8 +14,8 @@ use crate::{
         memory::{MemorySettings, MemoryWidget},
         mi::MiWidget,
         registers::RegistersWidget,
-        rsp::RspWidget,
         si::SiWidget,
+        sp::SpWidget,
         text::Text,
         vi::ViWidget,
     },
@@ -30,8 +30,8 @@ pub mod isviewer;
 pub mod memory;
 pub mod mi;
 pub mod registers;
-pub mod rsp;
 pub mod si;
+pub mod sp;
 pub mod text;
 pub mod vi;
 
@@ -89,7 +89,7 @@ impl Ui {
                 Box::new(ViWidget::default()),
                 Box::new(SiWidget::default()),
                 Box::new(AiWidget::default()),
-                Box::new(RspWidget::default()),
+                Box::new(SpWidget::default()),
                 Box::new(FramebufferWidget::default()),
                 Box::new(EventsWidget::default()),
                 Box::new(IsViewerWidget::default()),

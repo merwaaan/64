@@ -31,8 +31,7 @@ impl Command {
 
                 match Cart::load(path) {
                     Ok(cart) => {
-                        let mut system = System::new(cart);
-                        system.skip_ipl(); // TODO internalize
+                        let system = System::with_cart(cart);
 
                         events.push(Event::BreakpointsUpdate(system.breakpoints().clone()));
 

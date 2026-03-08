@@ -3,9 +3,9 @@ use strum::{Display, EnumIter};
 use crate::{
     data::Value,
     events::{EventType, Events},
-    map::Location,
+    location::Location,
     mi::Interrupt,
-    system::System,
+    system::{Address, System},
 };
 
 /// Peripheral interface
@@ -54,7 +54,7 @@ const STATUS_REG: usize = 4;
 const STATUS_LO: u32 = (STATUS_REG as u32) << 2;
 
 const STATUS_DMA_BUSY_MASK: u32 = 1;
-//const STATUS_IO_BUSY_MASK: u32 = 1 << 1;
+const STATUS_IO_BUSY_MASK: u32 = 1 << 1;
 const STATUS_DMA_ERROR_MASK: u32 = 1 << 2;
 const STATUS_DMA_COMPLETED_MASK: u32 = 1 << 3;
 
@@ -64,7 +64,7 @@ pub struct Pi {
 }
 
 impl Pi {
-    pub fn read<T: Value>(&self, addr: PiLocation) -> T {
+    pub fn read<T: Value>(s: &System, addr: PiLocation) -> T {
         // TODO depends???
 
         // TODO temp
@@ -72,34 +72,39 @@ impl Pi {
             log::warn!("Read from PI register {:08X}", addr.relative());
         }
 
-        T::read_reg(&self.regs, addr.relative() & MASK)
+        T::read_reg(&s.pi.regs, addr.relative() & MASK)
     }
 
     pub fn write<T: Value>(s: &mut System, addr: PiLocation, data: T) {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
 
+        log::info!("Write {:X?} to PI register {:08X}", data, addr.relative());
+
+        // TODO possible to write mult regs???
+        debug_assert!(T::BYTES <= 4, "Writing to multiple PI registers");
+
         match reg {
             DRAM_ADDR_REG => {
-                data.write_reg(&mut s.map.pi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.pi.regs, addr.relative() & MASK);
 
-                s.map.pi.regs[DRAM_ADDR_REG] &= 0x00FF_FFFE;
+                s.pi.regs[DRAM_ADDR_REG] &= 0x00FF_FFFE;
             }
             CART_ADDR_REG => {
-                data.write_reg(&mut s.map.pi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.pi.regs, addr.relative() & MASK);
 
-                s.map.pi.regs[CART_ADDR_REG] &= 0xFFFF_FFFE; // TODO auto updated after DMA transfer
+                s.pi.regs[CART_ADDR_REG] &= 0xFFFF_FFFE; // TODO auto updated after DMA transfer
             }
             READ_LEN_REG => {
-                data.write_reg(&mut s.map.pi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.pi.regs, addr.relative() & MASK);
 
-                s.map.pi.regs[READ_LEN_REG] &= 0x00FF_FFFF;
+                s.pi.regs[READ_LEN_REG] &= 0x00FF_FFFF;
 
                 unimplemented!("Write to READ_LEN");
             }
             WRITE_LEN_REG => {
-                data.write_reg(&mut s.map.pi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.pi.regs, addr.relative() & MASK);
 
-                s.map.pi.regs[WRITE_LEN_REG] &= 0x00FF_FFFF;
+                s.pi.regs[WRITE_LEN_REG] &= 0x00FF_FFFF;
 
                 Self::start_dma(s);
             }
@@ -110,20 +115,20 @@ impl Pi {
                 // Bit 1: clear the interrupt
 
                 if (trigger_bits[0] & 2) != 0 {
-                    s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_COMPLETED_MASK;
-                    s.map.mi.clear_pending_interrupt(Interrupt::Pi, &mut s.cop0);
+                    s.pi.regs[STATUS_REG] &= !STATUS_DMA_COMPLETED_MASK;
+                    s.mi.clear_pending_interrupt(Interrupt::Pi, &mut s.cop0);
                 }
 
                 // Bit 0: clear the error
 
                 if (trigger_bits[0] & 1) != 0 {
-                    s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_ERROR_MASK;
+                    s.pi.regs[STATUS_REG] &= !STATUS_DMA_ERROR_MASK;
                 }
             }
             _ => {
                 log::warn!("Write {:X?} to PI register {:08X}", data, addr.relative());
 
-                data.write_reg(&mut s.map.pi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.pi.regs, addr.relative() & MASK);
             }
         }
     }
@@ -131,31 +136,36 @@ impl Pi {
     fn start_dma(s: &mut System) {
         // Instant DMA transfer
 
-        let length = s.map.pi.regs[WRITE_LEN_REG] + 1;
+        let length = s.pi.regs[WRITE_LEN_REG] + 1;
 
         log::info!(
             "PI DMA transfer: {} bytes from CART {:08X} to RAM {:08X}",
             length,
-            s.map.pi.regs[CART_ADDR_REG],
-            s.map.pi.regs[DRAM_ADDR_REG]
+            s.pi.regs[CART_ADDR_REG],
+            s.pi.regs[DRAM_ADDR_REG]
         );
 
-        let dest_base = s.map.pi.regs[DRAM_ADDR_REG];
+        let dest_base = s.pi.regs[DRAM_ADDR_REG];
 
         for offset in 0..length {
-            let data = s.read::<u8>(s.map.pi.regs[CART_ADDR_REG] + offset);
+            let data = s
+                .read::<u8>(Address::p(s.pi.regs[CART_ADDR_REG] + offset))
+                .expect("PI DMA CART read failed");
 
-            s.write::<u8>(dest_base + offset, data);
+            s.write::<u8>(Address::p(dest_base + offset), data)
+                .expect("PI DMA CART to RAM write failed");
         }
 
-        s.map.pi.regs[DRAM_ADDR_REG] = s.map.pi.regs[DRAM_ADDR_REG].wrapping_add(length);
+        s.pi.regs[DRAM_ADDR_REG] = s.pi.regs[DRAM_ADDR_REG].wrapping_add(length);
 
-        s.map.pi.regs[CART_ADDR_REG] = s.map.pi.regs[CART_ADDR_REG].wrapping_add(length);
+        s.pi.regs[CART_ADDR_REG] = s.pi.regs[CART_ADDR_REG].wrapping_add(length);
 
         // Update the status register
 
-        s.map.pi.regs[STATUS_REG] |= STATUS_DMA_BUSY_MASK;
-        // TODO IO busy?
+        s.pi.regs[STATUS_REG] |= STATUS_DMA_BUSY_MASK;
+        s.pi.regs[STATUS_REG] |= STATUS_IO_BUSY_MASK; // TODO not sure?
+        s.pi.regs[STATUS_REG] &= !STATUS_DMA_ERROR_MASK;
+        s.pi.regs[STATUS_REG] &= !STATUS_DMA_COMPLETED_MASK;
         // TODO DMA error? if already busy?
 
         // TODO schedule status update
@@ -163,20 +173,22 @@ impl Pi {
         Events::push(
             s,
             EventType::PiDmaTransferComplete,
-            0, //(length / 8) as usize
+            (length as usize) * 10, // TODO depends on the regs?
         );
     }
 
     pub fn dma_completed(s: &mut System) {
         // Update the status register
 
-        s.map.pi.regs[STATUS_REG] |= STATUS_DMA_COMPLETED_MASK;
-        s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_BUSY_MASK;
+        s.pi.regs[STATUS_REG] |= STATUS_DMA_COMPLETED_MASK;
+        s.pi.regs[STATUS_REG] &= !STATUS_DMA_ERROR_MASK;
+        s.pi.regs[STATUS_REG] &= !STATUS_IO_BUSY_MASK; // TODO not sure?
+        s.pi.regs[STATUS_REG] &= !STATUS_DMA_BUSY_MASK;
         // TODO IO busy?
 
         // Raise the interrupt
 
-        s.map.mi.set_pending_interrupt(Interrupt::Pi, &mut s.cop0);
+        s.mi.set_pending_interrupt(Interrupt::Pi, &mut s.cop0);
     }
 
     pub fn reg_info(addr: PiLocation) -> Option<&'static str> {

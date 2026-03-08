@@ -20,7 +20,7 @@ pub enum Event {
     MiUpdate(Mi),
     ViUpdate(Vi),
     AiUpdate(Ai),
-    RspUpdate([u32; 8]),
+    SpUpdate([u32; 8]),
     SiUpdate(Si),
     FramebufferUpdate(FramebufferUpdate),
     IsViewerUpdate(String),

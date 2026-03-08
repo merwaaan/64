@@ -3,9 +3,9 @@ use strum::{Display, EnumIter};
 use crate::{
     data::Value,
     events::{EventType, Events},
-    map::Location,
+    location::Location,
     mi::Interrupt,
-    system::System,
+    system::{Address, System},
 };
 
 // TODO separate i/dmem really needed?
@@ -14,19 +14,13 @@ const MEM_START: u32 = 0x0400_0000;
 const MEM_END: u32 = 0x0404_0000;
 const MEM_MASK: u32 = 0x1FFF;
 
-pub type RspMemLocation = Location<MEM_START, MEM_END>;
-
-// const IMEM_START: u32 = DMEM_END;
-// const IMEM_END: u32 = 0x0400_2000;
-// const IMEM_MASK: u32 = 0x0FFF;
-
-// pub type RspImemLocation = Location<IMEM_START, IMEM_END>;
+pub type SpMemLocation = Location<MEM_START, MEM_END>;
 
 const REG_START: u32 = MEM_END;
 const REG_END: u32 = 0x040C_0000;
 const REG_MASK: u32 = 0x1F;
 
-pub type RspRegsLocation = Location<REG_START, REG_END>;
+pub type SpRegsLocation = Location<REG_START, REG_END>;
 
 #[derive(Debug, Display, Clone, Copy, EnumIter)]
 #[repr(u32)]
@@ -58,7 +52,7 @@ enum DmaDirection {
 }
 
 #[derive(Clone)]
-pub struct Rsp {
+pub struct Sp {
     // DMEM: 0x0000 - 0x0FFF
     // IMEM: 0x1000 - 0x1FFF
     mem: Vec<u8>,
@@ -68,7 +62,7 @@ pub struct Rsp {
     pub pc: u32,
 }
 
-impl Default for Rsp {
+impl Default for Sp {
     fn default() -> Self {
         let mut regs = [0; 8];
 
@@ -82,86 +76,97 @@ impl Default for Rsp {
     }
 }
 
-impl Rsp {
-    pub fn read_mem<T: Value>(&self, addr: RspMemLocation) -> T {
+impl Sp {
+    pub fn read_mem<T: Value>(&self, addr: SpMemLocation) -> T {
         T::read_mem(&self.mem, addr.relative() & MEM_MASK)
     }
 
-    pub fn write_mem<T: Value>(s: &mut System, addr: RspMemLocation, data: T) {
-        data.write_mem(&mut s.map.rsp.mem, addr.relative() & MEM_MASK);
+    pub fn write_mem<T: Value>(s: &mut System, addr: SpMemLocation, data: T) {
+        data.write_mem(&mut s.sp.mem, addr.relative() & MEM_MASK);
     }
 
-    pub fn read_reg<T: Value>(&self, addr: RspRegsLocation) -> T {
+    pub fn read_reg<T: Value>(&self, addr: SpRegsLocation) -> T {
         if addr.relative() < 0x4_0000 {
             T::read_reg(&self.regs, addr.relative() & REG_MASK)
         } else {
             if (addr.relative() & 3) != 0 {
-                panic!("Unaligned RSP PC read: {:08X}", addr.relative());
+                panic!("Unaligned SP PC read: {:08X}", addr.relative());
             }
 
             T::default() // TODO PC
         }
     }
 
-    pub fn write_reg<T: Value>(s: &mut System, addr: RspRegsLocation, data: T) {
+    pub fn write_reg<T: Value>(s: &mut System, addr: SpRegsLocation, data: T) {
         if addr.relative() < 0x4_0000 {
             let reg = ((addr.relative() & REG_MASK) >> 2) as usize;
 
             match reg {
                 0 => {
-                    log::warn!("write SP_DMA_SPADDR {:X}", data);
+                    //log::warn!("write SP_DMA_SPADDR {:X}", data);
 
                     // 11-bit SP address.
                     // Bits 0-2 cannot be written to so the address is always aligned to 8 bytes.
                     // Bit 12 is the "bank" (O = DMEM, 1 = IMEM).
 
-                    data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
+                    data.write_reg(&mut s.sp.regs, addr.relative() & REG_MASK);
 
-                    s.map.rsp.regs[Register::DmaSpAddr as usize] &= 0x0000_1FF8;
+                    s.sp.regs[Register::DmaSpAddr as usize] &= 0x0000_1FF8;
                 }
                 1 => {
-                    log::warn!("write SP_DMA_RAMADDR {:X}", data);
+                    //log::warn!("write SP_DMA_RAMADDR {:X}", data);
 
                     // 24-bit RAM address.
                     // Bits 0-2 cannot be written to so the address is always aligned to 8 bytes.
 
                     // TODO reads should return the previous value until DMA starts?
 
-                    data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
+                    data.write_reg(&mut s.sp.regs, addr.relative() & REG_MASK);
 
-                    s.map.rsp.regs[Register::DmaRamAddr as usize] &= 0x00FF_FFF8;
+                    s.sp.regs[Register::DmaRamAddr as usize] &= 0x00FF_FFF8;
                 }
                 2 => {
-                    log::warn!("write SP_DMA_RDLEN {:X}", data);
+                    //log::warn!("write SP_DMA_RDLEN {:X}", data);
 
-                    data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
+                    data.write_reg(&mut s.sp.regs, addr.relative() & REG_MASK);
 
                     Self::start_dma(s, DmaDirection::RamToSp);
                 }
                 3 => {
-                    log::warn!("write SP_DMA_WRLEN {:X}", data);
+                    //log::warn!("write SP_DMA_WRLEN {:X}", data);
 
-                    data.write_reg(&mut s.map.rsp.regs, addr.relative() & REG_MASK);
+                    data.write_reg(&mut s.sp.regs, addr.relative() & REG_MASK);
 
                     Self::start_dma(s, DmaDirection::SpToRam);
                 }
                 4 => {
-                    log::error!("write SP_STATUS {:X}", data);
+                    //log::error!("write SP_STATUS {:X}", data);
 
                     // TODO!
 
                     let mut trigger_bits = [0u32];
                     data.write_reg(&mut trigger_bits, addr.relative() & 3);
 
-                    //let status_reg = &mut s.map.rsp.regs[Register::Status as usize];
+                    //let status_reg = &mut s.sp.regs[Register::Status as usize];
 
                     let set_int = trigger_bits[0] & 16 != 0;
                     let clear_int = trigger_bits[0] & 8 != 0;
 
                     if clear_int && !set_int {
-                        s.map.mi.clear_pending_interrupt(Interrupt::Sp, &mut s.cop0);
+                        s.mi.clear_pending_interrupt(Interrupt::Sp, &mut s.cop0);
                     } else if !clear_int && set_int {
-                        s.map.mi.set_pending_interrupt(Interrupt::Sp, &mut s.cop0);
+                        s.mi.set_pending_interrupt(Interrupt::Sp, &mut s.cop0);
+                    }
+
+                    // TODO temp hack
+                    if (trigger_bits[0] & 5) != 0 {
+                        if (trigger_bits[0] & 0x80) != 0 {
+                            s.mi.set_pending_interrupt(Interrupt::Sp, &mut s.cop0);
+                            //s.mi.set_pending_interrupt(Interrupt::Dp, &mut s.cop0);
+                        }
+
+                        s.sp.regs[Register::Status as usize] &= 0x7F;
+                        s.sp.regs[Register::Status as usize] |= 3;
                     }
                 }
                 5 => {
@@ -173,37 +178,37 @@ impl Rsp {
                 7 => {
                     log::error!("write SP_SEMAPHORE {:X}", data);
                 }
-                _ => panic!("Invalid RSP register: {:08X}", reg),
+                _ => panic!("Invalid SP register: {:08X}", reg),
             }
         } else {
             if (addr.relative() & 3) != 0 {
-                panic!("Unaligned RSP PC write: {:08X}", addr.relative());
+                panic!("Unaligned SP PC write: {:08X}", addr.relative());
             }
 
-            let mut pc = [s.map.rsp.pc];
+            let mut pc = [s.sp.pc];
             data.write_reg(&mut pc, addr.relative() & 0x0000_0003);
-            s.map.rsp.pc = pc[0]; // TODO mask?
+            s.sp.pc = pc[0]; // TODO mask?
         }
     }
 
-    pub fn reg_info(addr: RspRegsLocation) -> Option<&'static str> {
+    pub fn reg_info(addr: SpRegsLocation) -> Option<&'static str> {
         match addr.relative() & REG_MASK {
-            0 => Some("RSP_DMA_SPADDR"),
-            1 => Some("RSP_DMA_RAMADDR"),
-            2 => Some("RSP_DMA_RDLEN"),
-            3 => Some("RSP_DMA_WRLEN"),
-            4 => Some("RSP_STATUS"),
-            5 => Some("RSP_DMA_FULL"),
-            6 => Some("RSP_DMA_BUSY"),
-            7 => Some("RSP_SEMAPHORE"),
+            0 => Some("SP_DMA_SPADDR"),
+            1 => Some("SP_DMA_RAMADDR"),
+            2 => Some("SP_DMA_RDLEN"),
+            3 => Some("SP_DMA_WRLEN"),
+            4 => Some("SP_STATUS"),
+            5 => Some("SP_DMA_FULL"),
+            6 => Some("SP_DMA_BUSY"),
+            7 => Some("SP_SEMAPHORE"),
             _ => None,
         }
     }
 
     fn start_dma(s: &mut System, direction: DmaDirection) {
         let length_reg = match direction {
-            DmaDirection::RamToSp => s.map.rsp.regs[Register::DmaRdLen as usize],
-            DmaDirection::SpToRam => s.map.rsp.regs[Register::DmaWrLen as usize],
+            DmaDirection::RamToSp => s.sp.regs[Register::DmaRdLen as usize],
+            DmaDirection::SpToRam => s.sp.regs[Register::DmaWrLen as usize],
         };
 
         // Number of bytes to copy per "row"
@@ -222,15 +227,15 @@ impl Rsp {
 
         let skips = (length_reg >> 20) & !7;
 
-        let mut ram_addr = s.map.rsp.regs[Register::DmaRamAddr as usize];
-        let mut sp_addr = s.map.rsp.regs[Register::DmaSpAddr as usize];
+        let mut ram_addr = s.sp.regs[Register::DmaRamAddr as usize];
+        let mut sp_addr = s.sp.regs[Register::DmaSpAddr as usize];
 
         let sp_bank_offset = sp_addr & 0x1000;
 
         match direction {
             DmaDirection::RamToSp => {
                 log::info!(
-                    "SP DMA: {:X} bytes * {:X} rows + {:X} skips from RAM {:08X} to RSP {:08X}",
+                    "SP DMA: {:X} bytes * {:X} rows + {:X} skips from RAM {:08X} to SP {:08X}",
                     bytes_per_row,
                     rows,
                     skips,
@@ -240,12 +245,14 @@ impl Rsp {
 
                 for _ in 0..rows {
                     for byte in 0..bytes_per_row {
-                        let data = s.read::<u8>(ram_addr + byte);
+                        let data = s
+                            .read::<u8>(Address::p(ram_addr + byte))
+                            .expect("SP DMA RAM to SP read failed");
 
                         // The transfer wraps around the current bank
                         let wrapping_sp_addr = ((sp_addr + byte) & 0x0FFF) | sp_bank_offset;
 
-                        s.map.rsp.mem[wrapping_sp_addr as usize] = data;
+                        s.sp.mem[wrapping_sp_addr as usize] = data;
                     }
 
                     sp_addr = sp_addr.wrapping_add(bytes_per_row);
@@ -267,9 +274,10 @@ impl Rsp {
                     for byte in 0..bytes_per_row {
                         let wrapping_sp_addr = ((sp_addr + byte) & 0x0FFF) | sp_bank_offset;
 
-                        let data = s.map.rsp.mem[wrapping_sp_addr as usize];
+                        let data = s.sp.mem[wrapping_sp_addr as usize];
 
-                        s.write::<u8>(ram_addr + byte, data);
+                        s.write::<u8>(Address::p(ram_addr + byte), data)
+                            .expect("SP DMA SP to RAM write failed");
                     }
 
                     sp_addr = sp_addr.wrapping_add(bytes_per_row);
@@ -281,30 +289,35 @@ impl Rsp {
 
         // Update the status register
 
-        s.map.rsp.regs[Register::Status as usize] |= STATUS_DMA_BUSY;
-        s.map.rsp.regs[Register::Status as usize] &= !STATUS_DMA_FULL;
+        s.sp.regs[Register::Status as usize] |= STATUS_DMA_BUSY;
+        s.sp.regs[Register::Status as usize] &= !STATUS_DMA_FULL;
 
         // TODO reset count to 0!
         // TODO IO busy?
         // TODO DMA error? if already busy? queue?
 
-        // TODO schedule status update
+        // Schedule the DMA completion
+        //
+        // Takes 1 SP cycle per 8 bytes + some overhead
 
-        Events::push(
-            s,
-            EventType::RspDmaTransferComplete,
-            0, //(bytes_per_row / 8) as usize, // TODO currently just copied from pi
-        );
+        const CPU_SP_RATIO: f32 = 1.5;
+        const OVERHEAD: usize = 9;
+
+        let bytes = rows * bytes_per_row;
+
+        let cycles = ((bytes as f32) / 8.0 * CPU_SP_RATIO) as usize + OVERHEAD;
+
+        Events::push(s, EventType::SpDmaTransferComplete, cycles);
     }
 
     pub fn dma_completed(s: &mut System) {
         // Update the status register
 
-        s.map.rsp.regs[Register::Status as usize] &= !STATUS_DMA_BUSY;
+        s.sp.regs[Register::Status as usize] &= !STATUS_DMA_BUSY;
         // TODO IO busy?
 
         // Raise the interrupt
 
-        s.map.mi.set_pending_interrupt(Interrupt::Sp, &mut s.cop0);
+        s.mi.set_pending_interrupt(Interrupt::Sp, &mut s.cop0);
     }
 }

@@ -1,4 +1,4 @@
-use crate::registers::Reg64;
+use crate::{registers::Reg64, tlb::Tlb};
 
 pub const STATUS_IE_MASK: u32 = 1;
 pub const STATUS_EXL_MASK: u32 = 1 << 1;
@@ -20,7 +20,7 @@ pub enum Register {
     Compare,
     Status,
     Cause,
-    EPC,
+    EPC, // TODO rename Expect(ion)PC?
     PRId,
     Config,
     LLAddr,
@@ -36,14 +36,17 @@ pub enum Register {
     CacheErr,
     TagLo,
     TagHi,
-    ErrorEPC,
+    ErrorEPC, // TODO rename ErrorPC?
     Rsv31,
 }
 
 #[derive(Clone, Copy)]
 pub struct Cop0 {
     regs: [Reg64; 32],
+
+    pub tlb: Tlb, // TODO visibility?
 }
+
 // TODO bitfields or something?
 
 impl Default for Cop0 {
@@ -58,7 +61,10 @@ impl Default for Cop0 {
         regs[Register::PRId as usize].set(0xB22);
         regs[Register::Config as usize].set(0x7006_E463);
 
-        Self { regs }
+        Self {
+            regs,
+            tlb: Tlb::default(),
+        }
     }
 }
 
@@ -75,11 +81,11 @@ impl Cop0 {
         self.regs[reg].set((self.regs[reg].get() & !mask) | (value & mask));
 
         match reg {
-            // COUNT
+            // Count
             9 => {
                 self.update_cause_register();
             }
-            // COMPARE
+            // Compare
             11 => {
                 self.set_ip7_interrupt(false);
                 self.update_cause_register();
@@ -88,17 +94,18 @@ impl Cop0 {
         }
     }
 
+    // TODO use a single implem with <T: Value>?
     pub(crate) fn write64(&mut self, reg: usize, value: u64) {
         let mask = REG_WRITE_MASK[reg];
 
         self.regs[reg].set64((self.regs[reg].get64() & !mask) | (value & mask));
 
         match reg {
-            // COUNT
+            // Count
             9 => {
                 self.update_cause_register();
             }
-            // COMPARE
+            // Compare
             11 => {
                 self.set_ip7_interrupt(false);
                 self.update_cause_register();
@@ -124,7 +131,7 @@ impl Cop0 {
 
     // BadVAddr register
 
-    pub(crate) fn set_bad_address(&mut self, value: u32) {
+    pub(crate) fn set_bad_virtual_address(&mut self, value: u32) {
         self.regs[Register::BadVAddr as usize].set(value);
     }
 
@@ -174,7 +181,7 @@ impl Cop0 {
 
     pub(crate) fn set_exception_code(&mut self, value: u32) {
         self.regs[Register::Cause as usize]
-            .set((self.regs[Register::Cause as usize].get() & !0x7C) | (value << 2));
+            .set((self.regs[Register::Cause as usize].get() & !0x7C) | ((value & 0x1F) << 2));
     }
 
     pub(crate) fn set_coprocessor_error(&mut self, cop: u32) {
@@ -208,21 +215,21 @@ impl Cop0 {
 
     // EPC register
 
-    pub(crate) fn epc(&self) -> u32 {
+    pub(crate) fn exception_pc(&self) -> u32 {
         self.regs[Register::EPC as usize].get() // TODO 64/32?
     }
 
-    pub(crate) fn set_epc(&mut self, value: u32) {
+    pub(crate) fn set_exception_pc(&mut self, value: u32) {
         self.regs[Register::EPC as usize].set(value);
     }
 
     // ErrorEPC register
 
-    pub(crate) fn error_epc(&self) -> u32 {
+    pub(crate) fn error_pc(&self) -> u32 {
         self.regs[Register::ErrorEPC as usize].get() // TODO 64/32?
     }
 
-    pub(crate) fn set_error_epc(&mut self, value: u32) {
+    pub(crate) fn set_error_pc(&mut self, value: u32) {
         self.regs[Register::ErrorEPC as usize].set(value);
     }
 
@@ -253,36 +260,36 @@ const WRITABLE: u64 = 0xFFFFFFFF_FFFFFFFF;
 const READ_ONLY: u64 = 0;
 
 const REG_WRITE_MASK: [u64; 32] = [
-    WRITABLE,
-    READ_ONLY, // Random
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    READ_ONLY, // BadVAddr
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
+    0x00000000_8000003F, // Index
+    READ_ONLY,           // Random
+    0x00000000_3FFFFFFF, // EntryLo0
+    0x00000000_3FFFFFFF, // EntryLo1
+    0xFFFFFFFF_FF800000, // Context
+    0xFFFFFFFF_01FFE000, // PageMask
+    0x00000000_0000003F, // Wired
+    WRITABLE,            // Rsv7TODO?
+    READ_ONLY,           // BadVAddr
+    WRITABLE,            // Count
+    0xC00000FF_FFFFE0FF, // EntryHi
+    WRITABLE,            // Compare
     0xFFFFFFFF_FFF7FFFF, // Status: bit 19 is read-only TODO really?
-    0x00000000_00000300, // Cause: only bits for IP0-1 are writable
-    WRITABLE,
-    READ_ONLY, // PrId
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
-    WRITABLE,
+    0x00000000_00000300, // Cause
+    WRITABLE,            // EPC
+    READ_ONLY,           // PrId
+    0x00000000_00000003, // Config
+    0x00000000_FFFFFFFF, // LLAddr
+    WRITABLE,            // WatchLo
+    WRITABLE,            // WatchHi
+    0xFFFFFFFE_00000000, // XContext
+    WRITABLE,            // Rsv21
+    WRITABLE,            // Rsv22
+    WRITABLE,            // Rsv23
+    WRITABLE,            // Rsv24
+    WRITABLE,            // Rsv25
+    0x00000000_000000FF, // PErr
+    READ_ONLY,           // CacheErr
+    WRITABLE,            // TagLo
+    WRITABLE,            // TagHi
+    WRITABLE,            // ErrorEPC
+    WRITABLE,            // Rsv31
 ];

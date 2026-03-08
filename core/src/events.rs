@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, collections::BinaryHeap};
 
-use crate::{ai::Ai, pi::Pi, rsp::Rsp, si::Si, system::System, vi::Vi};
+use crate::{ai::Ai, pi::Pi, si::Si, sp::Sp, system::System, vi::Vi};
 
 pub type Cycle = usize;
 
@@ -8,7 +8,7 @@ pub type Cycle = usize;
 pub enum EventType {
     AiDmaTransferComplete,
     PiDmaTransferComplete,
-    RspDmaTransferComplete,
+    SpDmaTransferComplete,
     SiDmaTransferComplete,
     ViScanlineComplete,
 }
@@ -50,8 +50,8 @@ impl Event {
             EventType::PiDmaTransferComplete => {
                 Pi::dma_completed(s);
             }
-            EventType::RspDmaTransferComplete => {
-                Rsp::dma_completed(s);
+            EventType::SpDmaTransferComplete => {
+                Sp::dma_completed(s);
             }
             EventType::SiDmaTransferComplete => {
                 Si::dma_completed(s);
@@ -72,12 +72,12 @@ impl Events {
     pub(crate) fn push(s: &mut System, event: EventType, in_cycles: Cycle) {
         s.events.events.push(Event {
             id: event,
-            cycle: s.cycles + in_cycles,
+            cycle: s.cpu.cycles + in_cycles,
         });
     }
 
     pub(crate) fn update(s: &mut System) {
-        while let Some(event) = s.events.pop_if_ready(s.cycles) {
+        while let Some(event) = s.events.pop_if_ready(s.cpu.cycles) {
             event.handle(s);
         }
     }

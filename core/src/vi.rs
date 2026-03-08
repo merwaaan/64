@@ -1,11 +1,12 @@
 use strum::{Display, EnumIter};
 
 use crate::{
+    cpu,
     data::Value,
     events::{EventType, Events},
-    map::Location,
+    location::Location,
     mi::Interrupt,
-    system::System,
+    system::{Address, System},
 };
 
 const START: u32 = 0x0440_0000;
@@ -69,6 +70,13 @@ const V_BURST_REG: usize = 11;
 const X_SCALE_REG: usize = 12;
 const Y_SCALE_REG: usize = 13;
 
+const NTSC_FREQUENCY: f64 = 60.0; // TODO exact?
+//const PAL_FREQUENCY: f64 = 50.0;
+
+const TOTAL_SCANLINES: usize = 525; // TODO depends????
+const FRAME_CPU_CYCLES: usize = (cpu::FREQUENCY / NTSC_FREQUENCY) as usize;
+pub const SCANLINE_CPU_CYCLES: usize = FRAME_CPU_CYCLES / TOTAL_SCANLINES; // TODO fractional part?
+
 // NTSC 59.94 Hz, 262.5 scanlines
 // PAL 50.00 Hz, 312.5 scanlines
 
@@ -89,19 +97,19 @@ impl Default for Vi {
 }
 
 impl Vi {
-    pub fn read<T: Value>(&self, addr: ViLocation) -> T {
+    pub fn read<T: Value>(s: &System, addr: ViLocation) -> T {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
 
         match reg {
             FRAMEBUFFER_ADDR_REG => {
                 // TODO mask addr value???
 
-                T::read_reg(&self.regs, addr.relative() & MASK)
+                T::read_reg(&s.vi.regs, addr.relative() & MASK)
             }
             CURRENT_SCANLINE_REG => {
                 // TODO half scanlines???
 
-                T::read_reg(&self.regs, addr.relative() & MASK)
+                T::read_reg(&s.vi.regs, addr.relative() & MASK)
             }
             _ => unimplemented!("Read VI register @ {:08X}", addr.relative()),
         }
@@ -110,91 +118,94 @@ impl Vi {
     pub fn write<T: Value>(s: &mut System, addr: ViLocation, data: T) {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
 
+        // TODO possible to write mult regs???
+        debug_assert!(T::BYTES <= 4, "Writing to multiple VI registers");
+
         // TODO mask on w or r?
 
         match reg {
             STATUS_REG => {
                 // TODO
 
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
             }
 
             FRAMEBUFFER_ADDR_REG => {
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
 
-                s.map.vi.regs[FRAMEBUFFER_ADDR_REG] &= FRAMEBUFFER_ADDR_MASK;
+                s.vi.regs[FRAMEBUFFER_ADDR_REG] &= FRAMEBUFFER_ADDR_MASK;
             }
 
             WIDTH_REG => {
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
 
-                s.map.vi.regs[WIDTH_REG] &= WIDTH_MASK;
+                s.vi.regs[WIDTH_REG] &= WIDTH_MASK;
             }
 
             INTERRUPT_SCANLINE_REG => {
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
 
-                s.map.vi.regs[INTERRUPT_SCANLINE_REG] &= INTERRUPT_SCANLINE_MASK;
+                s.vi.regs[INTERRUPT_SCANLINE_REG] &= INTERRUPT_SCANLINE_MASK;
             }
 
             CURRENT_SCANLINE_REG => {
                 // Writing anything to this register clears the interrupt
 
-                s.map.mi.clear_pending_interrupt(Interrupt::Vi, &mut s.cop0);
+                s.mi.clear_pending_interrupt(Interrupt::Vi, &mut s.cop0);
             }
 
             BURST_REG => {
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
             }
 
             V_SYNC_REG => {
                 // TODO
 
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
 
-                s.map.vi.regs[V_SYNC_REG] &= V_SYNC_MASK;
+                s.vi.regs[V_SYNC_REG] &= V_SYNC_MASK;
             }
 
             H_SYNC_REG => {
                 // TODO
 
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
             }
 
             H_SYNC_LEAP_REG => {
                 // TODO
 
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
             }
 
             H_VIDEO_REG => {
                 // TODO
 
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
             }
 
             V_VIDEO_REG => {
                 // TODO
 
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
             }
 
             V_BURST_REG => {
                 // TODO
 
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
             }
 
             X_SCALE_REG => {
                 // TODO
 
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
             }
 
             Y_SCALE_REG => {
                 // TODO
 
-                data.write_reg(&mut s.map.vi.regs, addr.relative() & MASK);
+                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
             }
 
             _ => unimplemented!("Write VI register {:X} @ {:08X}", data, addr.relative()),
@@ -212,29 +223,28 @@ impl Vi {
     }
 
     pub fn scanline_completed(s: &mut System) {
-        // Update the status register
+        // Increment the current scanline by 2 half scanlines
+        // TODO Toggle the field bit?
 
-        // s.map.pi.regs[STATUS_REG] |= STATUS_DMA_COMPLETED_MASK;
-        // s.map.pi.regs[STATUS_REG] &= !STATUS_DMA_BUSY_MASK;
-        // TODO IO busy?
+        s.vi.regs[CURRENT_SCANLINE_REG] = s.vi.regs[CURRENT_SCANLINE_REG].wrapping_add(2) & 0x3FF;
 
-        // Raise the interrupt
-        // TODO >= or ==???
+        // Reset the current scanline to 0 if it matches the V_SYNC register
 
-        if s.map.vi.regs[CURRENT_SCANLINE_REG] == s.map.vi.regs[V_SYNC_REG] {
-            s.map.vi.regs[CURRENT_SCANLINE_REG] = 0;
+        if s.vi.regs[CURRENT_SCANLINE_REG] >= s.vi.regs[V_SYNC_REG] {
+            s.vi.regs[CURRENT_SCANLINE_REG] = 0;
         }
 
-        s.map.vi.regs[CURRENT_SCANLINE_REG] =
-            s.map.vi.regs[CURRENT_SCANLINE_REG].wrapping_add(1) & 0x3FF;
+        // Raise an interrupt if the current scanline matches the interrupt scanline
+        // TODO >= or ==???
 
-        if s.map.vi.regs[CURRENT_SCANLINE_REG] == s.map.vi.regs[INTERRUPT_SCANLINE_REG] {
-            s.map.mi.set_pending_interrupt(Interrupt::Vi, &mut s.cop0);
+        if s.vi.regs[CURRENT_SCANLINE_REG] == s.vi.regs[INTERRUPT_SCANLINE_REG] {
+            s.mi.set_pending_interrupt(Interrupt::Vi, &mut s.cop0);
         }
 
         // Schedule the next scanline
+        // probably needd to be computed dynamically based on the current height?
 
-        Events::push(s, EventType::ViScanlineComplete, /*1587*/ 10000); // TODO
+        Events::push(s, EventType::ViScanlineComplete, SCANLINE_CPU_CYCLES);
     }
 
     pub fn address_info(addr: ViLocation) -> Option<&'static str> {
@@ -251,7 +261,7 @@ impl Vi {
         }
     }
 
-    pub(crate) fn color32(&self) -> bool {
+    fn color32(&self) -> bool {
         self.regs[STATUS_REG] & 0b11 == 0b11
         // TODO other modes?
     }
@@ -269,16 +279,18 @@ impl Vi {
     }
 
     pub fn extract_framebuffer(s: &System) -> (Vec<u8>, usize, usize) {
-        let base_addr = s.map.vi.framebuffer_address();
-        let width = s.map.vi.framebuffer_width();
-        let height = s.map.vi.framebuffer_height();
+        let base_addr = s.vi.framebuffer_address();
+        let width = s.vi.framebuffer_width();
+        let height = s.vi.framebuffer_height();
 
         let mut data = Vec::with_capacity(width * height * 4);
 
-        if s.map.vi.color32() {
+        if s.vi.color32() {
             for y in 0..height {
                 for x in 0..width {
-                    let pixel = s.read::<u32>(base_addr + ((y * width + x) * 4) as u32);
+                    let pixel = s
+                        .read::<u32>(Address::p(base_addr + ((y * width + x) * 4) as u32))
+                        .expect("Invalid pixel address");
 
                     data.push((pixel >> 24) as u8);
                     data.push((pixel >> 16) as u8);
@@ -289,7 +301,9 @@ impl Vi {
         } else {
             for y in 0..height {
                 for x in 0..width {
-                    let pixel = s.read::<u16>(base_addr + ((y * width + x) * 2) as u32);
+                    let pixel = s
+                        .read::<u16>(Address::p(base_addr + ((y * width + x) * 2) as u32))
+                        .expect("Invalid pixel address");
 
                     data.push(Self::b5_to_b8(pixel >> 11));
                     data.push(Self::b5_to_b8(pixel >> 6));

@@ -1,9 +1,11 @@
 use arbitrary_int::prelude::*;
 
-use crate::cop0::Cop0;
-use crate::cop1;
-use crate::registers::Registers;
-use crate::system::System;
+use crate::{
+    cop0::Cop0,
+    cop1,
+    registers::Registers,
+    system::{Address, System},
+};
 
 /// Helper to decode opcodes
 #[derive(Clone, Copy)]
@@ -169,8 +171,8 @@ impl Opcode {
 
     // COP1
 
-    pub(crate) fn cop1_format(&self) -> cop1::Format {
-        cop1::Format::new_with_raw_value(u5::new(((self.0 >> 21) & 0x1F) as u8)).unwrap()
+    pub(crate) fn cop1_format(&self) -> Option<cop1::Format> {
+        cop1::Format::new_with_raw_value(u5::new(((self.0 >> 21) & 0x1F) as u8)).ok()
     }
 
     pub(crate) fn cop1_condition(&self) -> cop1::Condition {

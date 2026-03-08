@@ -34,7 +34,7 @@ impl Widget for RegistersWidget {
             .default_pos([800.0, 100.0])
             .show(ctx, |ui| {
                 if let Some(last_update) = &self.last_update {
-                    reg64(ui, "STEP", last_update.cpu.step as u64);
+                    reg64(ui, "CYCLES", last_update.cpu.cycles as u64);
 
                     reg64(ui, "PC", last_update.cpu.regs.pc as u64);
 

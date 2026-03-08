@@ -1,13 +1,30 @@
-use crate::breakpoints::Breakpoints;
-use crate::cart::CartLocation;
-use crate::cop0::Cop0;
-use crate::cop1::Cop1;
-use crate::data::Value;
-use crate::events::{Cycle, EventType, Events};
-use crate::map::Location;
-use crate::rsp::Rsp;
-use crate::{cart::Cart, cpu::Cpu, map::Map};
+use core::fmt;
+use std::fmt::Display;
 
+use crate::{
+    ai::{Ai, AiLocation},
+    breakpoints::Breakpoints,
+    cart::{Cart, CartLocation},
+    cop0::Cop0,
+    cop1::Cop1,
+    cpu::Cpu,
+    data::Value,
+    dd::Dd,
+    dp::{Dp, DpLocation},
+    events::{Cycle, EventType, Events},
+    exception::Exception,
+    location::{Location, MapLocation},
+    mi::{Mi, MiLocation},
+    openbus,
+    pi::{Pi, PiLocation},
+    pif::{Pif, PifRamLocation},
+    ram::{Ram, RamInterfaceLocation, RamLocation, RamRegsLocation},
+    si::{Si, SiLocation},
+    sp::{Sp, SpMemLocation, SpRegsLocation},
+    vi::{self, Vi, ViLocation},
+};
+
+// TODO clean up?
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
     #[error(transparent)]
@@ -16,40 +33,107 @@ pub enum LoadError {
     Json(#[from] serde_json::Error),
 }
 
+// TODO rework with a trait + const generics?
+#[derive(Clone, Copy)]
+pub struct VirtualAddress(pub u32);
+
+#[derive(Clone, Copy)]
+pub struct PhysicalAddress(pub u32);
+
+#[derive(Clone, Copy)]
+pub enum Address {
+    Virtual(VirtualAddress),
+    Physical(PhysicalAddress),
+}
+
+impl Address {
+    pub fn v(addr: u32) -> Self {
+        Address::Virtual(VirtualAddress(addr))
+    }
+
+    pub fn p(addr: u32) -> Self {
+        Address::Physical(PhysicalAddress(addr))
+    }
+
+    // pub fn value(&self) -> u32 {
+    //     match self {
+    //         Address::Virtual(addr) => addr.0,
+    //         Address::Physical(addr) => addr.0,
+    //     }
+    // }
+}
+
+impl Display for Address {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Address::Virtual(addr) => write!(f, "Virtual({:08X})", addr.0),
+            Address::Physical(addr) => write!(f, "Physical({:08X})", addr.0),
+        }
+    }
+}
+
+// pub trait Address {
+//     fn value(&self) -> u32;
+// }
+
+// impl Address for VirtualAddress {
+//     fn value(&self) -> u32 {
+//         self.0
+//     }
+// }
+
+// impl Address for PhysicalAddress {
+//     fn value(&self) -> u32 {
+//         self.0
+//     }
+// }
+
 pub struct System {
     // Components
     pub cpu: Cpu,
     pub cop0: Cop0,
     pub cop1: Cop1,
-    pub map: Map,
+    pub ram: Ram,
+    pub sp: Sp,
+    pub dp: Dp,
+    pub mi: Mi,
+    pub vi: Vi,
+    pub ai: Ai,
+    pub pi: Pi,
+    pub si: Si,
+    pub dd: Dd,
+    pub pif: Pif,
+    pub cart: Cart,
 
     // Scheduling
-    pub cycles: Cycle,
     pub(crate) events: Events,
-    odd: bool, // TODO temp hack to time CPU
 
     // Debugger
     breakpoints: Breakpoints,
 }
 
 impl System {
-    pub fn new(cart: Cart) -> Self {
+    pub fn with_cart(cart: Cart) -> Self {
         let mut s = Self {
             cpu: Cpu::default(),
             cop0: Cop0::default(),
             cop1: Cop1::default(),
-            map: Map::new(cart),
+            ram: Ram::default(),
+            sp: Sp::default(),
+            dp: Dp::default(),
+            mi: Mi::default(),
+            vi: Vi::default(),
+            ai: Ai::default(),
+            pi: Pi::default(),
+            si: Si::default(),
+            dd: Dd::default(),
+            pif: Pif::default(),
+            cart,
 
-            cycles: 0,
             events: Events::default(),
-            odd: false,
 
             breakpoints: Breakpoints::default(),
         };
-
-        // Schedule the first scanline
-
-        Events::push(&mut s, EventType::ViScanlineComplete, /*1587*/ 1000000); // TODO!
 
         // Load the breakpoints
 
@@ -62,11 +146,24 @@ impl System {
             }
         }
 
+        // Schedule the first scanline
+
+        Events::push(
+            &mut s,
+            EventType::ViScanlineComplete,
+            vi::SCANLINE_CPU_CYCLES,
+        );
+
+        s.initialize();
+
         s
     }
 
-    // NOTE: IPL starts at A4000040 and executes the boot sequence, skipped for now
-    pub fn skip_ipl(&mut self) {
+    fn initialize(&mut self) {
+        // Set the PC to the start of the IPL
+        //
+        // NOTE: IPL starts at A4000040 and executes the boot sequence, skipped for now
+
         self.cpu.regs.pc = 0xA4000040;
 
         // Setup the registers as IPL would have done
@@ -77,16 +174,18 @@ impl System {
         self.cpu.regs.gpr[22].set(0x0000003F);
         self.cpu.regs.gpr[29].set(0xA4001FF0);
 
-        // Copy the cart's boot code to memory
+        // Copy the cart's boot code to RAM
 
-        // TODO which size?
         for i in 0..0x1000u32 {
-            Rsp::write_mem(
-                self,
-                Location::from_relative(i),
-                self.map.cart.read::<u8>(CartLocation::from_relative(i)),
-            );
+            let byte = Cart::read::<u8>(self, CartLocation::from_relative(i));
+
+            Sp::write_mem(self, Location::from_relative(i), byte);
         }
+
+        // Set the exception code to 11111
+        // TODO unclear if expected, makes lemon tests pass
+
+        self.cop0.set_exception_code(u32::MAX);
     }
 
     pub fn step(&mut self) -> bool {
@@ -94,15 +193,14 @@ impl System {
 
         Cpu::step(self);
 
-        self.cycles += 2; //if self.odd { 2 } else { 1 };
-        self.odd = !self.odd;
+        // Increment the timer every 2 CPU cycles
 
-        if self.odd {
-            self.cop0.increment_timer(); // TODO proper timing
+        if self.cpu.cycles.is_multiple_of(2) {
+            // TODO ok right now, but not robust if some instructions take more than 2 cycles!
+            self.cop0.increment_timer();
         }
 
-        // Events
-        // TODO how many cycles?
+        // Process scheduled events
 
         Events::update(self);
 
@@ -116,23 +214,151 @@ impl System {
         }
     }
 
-    pub fn read<T: Value>(&self, addr: u32) -> T {
-        Map::read(self, addr) // TODO  Map:: really needed??
+    // TODO or Option<Result<Loc, Exc>>?
+    #[must_use]
+    fn decode(&self, addr: Address, write: bool) -> Result<Option<MapLocation>, Exception> {
+        let physical_addr = match addr {
+            Address::Virtual(addr) => match addr.0 {
+                0x0000_0000..=0x7FFF_FFFF => self.cop0.tlb.translate(addr, &self.cop0, write)?,
+                0x8000_0000..=0x9FFF_FFFF => PhysicalAddress(addr.0),
+                0xA000_0000..=0xBFFF_FFFF => PhysicalAddress(addr.0),
+                0xC000_0000..=0xDFFF_FFFF => self.cop0.tlb.translate(addr, &self.cop0, write)?,
+                0xE000_0000..=0xFFFF_FFFF => self.cop0.tlb.translate(addr, &self.cop0, write)?,
+            },
+            Address::Physical(addr) => addr,
+        };
+
+        let addr = physical_addr.0 & 0x1FFF_FFFF;
+
+        Ok(match addr {
+            RamLocation::START..RamLocation::END => {
+                Some(MapLocation::Ram(RamLocation::from_absolute(addr)))
+            }
+            RamRegsLocation::START..RamRegsLocation::END => {
+                Some(MapLocation::RamRegs(RamRegsLocation::from_absolute(addr)))
+            }
+            SpMemLocation::START..SpMemLocation::END => {
+                Some(MapLocation::SpMem(SpMemLocation::from_absolute(addr)))
+            }
+            SpRegsLocation::START..SpRegsLocation::END => {
+                Some(MapLocation::SpRegs(SpRegsLocation::from_absolute(addr)))
+            }
+            DpLocation::START..DpLocation::END => {
+                Some(MapLocation::Dp(DpLocation::from_absolute(addr)))
+            }
+            MiLocation::START..MiLocation::END => {
+                Some(MapLocation::Mi(MiLocation::from_absolute(addr)))
+            }
+            ViLocation::START..ViLocation::END => {
+                Some(MapLocation::Vi(ViLocation::from_absolute(addr)))
+            }
+            AiLocation::START..AiLocation::END => {
+                Some(MapLocation::Ai(AiLocation::from_absolute(addr)))
+            }
+            PiLocation::START..PiLocation::END => {
+                Some(MapLocation::Pi(PiLocation::from_absolute(addr)))
+            }
+            RamInterfaceLocation::START..RamInterfaceLocation::END => Some(
+                MapLocation::RamInterface(RamInterfaceLocation::from_absolute(addr)),
+            ),
+            SiLocation::START..SiLocation::END => {
+                Some(MapLocation::Si(SiLocation::from_absolute(addr)))
+            }
+            // DdLocation::START..DdLocation::END => {
+            //     Some(MapLocation::Dd(DdLocation::from_absolute(addr)))
+            // }
+            0x0500_0000..0x1000_0000 => Some(MapLocation::OpenBus(addr)),
+            CartLocation::START..CartLocation::END => {
+                Some(MapLocation::Cart(CartLocation::from_absolute(addr)))
+            }
+            // TODO actually not openbus? ignore writes? what about reads?
+            0x1FC0_0000..PifRamLocation::START => Some(MapLocation::OpenBus(addr)),
+            PifRamLocation::START..PifRamLocation::END => {
+                Some(MapLocation::Pif(PifRamLocation::from_absolute(addr)))
+            }
+            0x1FD00000..0x80000000 => Some(MapLocation::OpenBus(addr)),
+            _ => None,
+        })
     }
 
-    pub fn try_read<T: Value>(&self, addr: u32) -> Option<T> {
-        Map::try_read(self, addr)
+    #[must_use]
+    pub fn read<T: Value>(&self, addr: Address) -> Result<T, Exception> {
+        self.decode(addr, false).map(|location| match location {
+            Some(MapLocation::Ram(addr)) => Ram::read(self, addr),
+            Some(MapLocation::RamRegs(addr)) => self.ram.read_reg(addr),
+            Some(MapLocation::SpMem(addr)) => self.sp.read_mem(addr),
+            Some(MapLocation::SpRegs(addr)) => self.sp.read_reg(addr),
+            Some(MapLocation::Dp(addr)) => Dp::read(self, addr),
+            Some(MapLocation::Mi(addr)) => Mi::read(self, addr),
+            Some(MapLocation::Vi(addr)) => Vi::read(self, addr),
+            Some(MapLocation::Ai(addr)) => Ai::read(self, addr),
+            Some(MapLocation::Pi(addr)) => Pi::read(self, addr),
+            Some(MapLocation::RamInterface(addr)) => self.ram.read_interface(addr),
+            Some(MapLocation::Si(addr)) => Si::read(self, addr),
+            //Some(MapLocation::Dd(addr)) => s.dd.read(addr),
+            Some(MapLocation::Cart(addr)) => Cart::read(self, addr),
+            Some(MapLocation::Pif(addr)) => Pif::read(self, addr),
+            Some(MapLocation::OpenBus(addr)) => openbus::read(addr),
+            None => {
+                log::error!("Invalid read address: {}", addr);
+                T::default()
+            }
+        })
     }
 
-    pub fn write<T: Value>(&mut self, addr: u32, data: T) {
-        Map::write(self, addr, data); // TODO  Map:: really needed???
+    /// Reads without side effects, for debugging
+    pub fn peek<T: Value>(&self, addr: Address) -> Option<T> {
+        self.read(addr).ok()
     }
+
+    // TODO what if address crosses a boundary?
+    #[must_use]
+    pub fn write<T: Value>(&mut self, addr: Address, data: T) -> Result<(), Exception> {
+        let location = self.decode(addr, true)?;
+
+        match location {
+            Some(MapLocation::Ram(addr)) => Ram::write(self, addr, data),
+            Some(MapLocation::RamRegs(addr)) => Ram::write_reg(self, addr, data),
+            Some(MapLocation::SpMem(addr)) => Sp::write_mem(self, addr, data),
+            Some(MapLocation::SpRegs(addr)) => Sp::write_reg(self, addr, data),
+            Some(MapLocation::Dp(addr)) => Dp::write(self, addr, data),
+            Some(MapLocation::Mi(addr)) => Mi::write(self, addr, data),
+            Some(MapLocation::Vi(addr)) => Vi::write(self, addr, data),
+            Some(MapLocation::Ai(addr)) => Ai::write(self, addr, data),
+            Some(MapLocation::Pi(addr)) => Pi::write(self, addr, data),
+            Some(MapLocation::RamInterface(addr)) => Ram::write_interface(self, addr, data),
+            Some(MapLocation::Si(addr)) => Si::write(self, addr, data),
+            Some(MapLocation::Cart(addr)) => Cart::write(self, addr, data),
+            Some(MapLocation::Pif(addr)) => Pif::write(self, addr, data),
+            Some(MapLocation::OpenBus(addr)) => openbus::write(addr, data),
+            _ => log::error!("Invalid write address: {}", addr),
+        };
+
+        Ok(())
+    }
+
+    // fn address_info(addr: u32) -> Option<&'static str> {
+    //     match Map::decode(addr) {
+    //         Some(MapLocation::RdramRegs(addr)) => Rdram::reg_info(addr),
+    //         Some(MapLocation::RspRegs(addr)) => Rsp::reg_info(addr),
+    //         Some(MapLocation::Mi(addr)) => Mi::reg_info(addr),
+    //         Some(MapLocation::Vi(addr)) => Vi::reg_info(addr),
+    //         Some(MapLocation::Ai(addr)) => Ai::reg_info(addr),
+    //         Some(MapLocation::Pi(addr)) => Pi::reg_info(addr),
+    //         Some(MapLocation::RdramInterface(addr)) => Rdram::interface_info(addr),
+    //         Some(MapLocation::Si(addr)) => Si::reg_info(addr),
+    //         _ => None,
+    //     }
+    // }
+
+    // Events
 
     pub fn pending_events(&self) -> Vec<(EventType, Cycle)> {
         self.events.snapshot()
     }
 
     // Breakpoints
+    // TODO move to emulator?
 
     pub fn breakpoints(&self) -> &Breakpoints {
         &self.breakpoints
@@ -156,12 +382,16 @@ impl System {
         self.save().unwrap();
     }
 
+    // TODO move saving to client code? just serialize in core
+
+    #[must_use]
     fn save(&self) -> Result<(), LoadError> {
         let breakpoints_json = serde_json::to_string(&self.breakpoints)?;
         std::fs::write("breakpoints.json", breakpoints_json)?;
         Ok(())
     }
 
+    #[must_use]
     fn load(&mut self) -> Result<(), LoadError> {
         let path = std::path::Path::new("breakpoints.json");
 

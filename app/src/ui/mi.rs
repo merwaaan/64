@@ -2,12 +2,9 @@ use egui::{Context, Window};
 use n64_core::mi::{Interrupt, Mi, Register};
 use strum::IntoEnumIterator;
 
-use crate::emu::command::Command;
-use crate::ui::colors::Color;
-use crate::ui::text::Text;
 use crate::{
-    emu::event::Event,
-    ui::{Widget, reg32},
+    emu::{command::Command, event::Event},
+    ui::{colors::Color, text::Text, reg32, Widget},
 };
 
 #[derive(Default)]

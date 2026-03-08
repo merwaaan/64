@@ -1,9 +1,10 @@
 use strum::{Display, EnumIter};
 
 use crate::{
+    cpu,
     data::Value,
     events::{EventType, Events},
-    map::Location,
+    location::Location,
     mi::Interrupt,
     system::System,
 };
@@ -52,47 +53,50 @@ pub struct Ai {
 // TODO ENABLE FLAG???
 
 impl Ai {
-    pub fn read<T: Value>(&self, addr: AiLocation) -> T {
+    pub fn read<T: Value>(s: &System, addr: AiLocation) -> T {
         match (addr.relative() >> 2) & REG_MASK {
-            STATUS_REG => T::read_reg(&self.regs, addr.relative() & REG_MASK),
+            STATUS_REG => T::read_reg(&s.ai.regs, addr.relative() & REG_MASK),
 
             // All the other registers mirror LENGTH
-            _ => T::read_reg(&self.regs, LENGTH_REG + (addr.relative() & 3)),
+            _ => T::read_reg(&s.ai.regs, LENGTH_REG + (addr.relative() & 3)),
         }
     }
 
     pub fn write<T: Value>(s: &mut System, addr: AiLocation, data: T) {
+        // TODO possible to write mult regs???
+        debug_assert!(T::BYTES <= 4, "Writing to multiple AI registers");
+
         match (addr.relative() >> 2) & REG_MASK {
             DRAM_ADDR_REG => {
-                data.write_reg(&mut s.map.ai.regs, addr.relative() & REG_MASK);
+                data.write_reg(&mut s.ai.regs, addr.relative() & REG_MASK);
 
-                s.map.ai.regs[DRAM_ADDR_REG as usize] &= 0x00FF_FFF8;
+                s.ai.regs[DRAM_ADDR_REG as usize] &= 0x00FF_FFF8;
             }
             LENGTH_REG => {
-                data.write_reg(&mut s.map.ai.regs, addr.relative() & REG_MASK);
+                data.write_reg(&mut s.ai.regs, addr.relative() & REG_MASK);
 
-                s.map.ai.regs[LENGTH_REG as usize] &= 0x0003_FFFF;
+                s.ai.regs[LENGTH_REG as usize] &= 0x0003_FFFF;
 
                 // TODO depends on DMA_ENABLE???
                 Self::start_dma(s);
             }
             CONTROL_REG => {
-                data.write_reg(&mut s.map.ai.regs, addr.relative() & REG_MASK);
+                data.write_reg(&mut s.ai.regs, addr.relative() & REG_MASK);
             }
             STATUS_REG => {
                 // Writing any value acknowledges the interrupt
 
-                s.map.mi.clear_pending_interrupt(Interrupt::Ai, &mut s.cop0);
+                s.mi.clear_pending_interrupt(Interrupt::Ai, &mut s.cop0);
             }
             DACRATE_REG => {
-                data.write_reg(&mut s.map.ai.regs, addr.relative() & REG_MASK);
+                data.write_reg(&mut s.ai.regs, addr.relative() & REG_MASK);
 
-                s.map.ai.regs[DACRATE_REG as usize] &= 0x0000_3FFF;
+                s.ai.regs[DACRATE_REG as usize] &= 0x0000_3FFF;
             }
             BITRATE_REG => {
-                data.write_reg(&mut s.map.ai.regs, addr.relative() & REG_MASK);
+                data.write_reg(&mut s.ai.regs, addr.relative() & REG_MASK);
 
-                s.map.ai.regs[BITRATE_REG as usize] &= 0x0000_000F;
+                s.ai.regs[BITRATE_REG as usize] &= 0x0000_000F;
             }
             _ => panic!(
                 "Invalid AI register write: {:08X} {:X}",
@@ -102,36 +106,41 @@ impl Ai {
         }
     }
 
+    pub fn sample_rate(&self) -> usize {
+        (cpu::FREQUENCY / ((self.regs[DACRATE_REG as usize] + 1) as f64)) as usize
+    }
+
     fn start_dma(s: &mut System) {
         // TODO actually do something
 
         // log::info!(
         //     "AI DMA transfer: {} bytes from {:08X}",
-        //     s.map.ai.regs[LENGTH_REG as usize],
-        //     s.map.ai.regs[DRAM_ADDR_REG as usize]
+        //     s.ai.regs[LENGTH_REG as usize],
+        //     s.ai.regs[DRAM_ADDR_REG as usize]
         // );
 
         // Update the status register
 
-        s.map.ai.regs[STATUS_REG as usize] |= STATUS_DMA_BUSY_MASK;
+        s.ai.regs[STATUS_REG as usize] |= STATUS_DMA_BUSY_MASK;
         // TODO enabled mirror?
         // TODO others
 
         // Raise the interrupt when starting the transfer
+        // TODO when played instead? depnding on rate?
 
-        s.map.mi.set_pending_interrupt(Interrupt::Ai, &mut s.cop0);
+        s.mi.set_pending_interrupt(Interrupt::Ai, &mut s.cop0);
 
         Events::push(
             s,
             EventType::AiDmaTransferComplete,
-            100000, // TODO random lol
+            1000000, // TODO random lol
         );
     }
 
     pub fn dma_completed(s: &mut System) {
         // Update the status register
 
-        s.map.ai.regs[STATUS_REG as usize] &= !STATUS_DMA_BUSY_MASK;
+        s.ai.regs[STATUS_REG as usize] &= !STATUS_DMA_BUSY_MASK;
         // TODO IO busy?
     }
 

@@ -2,16 +2,17 @@ use std::panic::AssertUnwindSafe;
 use std::thread::{self, JoinHandle};
 
 use crossbeam::channel::{Receiver, Sender, TryRecvError, unbounded};
+use n64_core::system::Address;
 use n64_core::{
     instructions::{Disassembly, Opcode, decode},
     system::System,
     vi::Vi,
 };
 
-use crate::ui::Status;
 use crate::{
     emu::{command::Command, event::Event},
     ui::{
+        Status,
         framebuffer::FramebufferUpdate,
         instructions::{InstructionAddress, InstructionData, InstructionsSettings},
         memory::{MemorySettings, MemoryUpdate},
@@ -54,7 +55,7 @@ pub struct CoreThread {
     event_rx: Receiver<Event>,
 }
 
-const UPDATE_INTERVAL: usize = 100_000;
+const UPDATE_INTERVAL: usize = 1_000_000;
 
 impl CoreThread {
     pub fn new() -> Self {
@@ -216,7 +217,9 @@ impl CoreThread {
                     ..base_address + instructions_settings.rows as u32 * 4)
                     .step_by(4)
                     .map(|addr| {
-                        let instruction = system.read(addr);
+                        let instruction = system
+                            .peek(Address::v(addr))
+                            .expect("Invalid instruction address");
 
                         let opcode = Opcode(instruction);
                         let handler = decode(opcode);
@@ -254,7 +257,7 @@ impl CoreThread {
                 let base_address = memory_settings.address & !0xF;
 
                 let data = (0..memory_settings.rows * 16)
-                    .map(|i| system.try_read(base_address + i as u32))
+                    .map(|i| system.peek(Address::v(base_address + i as u32)))
                     .collect();
 
                 events.push(Event::MemoryUpdate(MemoryUpdate { base_address, data }));
@@ -271,22 +274,22 @@ impl CoreThread {
             }
 
             // TODO conditional
-            events.push(Event::MiUpdate(system.map.mi));
+            events.push(Event::MiUpdate(system.mi));
 
-            events.push(Event::ViUpdate(system.map.vi));
+            events.push(Event::ViUpdate(system.vi));
 
-            events.push(Event::AiUpdate(system.map.ai));
+            events.push(Event::AiUpdate(system.ai));
 
-            events.push(Event::RspUpdate(system.map.rsp.regs));
+            events.push(Event::SpUpdate(system.sp.regs));
 
-            events.push(Event::SiUpdate(system.map.si));
+            events.push(Event::SiUpdate(system.si));
 
             events.push(Event::IsViewerUpdate(
-                system.map.cart.isviewer.get().to_string(),
+                system.cart.isviewer.get().to_string(),
             ));
 
             events.push(Event::CoreEventsUpdate {
-                current_cycle: system.cycles,
+                current_cycle: system.cpu.cycles,
                 pending: system.pending_events(),
             });
         }

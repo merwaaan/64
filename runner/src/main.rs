@@ -14,7 +14,7 @@ struct Args {
     dir: PathBuf,
 
     /// Number of emulator cycles to run per ROM
-    #[arg(short, long, default_value = "1000000000")]
+    #[arg(short, long, default_value = "10000000000")]
     cycles: usize,
 }
 
@@ -72,21 +72,20 @@ fn run_rom(path: &Path, cycles: usize, captures_dir: &Path) {
 
         let cart = Cart::load(path).map_err(|e| e.to_string())?;
 
-        let mut system = System::new(cart);
-        system.skip_ipl();
+        let mut system = System::with_cart(cart);
 
         const CAPTURE_INTERVAL: usize = 100_000;
         let mut next_capture = CAPTURE_INTERVAL;
 
-        while system.cycles < cycles {
+        while system.cpu.cycles < cycles {
             system.step();
 
-            if system.cycles >= next_capture {
-                if system.map.vi.framebuffer_width() > 0 {
+            if system.cpu.cycles >= next_capture {
+                if system.vi.framebuffer_width() > 0 {
                     framebuffer = Some(Vi::extract_framebuffer(&system));
                 }
 
-                next_capture = system.cycles + CAPTURE_INTERVAL;
+                next_capture = system.cpu.cycles + CAPTURE_INTERVAL;
             }
         }
 

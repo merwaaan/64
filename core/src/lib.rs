@@ -13,16 +13,17 @@ pub mod events;
 pub mod exception;
 pub mod instructions;
 pub mod isviewer;
-pub mod map;
+pub mod location;
 pub mod mi;
 pub mod openbus;
 pub mod pi;
 pub mod pif;
-pub mod rdram;
+pub mod ram;
 pub mod registers;
-pub mod rsp;
 pub mod si;
+pub mod sp;
 pub mod system;
+pub mod tlb;
 pub mod vi;
 
 pub fn is_supported_rom_file(path: &Path) -> bool {
@@ -54,3 +55,8 @@ pub fn is_supported_file(path: &Path) -> bool {
 // - Monaco Grand Prix: read invalid address 840C0000 (unmapped)
 // - Quake: access invalid reg #13 (si or pi?)
 // - Chopper Attack: PIF out of range
+
+// TODO next steps:
+// - count/compare: interrupt cleared when compare changed??
+// - AI DMA queue
+// - exception on reserved/unknown instructions?
