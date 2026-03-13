@@ -59,13 +59,17 @@ use rstest::rstest;
 #[case::subu("SUBU/CPUSUBU.N64")]
 #[case::xor("XOR/CPUXOR.N64")]
 fn cpu(#[case] test_name: &str) {
-    test(format!("CPUTest/CPU/{test_name}"));
+    test(format!("CPUTest/CPU/{test_name}"), |_| {});
 }
 
 #[rstest]
 #[case::cause("COP0Cause/COP0Cause.N64")]
 fn cop0(#[case] test_name: &str) {
-    test(format!("CPUTest/CP0/{test_name}"));
+    test(format!("CPUTest/CP0/{test_name}"), |s| {
+        // The test starts with coprocessor error set to 3, the actual cause is unclear
+        // https://github.com/PeterLemon/N64/blob/7085543e4a19d8c539fc9e0a4d2869e788b4ed4b/CPUTest/CP0/COP0Cause/COP0Cause.asm
+        s.cop0.set_coprocessor_error(3);
+    });
 }
 
 #[rstest]
@@ -99,7 +103,7 @@ fn cop0(#[case] test_name: &str) {
 #[case::sub("SUB/CP1SUB.N64")]
 #[case::trunc("TRUNC/CP1TRUNC.N64")]
 fn cop1(#[case] test_name: &str) {
-    test(format!("CPUTest/CP1/{test_name}"));
+    test(format!("CPUTest/CP1/{test_name}"), |_| {});
 }
 
 // TODO rf images with same names conflict (single/double)
@@ -121,7 +125,7 @@ fn cop1(#[case] test_name: &str) {
 #[case::mandelbrot_640_double("640X480/Mandelbrot/Double/Mandelbrot32BPP640X480.N64")]
 #[case::mandelbrot_640_single("640X480/Mandelbrot/Single/Mandelbrot32BPP640X480.N64")]
 fn cop1_fractals(#[case] test_name: &str) {
-    test(format!("CP1/Fractal/32BPP/{test_name}"));
+    test(format!("CP1/Fractal/32BPP/{test_name}"), |_| {});
 }
 
 #[rstest]
@@ -130,42 +134,49 @@ fn cop1_fractals(#[case] test_name: &str) {
 #[case::dma_large_4("DMAAlignment-PI-ROM-FROM_large_4.N64")]
 #[case::dma_large_6("DMAAlignment-PI-ROM-FROM_large_6.N64")]
 fn pi_dma(#[case] test_name: &str) {
-    test(format!("CPUTest/DMAAlignment-PI-cart/{test_name}"));
+    test(format!("CPUTest/DMAAlignment-PI-cart/{test_name}"), |_| {});
 }
 
 #[rstest]
 #[case::compare_disabled("Compare/ExceptionCompareDisabled.n64")]
 #[case::compare_registers("Compare/ExceptionCompareRegisters.n64")]
-#[case::syscall("Syscall/ExceptionSyscall.N64")]
-#[case::syscall_delay("Syscall/ExceptionSyscallDelay.N64")]
-#[case::syscall_delay_2("Syscall/ExceptionSyscallDelay2.N64")]
-#[case::syscall_while_in_exception("Syscall/ExceptionSyscallWhileInException.N64")]
-#[case::tlb_read_miss("TLB/ExceptionTLBReadMiss.N64")]
-#[case::tlb_read_miss_delay("TLB/ExceptionTLBReadMissDelay.N64")]
-#[case::tlb_read_miss_nested("TLB/ExceptionTLBReadMissNested.N64")]
-#[case::tlb_read_miss_nested_delay("TLB/ExceptionTLBReadMissNestedDelay.N64")]
-#[case::tlb_write_miss("TLB/ExceptionTLBWriteMiss.N64")]
-#[case::tlb_write_miss_delay("TLB/ExceptionTLBWriteMissDelay.N64")]
-#[case::trap_teq("Trap/ExceptionTEQ.N64")]
-#[case::trap_teq_delay("Trap/ExceptionTEQDelay.N64")]
-#[case::unaligned("Unaligned/ExceptionUnaligned.N64")]
-#[case::unaligned_delay("Unaligned/ExceptionUnalignedDelay.N64")]
-#[case::vii_intr_disabled("VIIntr/ExceptionVIIntrDisabled.N64")]
+#[case::syscall("Syscall/ExceptionSyscall.n64")]
+#[case::syscall_delay("Syscall/ExceptionSyscallDelay.n64")]
+#[case::syscall_delay_2("Syscall/ExceptionSyscallDelay2.n64")]
+#[case::syscall_while_in_exception("Syscall/ExceptionSyscallWhileInException.n64")]
+#[case::tlb_read_miss("TLB/ExceptionTLBReadMiss.n64")]
+#[case::tlb_read_miss_delay("TLB/ExceptionTLBReadMissDelay.n64")]
+#[case::tlb_read_miss_nested("TLB/ExceptionTLBReadMissNested.n64")]
+#[case::tlb_read_miss_nested_delay("TLB/ExceptionTLBReadMissNestedDelay.n64")]
+#[case::tlb_write_miss("TLB/ExceptionTLBWriteMiss.n64")]
+#[case::tlb_write_miss_delay("TLB/ExceptionTLBWriteMissDelay.n64")]
+#[case::trap_teq("Trap/ExceptionTEQ.n64")]
+#[case::trap_teq_delay("Trap/ExceptionTEQDelay.n64")]
+#[case::unaligned("Unaligned/ExceptionUnaligned.n64")]
+#[case::unaligned_delay("Unaligned/ExceptionUnalignedDelay.n64")]
+#[case::vii_intr_disabled("VIIntr/ExceptionVIIntrDisabled.n64")]
 fn exceptions(#[case] test_name: &str) {
-    test(format!("CPUTest/Exceptions/{test_name}"));
+    test(format!("CPUTest/Exceptions/{test_name}"), |s| {
+        // Tests start with error registers set to 0xFFFFFFFF TODO investigate why
+        s.cop0.set_exception_pc(u32::MAX);
+        s.cop0.set_error_pc(u32::MAX);
+        s.cop0.set_bad_virtual_address(u32::MAX);
+        // Tests start with a weird STATUS TODO investigate why
+        s.cop0.set_status(0x2410_00E0);
+    });
 }
 
 #[rstest]
 #[case::registers("RDRAMTest/RDRAMTest.N64")]
 fn rdram(#[case] test_name: &str) {
-    test(test_name);
+    test(test_name, |_| {});
 }
 
 #[rstest]
 #[case::version("Version/RCPVersion.N64")]
 #[case::vi_coverage("VI/CoverageTest/CoverageTest.N64")]
 fn rcp(#[case] test_name: &str) {
-    test(format!("RCP/{test_name}"));
+    test(format!("RCP/{test_name}"), |_| {});
 }
 
 #[rstest]
@@ -174,7 +185,7 @@ fn rcp(#[case] test_name: &str) {
 #[case::framebuffer_32_cpu("32BPP/FrameBufferCPU640x480/FrameBufferCPU32BPP640X480.N64")]
 #[case::framebuffer_32_dma("32BPP/FrameBufferDMA640x480/FrameBufferDMA32BPP640X480.N64")]
 fn framebuffer(#[case] test_name: &str) {
-    test(format!("FrameBuffer/{test_name}"));
+    test(format!("FrameBuffer/{test_name}"), |_| {});
 }
 
 #[rstest]
@@ -183,14 +194,14 @@ fn framebuffer(#[case] test_name: &str) {
 #[case::hello_world_32_cpu("32BPP/HelloWorldCPU320x240/HelloWorldCPU32BPP320X240.N64")]
 #[case::hello_world_32_rdp("32BPP/HelloWorldRDP320x240/HelloWorldRDP32BPP320X240.N64")]
 fn hello_world(#[case] test_name: &str) {
-    test(format!("HelloWorld/{test_name}"));
+    test(format!("HelloWorld/{test_name}"), |_| {});
 }
 
 // TODO fractals
 // TODO rsp
 // TODO rdp
 
-fn test(test_name: impl AsRef<str>) {
+fn test(test_name: impl AsRef<str>, setup: impl FnOnce(&mut System)) {
     // Download the ROM and reference image
 
     let rom_path = download(test_name.as_ref());
@@ -204,6 +215,8 @@ fn test(test_name: impl AsRef<str>) {
 
     let mut system = System::with_cart(cart);
 
+    setup(&mut system);
+
     for _ in 0..100_000_000 {
         system.step();
     }
@@ -211,7 +224,7 @@ fn test(test_name: impl AsRef<str>) {
     // Save the framebuffer
 
     let (framebuffer_data, framebuffer_width, framebuffer_height) =
-        Vi::extract_framebuffer(&system);
+        Vi::extract_framebuffer(&mut system);
 
     if framebuffer_width > 0 && framebuffer_height > 0 {
         let framebuffer_path = ref_image_path.with_extension("output.png");

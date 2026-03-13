@@ -1,17 +1,17 @@
 use std::path::Path;
 
 pub mod ai;
+pub(crate) mod bits;
 pub mod breakpoints;
 pub mod cart;
+pub mod controller;
 pub mod cop0;
 pub mod cop1;
 pub mod cpu;
-pub mod data;
 pub mod dd;
 pub mod dp;
 pub mod events;
 pub mod exception;
-pub mod instructions;
 pub mod isviewer;
 pub mod location;
 pub mod mi;
@@ -20,10 +20,12 @@ pub mod pi;
 pub mod pif;
 pub mod ram;
 pub mod registers;
+pub mod rendering;
 pub mod si;
 pub mod sp;
 pub mod system;
 pub mod tlb;
+pub mod value;
 pub mod vi;
 
 pub fn is_supported_rom_file(path: &Path) -> bool {
@@ -58,5 +60,5 @@ pub fn is_supported_file(path: &Path) -> bool {
 
 // TODO next steps:
 // - count/compare: interrupt cleared when compare changed??
-// - AI DMA queue
+// - DMA double-buffering (AI ok, others now)
 // - exception on reserved/unknown instructions?

@@ -5,10 +5,10 @@ use crate::{
     ai::{Ai, AiLocation},
     breakpoints::Breakpoints,
     cart::{Cart, CartLocation},
+    controller::Controller,
     cop0::Cop0,
     cop1::Cop1,
     cpu::Cpu,
-    data::Value,
     dd::Dd,
     dp::{Dp, DpLocation},
     events::{Cycle, EventType, Events},
@@ -19,8 +19,10 @@ use crate::{
     pi::{Pi, PiLocation},
     pif::{Pif, PifRamLocation},
     ram::{Ram, RamInterfaceLocation, RamLocation, RamRegsLocation},
+    rendering::audio::AudioRenderer,
     si::{Si, SiLocation},
     sp::{Sp, SpMemLocation, SpRegsLocation},
+    value::Value,
     vi::{self, Vi, ViLocation},
 };
 
@@ -110,6 +112,11 @@ pub struct System {
 
     // Debugger
     breakpoints: Breakpoints,
+
+    pub controllers: [Controller; 4],
+
+    pub audio_renderer: AudioRenderer,
+    // TODO video_renderer
 }
 
 impl System {
@@ -133,6 +140,10 @@ impl System {
             events: Events::default(),
 
             breakpoints: Breakpoints::default(),
+
+            controllers: [Controller::default(); 4],
+
+            audio_renderer: AudioRenderer::new(),
         };
 
         // Load the breakpoints
@@ -145,6 +156,9 @@ impl System {
                 log::error!("Failed to load breakpoints: {}", e);
             }
         }
+
+        // s.breakpoints.add(0x80000180);
+        // s.breakpoints.add(0x80000100);
 
         // Schedule the first scanline
 
@@ -189,13 +203,14 @@ impl System {
     }
 
     pub fn step(&mut self) -> bool {
-        // Step the CPU
+        // Step the processors
 
         Cpu::step(self);
+        Sp::step(self); // TODO 2 SP cycles for 3 CPU cycles?
 
         // Increment the timer every 2 CPU cycles
 
-        if self.cpu.cycles.is_multiple_of(2) {
+        if self.cpu.cycles().is_multiple_of(2) {
             // TODO ok right now, but not robust if some instructions take more than 2 cycles!
             self.cop0.increment_timer();
         }
@@ -282,7 +297,7 @@ impl System {
     }
 
     #[must_use]
-    pub fn read<T: Value>(&self, addr: Address) -> Result<T, Exception> {
+    pub fn read<T: Value>(&mut self, addr: Address) -> Result<T, Exception> {
         self.decode(addr, false).map(|location| match location {
             Some(MapLocation::Ram(addr)) => Ram::read(self, addr),
             Some(MapLocation::RamRegs(addr)) => self.ram.read_reg(addr),
@@ -307,7 +322,7 @@ impl System {
     }
 
     /// Reads without side effects, for debugging
-    pub fn peek<T: Value>(&self, addr: Address) -> Option<T> {
+    pub fn peek<T: Value>(&mut self, addr: Address) -> Option<T> {
         self.read(addr).ok()
     }
 

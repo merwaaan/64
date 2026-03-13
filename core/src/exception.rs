@@ -6,6 +6,8 @@ pub enum Exception {
     TlbModification,
     TlbMissLoad,
     TlbMissStore,
+    TlbInvalidLoad,
+    TlbInvalidStore,
     AddressLoad(u32),
     AddressStore(u32),
     Syscall,
@@ -18,7 +20,9 @@ pub enum Exception {
 
 impl Exception {
     pub fn raise(&self, s: &mut System) {
-        //log::error!("EXCEPTION {:?}", self);
+        // if !matches!(self, Exception::Interrupt(8)) && !matches!(self, Exception::Interrupt(4)) {
+        //     log::warn!("Exception: {:?}", self);
+        // }
 
         let in_branch_delay = s.cpu.in_branch_delay_slot();
 
@@ -64,7 +68,10 @@ impl Exception {
 
         // Jump to the exception handler
 
-        s.cpu.regs.pc = 0x8000_0180;
+        s.cpu.regs.pc = match self {
+            Exception::TlbMissLoad | Exception::TlbMissStore => 0x8000_0080,
+            _ => 0x8000_0180,
+        };
 
         s.cpu.regs.load_linked_bit = false; // TODO not documented anywhere???
 
@@ -77,12 +84,14 @@ impl Exception {
         }
     }
 
-    fn exception_code(&self) -> u32 {
+    pub fn exception_code(&self) -> u32 {
         match self {
             Exception::Interrupt(_) => 0,
             Exception::TlbModification => 1,
             Exception::TlbMissLoad => 2,
             Exception::TlbMissStore => 3,
+            Exception::TlbInvalidLoad => 2,
+            Exception::TlbInvalidStore => 3,
             Exception::AddressLoad(_) => 4,
             Exception::AddressStore(_) => 5,
             Exception::Syscall => 8,

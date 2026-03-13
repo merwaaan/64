@@ -1,159 +1,259 @@
-use strum::{Display, EnumIter};
+use arbitrary_int::prelude::*;
+use bitbybit::bitfield;
 
 use crate::{
-    cpu,
-    data::Value,
     events::{EventType, Events},
     location::Location,
     mi::Interrupt,
-    system::System,
+    register_overlaps,
+    system::{Address, System},
+    value::Value,
 };
 
 /// Audio interface
 ///
+/// https://n64brew.dev/wiki/Audio_Interface
 /// TODO doc
 
-const START: u32 = 0x0450_0000;
-const END: u32 = 0x0460_0000;
+pub type AiLocation = Location<0x0450_0000, 0x0460_0000>;
 
-pub type AiLocation = Location<START, END>;
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct DmaRamAddress {
+    #[bits(0..=23, rw)]
+    value: u24,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct DmaLength {
+    #[bits(0..=17, rw)]
+    value: u18,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Control {
+    #[bit(0, rw)]
+    dma_enabled: bool,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Status {
+    #[bit(0, rw)]
+    full_mirror: bool,
+
+    #[bits(1..=14, rw)]
+    count: u14,
+
+    #[bit(16, rw)]
+    bit_clock: bool,
+
+    #[bit(19, rw)]
+    word_clock: bool,
+
+    // TODO b24=1?
+    #[bit(25, rw)]
+    dma_enabled: bool,
+
+    // TODO b28/29=1?
+
+    // TODO b24=1?
+    #[bit(30, rw)]
+    dma_busy: bool,
+
+    #[bit(31, rw)]
+    dma_full: bool,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct DacRate {
+    #[bits(0..=13, rw)]
+    value: u14,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct BitRate {
+    #[bits(0..=3, rw)]
+    rate: u4,
+}
+
+#[repr(C)]
+#[derive(Default, Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Registers {
+    pub ram_address: DmaRamAddress,
+    pub length: DmaLength,
+    pub control: Control,
+    pub status: Status,
+    pub dac_rate: DacRate,
+    pub bit_rate: BitRate,
+}
+
+impl Registers {
+    pub fn read<T: Value>(&self, offset: u32) -> T {
+        let words = bytemuck::cast_slice(bytemuck::bytes_of(self));
+
+        T::read_reg(words, offset)
+
+        // TODO All the other registers mirror LENGTH
+    }
+
+    pub fn write<T: Value>(&mut self, offset: u32, data: T) {
+        let mut words = bytemuck::cast_slice_mut(bytemuck::bytes_of_mut(self));
+
+        data.write_reg(&mut words, offset);
+
+        // Mask out the lower bits of the DMA length register
+
+        self.length
+            .set_value(self.length.value() & u18::new(0x3_FFF8));
+
+        // The DMA_ENABLE flag is mirrored in bit 25 of STATUS
+
+        self.status.set_dma_enabled(self.control.dma_enabled());
+    }
+}
 
 // TODO generally, what's faster? match get optimized? compute index from >> 2?
-const REG_MASK: u32 = 0x1F;
+const REGISTERS_MASK: u32 = 0x1F; // TODO not exactly correct
 
-const DRAM_ADDR_REG: u32 = 0;
-
-const LENGTH_REG: u32 = 1;
-
-const CONTROL_REG: u32 = 2;
-
-const STATUS_REG: u32 = 3;
-const STATUS_DMA_BUSY_MASK: u32 = 1 << 30;
-
-const DACRATE_REG: u32 = 4;
-
-const BITRATE_REG: u32 = 5;
-
-#[derive(Debug, Display, Clone, Copy, EnumIter)]
-#[repr(u32)]
-pub enum Register {
-    DramAddress = DRAM_ADDR_REG,
-    Length = LENGTH_REG,
-    Control = CONTROL_REG,
-    Status = STATUS_REG,
-    DacRate = DACRATE_REG,
-    BitRate = BITRATE_REG,
+#[derive(Default, Clone, Copy, Debug)]
+struct DmaSlot {
+    address: u32,
+    length: u32,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct Ai {
-    pub regs: [u32; 6], // TODO not pub
-}
+    regs: Registers,
 
-// TODO ENABLE FLAG???
+    active_dma: Option<DmaSlot>,
+    pending_dma: Option<DmaSlot>,
+}
 
 impl Ai {
-    pub fn read<T: Value>(s: &System, addr: AiLocation) -> T {
-        match (addr.relative() >> 2) & REG_MASK {
-            STATUS_REG => T::read_reg(&s.ai.regs, addr.relative() & REG_MASK),
+    pub fn regs(&self) -> &Registers {
+        &self.regs
+    }
 
-            // All the other registers mirror LENGTH
-            _ => T::read_reg(&s.ai.regs, LENGTH_REG + (addr.relative() & 3)),
-        }
+    pub fn read<T: Value>(s: &System, addr: AiLocation) -> T {
+        s.ai.regs.read(addr.relative() & REGISTERS_MASK)
     }
 
     pub fn write<T: Value>(s: &mut System, addr: AiLocation, data: T) {
-        // TODO possible to write mult regs???
-        debug_assert!(T::BYTES <= 4, "Writing to multiple AI registers");
+        let offset = addr.relative() & REGISTERS_MASK; // TODO how does mirroring work? not aligned
 
-        match (addr.relative() >> 2) & REG_MASK {
-            DRAM_ADDR_REG => {
-                data.write_reg(&mut s.ai.regs, addr.relative() & REG_MASK);
+        s.ai.regs.write(offset, data);
 
-                s.ai.regs[DRAM_ADDR_REG as usize] &= 0x00FF_FFF8;
-            }
-            LENGTH_REG => {
-                data.write_reg(&mut s.ai.regs, addr.relative() & REG_MASK);
+        // Writing to the length register starts a DMA transfer
 
-                s.ai.regs[LENGTH_REG as usize] &= 0x0003_FFFF;
+        if register_overlaps!(offset, offset + T::BYTES as u32, Registers::length) {
+            Self::push_dma(s);
+        }
 
-                // TODO depends on DMA_ENABLE???
-                Self::start_dma(s);
-            }
-            CONTROL_REG => {
-                data.write_reg(&mut s.ai.regs, addr.relative() & REG_MASK);
-            }
-            STATUS_REG => {
-                // Writing any value acknowledges the interrupt
+        // Writing to the status register clears the AI interrupt
 
-                s.mi.clear_pending_interrupt(Interrupt::Ai, &mut s.cop0);
-            }
-            DACRATE_REG => {
-                data.write_reg(&mut s.ai.regs, addr.relative() & REG_MASK);
+        if register_overlaps!(offset, offset + T::BYTES as u32, Registers::status) {
+            s.mi.clear_pending_interrupt(Interrupt::Ai, &mut s.cop0);
+        }
 
-                s.ai.regs[DACRATE_REG as usize] &= 0x0000_3FFF;
-            }
-            BITRATE_REG => {
-                data.write_reg(&mut s.ai.regs, addr.relative() & REG_MASK);
+        // Notify the audio renderer when the sample rate changes
 
-                s.ai.regs[BITRATE_REG as usize] &= 0x0000_000F;
-            }
-            _ => panic!(
-                "Invalid AI register write: {:08X} {:X}",
-                addr.relative(),
-                data
-            ),
+        if register_overlaps!(offset, offset + T::BYTES as u32, Registers::dac_rate) {
+            s.audio_renderer.set_sample_rate(s.ai.sample_rate());
         }
     }
 
-    pub fn sample_rate(&self) -> usize {
-        (cpu::FREQUENCY / ((self.regs[DACRATE_REG as usize] + 1) as f64)) as usize
+    // TODO use it!
+    pub fn dma_enabled(&self) -> bool {
+        self.regs.control.dma_enabled()
     }
 
-    fn start_dma(s: &mut System) {
-        // TODO actually do something
+    pub fn sample_rate(&self) -> u32 {
+        // TODO var in sp or something, also correct val?
+        (62_500_000.0 / ((self.regs.dac_rate.raw_value + 1) as f64)) as u32
+    }
 
-        // log::info!(
-        //     "AI DMA transfer: {} bytes from {:08X}",
-        //     s.ai.regs[LENGTH_REG as usize],
-        //     s.ai.regs[DRAM_ADDR_REG as usize]
-        // );
+    fn push_dma(s: &mut System) {
+        if s.ai.pending_dma.is_some() {
+            log::error!("AI DMA transfer already pending");
+        }
+        // Active DMA transfer: queue
+        else if s.ai.active_dma.is_some() {
+            s.ai.pending_dma = Some(DmaSlot {
+                address: s.ai.regs.ram_address.value().value(),
+                length: s.ai.regs.length.value().value(),
+            });
+
+            s.ai.regs.status.set_dma_full(true);
+        }
+        // No active DMA transfer: execute
+        else {
+            let slot = DmaSlot {
+                address: s.ai.regs.ram_address.value().value(),
+                length: s.ai.regs.length.value().value(),
+            };
+
+            s.ai.active_dma = Some(slot);
+
+            // TODO ENABLED?
+
+            Self::start_dma(s, slot);
+        }
+    }
+
+    fn start_dma(s: &mut System, slot: DmaSlot) {
+        log::info!(
+            "AI DMA transfer: {:X} bytes from RAM {:08X}",
+            slot.length,
+            slot.address
+        );
+
+        // Push the data to the audio renderer
+
+        let mut samples = Vec::with_capacity(slot.length as usize);
+
+        for i in 0..slot.length {
+            let sample = s
+                .read(Address::p(slot.address + i)) // TODO physical/virtual?
+                .expect("AI DMA RAM read failed");
+
+            samples.push(sample);
+        }
+
+        s.audio_renderer.push(samples.as_slice());
 
         // Update the status register
 
-        s.ai.regs[STATUS_REG as usize] |= STATUS_DMA_BUSY_MASK;
-        // TODO enabled mirror?
-        // TODO others
+        s.ai.regs.status.set_dma_busy(true);
 
-        // Raise the interrupt when starting the transfer
-        // TODO when played instead? depnding on rate?
+        // Schedule completion
 
-        s.mi.set_pending_interrupt(Interrupt::Ai, &mut s.cop0);
+        let samples = (slot.length / 4) as f64; // 16-bit stereo = 4 bytes per sample
+        let cycles = ((samples / (s.ai.sample_rate() as f64)) * 93_750_000.0) as usize; // TODO crrect cycle unit?
 
-        Events::push(
-            s,
-            EventType::AiDmaTransferComplete,
-            1000000, // TODO random lol
-        );
+        Events::push(s, EventType::AiDmaTransferComplete, cycles);
     }
 
     pub fn dma_completed(s: &mut System) {
-        // Update the status register
+        debug_assert!(s.ai.active_dma.is_some(), "AI DMA transfer not in progress");
 
-        s.ai.regs[STATUS_REG as usize] &= !STATUS_DMA_BUSY_MASK;
-        // TODO IO busy?
-    }
+        s.ai.regs.status.set_dma_busy(false);
+        s.ai.regs.status.set_dma_full(false);
 
-    pub fn reg_info(addr: AiLocation) -> Option<&'static str> {
-        // TODO mask?
-        match (addr.relative() >> 2) & REG_MASK {
-            DRAM_ADDR_REG => Some("AI_DRAM_ADDR"),
-            LENGTH_REG => Some("AI_LENGTH"),
-            CONTROL_REG => Some("AI_CONTROL"),
-            STATUS_REG => Some("AI_STATUS"),
-            DACRATE_REG => Some("AI_DACRATE"),
-            BITRATE_REG => Some("AI_BITRATE"),
-            _ => None,
+        // Start the pending DMA, if any
+
+        s.ai.active_dma = s.ai.pending_dma.take();
+
+        if let Some(slot) = s.ai.active_dma {
+            Self::start_dma(s, slot);
         }
+
+        // Raise an AI interrupt
+
+        s.mi.set_pending_interrupt(Interrupt::Ai, &mut s.cop0);
     }
 }

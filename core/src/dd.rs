@@ -1,4 +1,4 @@
-use crate::{data::Value, location::Location, system::System};
+use crate::{value::Value, location::Location, system::System};
 
 const RAM_START: u32 = 0x0500_0000;
 const RAM_END: u32 = 0x0600_0800;

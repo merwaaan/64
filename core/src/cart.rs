@@ -9,7 +9,7 @@ use thiserror::Error;
 use zip::ZipArchive;
 
 use crate::{
-    data::Value,
+    value::Value,
     is_supported_rom_file,
     isviewer::{IsViewer, IsViewerBufferLocation, IsViewerControlLocation},
     location::Location,

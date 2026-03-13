@@ -4,7 +4,7 @@
 // However, some instructions rely on the full 64-bit range of the registers (eg. DSLL, DSRL).
 
 // TODO isn't this just data<u64>?
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, Debug)]
 pub struct Reg64(u64);
 
 impl Reg64 {
@@ -28,7 +28,7 @@ impl Reg64 {
 
 // TODO optim: avoid branch in get?
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum GPReg {
     // r0 always reads as 0 and cannot be written to
     Zero,
@@ -66,7 +66,7 @@ impl GPReg {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Registers {
     pub pc: u32,
 

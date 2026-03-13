@@ -11,6 +11,8 @@ pub enum EventType {
     SpDmaTransferComplete,
     SiDmaTransferComplete,
     ViScanlineComplete,
+    // SpHalt, // TODO temp hack
+    // DpHalt, // TODO temp hack
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -58,7 +60,12 @@ impl Event {
             }
             EventType::ViScanlineComplete => {
                 Vi::scanline_completed(s);
-            }
+            } // EventType::SpHalt => {
+              //     Sp::halt(s);
+              // }
+              // EventType::DpHalt => {
+              //     Sp::dp_halt(s);
+              // }
         }
     }
 }
@@ -72,12 +79,12 @@ impl Events {
     pub(crate) fn push(s: &mut System, event: EventType, in_cycles: Cycle) {
         s.events.events.push(Event {
             id: event,
-            cycle: s.cpu.cycles + in_cycles,
+            cycle: s.cpu.cycles() + in_cycles,
         });
     }
 
     pub(crate) fn update(s: &mut System) {
-        while let Some(event) = s.events.pop_if_ready(s.cpu.cycles) {
+        while let Some(event) = s.events.pop_if_ready(s.cpu.cycles()) {
             event.handle(s);
         }
     }

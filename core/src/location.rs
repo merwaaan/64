@@ -17,6 +17,8 @@ use crate::{
 /// Memory map sections can define their own locations:
 ///
 /// ```
+/// use n64_core::location::Location;
+///
 /// type RspDmemLocation = Location<0x0400_0000, 0x0400_1000>;
 /// ```
 #[derive(Debug, Clone, Copy)]

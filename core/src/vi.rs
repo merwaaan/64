@@ -1,20 +1,18 @@
+use arbitrary_int::prelude::*;
+use bitbybit::bitfield;
 use strum::{Display, EnumIter};
 
 use crate::{
     cpu,
-    data::Value,
     events::{EventType, Events},
     location::Location,
     mi::Interrupt,
+    register_overlaps,
     system::{Address, System},
+    value::Value,
 };
 
-const START: u32 = 0x0440_0000;
-const END: u32 = 0x0450_0000;
-
-pub type ViLocation = Location<START, END>;
-
-const MASK: u32 = 0x3F;
+pub type ViLocation = Location<0x0440_0000, 0x0450_0000>;
 
 #[derive(Debug, Display, Clone, Copy, EnumIter)]
 #[repr(u32)]
@@ -37,207 +35,263 @@ pub enum Register {
     YScale,
 }
 
-const STATUS_REG: usize = 0;
-const STATUS_LO: u32 = (STATUS_REG as u32) << 2;
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Control {
+    #[bits(0..=1, rw)] // TODO enum
+    color_mode: u2,
 
-// TODO flags
+    #[bit(2, rw)]
+    gamma_dither: bool,
 
-const FRAMEBUFFER_ADDR_REG: usize = 1; // "ORIGIN" in some docs
-const FRAMEBUFFER_ADDR_LO: u32 = (FRAMEBUFFER_ADDR_REG as u32) << 2;
-const FRAMEBUFFER_ADDR_MASK: u32 = 0x00FF_FFFF;
+    #[bit(3, rw)]
+    gamma: bool,
 
-const WIDTH_REG: usize = 2;
-const WIDTH_LO: u32 = (WIDTH_REG as u32) << 2;
-const WIDTH_MASK: u32 = 0x0FFF;
+    #[bit(4, rw)]
+    divot: bool,
 
-const INTERRUPT_SCANLINE_REG: usize = 3;
-const INTERRUPT_SCANLINE_LO: u32 = (INTERRUPT_SCANLINE_REG as u32) << 2;
-const INTERRUPT_SCANLINE_MASK: u32 = 0x03FF;
+    #[bit(5, rw)]
+    vbus_clock: bool,
 
-const CURRENT_SCANLINE_REG: usize = 4;
-//const CURRENT_SCANLINE_LO: u32 = (CURRENT_SCANLINE_REG as u32) << 2;
+    #[bit(6, rw)]
+    serrate: bool,
 
-const BURST_REG: usize = 5;
+    #[bit(7, rw)]
+    test_mode: bool,
 
-const V_SYNC_REG: usize = 6; // TODO rn V_TOTAL?
-const V_SYNC_MASK: u32 = 0x03FF;
+    #[bits(8..=9, rw)] // TODO enum
+    antialias_mode: u2,
 
-const H_SYNC_REG: usize = 7;
-const H_SYNC_LEAP_REG: usize = 8;
-const H_VIDEO_REG: usize = 9;
-const V_VIDEO_REG: usize = 10;
-const V_BURST_REG: usize = 11;
-const X_SCALE_REG: usize = 12;
-const Y_SCALE_REG: usize = 13;
+    #[bit(11, rw)]
+    kill_writes: bool,
 
+    #[bits(12..=15, rw)] // TODO enum
+    pixel_advance: u4,
+
+    #[bit(16, rw)]
+    dither: bool,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Origin {
+    #[bits(0..=23, rw)]
+    ram_address: u24,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Width {
+    #[bits(0..=11, rw)]
+    value: u12,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct InterruptLine {
+    #[bits(0..=9, rw)]
+    value: u10,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CurrentLine {
+    #[bit(0, rw)]
+    field: u1,
+
+    #[bits(1..=9, rw)]
+    line: u9,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Burst {
+    #[bits(0..=7, rw)]
+    hsync_width: u8,
+
+    #[bits(8..=15, rw)]
+    burst_width: u8,
+
+    #[bits(16..=19, rw)]
+    vsync_height: u4,
+
+    #[bits(20..=29, rw)]
+    vburst_start: u10,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct VerticalTotal {
+    #[bits(0..=9, rw)]
+    value: u10,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct HorizontalTotal {
+    #[bits(0..=11, rw)]
+    total: u12,
+
+    #[bits(16..=20, rw)]
+    leap: u5,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct HorizontalTotalLeap {
+    #[bits(0..=11, rw)]
+    leap_b: u12,
+
+    #[bits(16..=27, rw)]
+    leap_a: u12,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct StartEnd {
+    #[bits(0..=9, rw)]
+    end: u10,
+
+    #[bits(16..=25, rw)]
+    start: u10,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct HorizontalScale {
+    #[bits(0..=11, rw)]
+    scale: u12,
+
+    #[bits(16..=27, rw)]
+    offset: u12,
+}
+
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct VerticalScale {
+    #[bits(0..=11, rw)]
+    scale: u12,
+
+    #[bits(16..=25, rw)]
+    offset: u10,
+}
+
+#[repr(C)]
+#[derive(Default, Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Registers {
+    pub control: Control,
+    pub origin: Origin,
+    pub width: Width,
+    pub interrupt_line: InterruptLine,
+    pub current_line: CurrentLine,
+    pub burst: Burst,
+    pub vertical_total: VerticalTotal,
+    pub horizontal_total: HorizontalTotal,
+    pub horizontal_leap: HorizontalTotalLeap,
+    pub horizontal_video: StartEnd,
+    pub vertical_video: StartEnd,
+    pub vertical_burst: StartEnd,
+    pub x_scale: HorizontalScale,
+    pub y_scale: VerticalScale,
+    // TODO others?
+    test_address: u32,
+    staged_data: u32,
+}
+
+impl Registers {
+    pub fn read<T: Value>(&self, offset: u32) -> T {
+        let words = bytemuck::cast_slice(bytemuck::bytes_of(self));
+
+        T::read_reg(words, offset)
+    }
+
+    pub fn write<T: Value>(&mut self, offset: u32, data: T) {
+        let mut words = bytemuck::cast_slice_mut(bytemuck::bytes_of_mut(self));
+
+        data.write_reg(&mut words, offset);
+    }
+}
+
+const REGISTERS_MASK: u32 = 0x3F;
+
+// NTSC 59.94 Hz, 262.5 scanlines
+// PAL 50.00 Hz, 312.5 scanlines
 const NTSC_FREQUENCY: f64 = 60.0; // TODO exact?
-//const PAL_FREQUENCY: f64 = 50.0;
+const _PAL_FREQUENCY: f64 = 50.0;
 
 const TOTAL_SCANLINES: usize = 525; // TODO depends????
 const FRAME_CPU_CYCLES: usize = (cpu::FREQUENCY / NTSC_FREQUENCY) as usize;
 pub const SCANLINE_CPU_CYCLES: usize = FRAME_CPU_CYCLES / TOTAL_SCANLINES; // TODO fractional part?
 
-// NTSC 59.94 Hz, 262.5 scanlines
-// PAL 50.00 Hz, 312.5 scanlines
-
 #[derive(Debug, Clone, Copy)]
 pub struct Vi {
-    pub regs: [u32; 14],
+    regs: Registers,
 }
 
 impl Default for Vi {
     fn default() -> Self {
         Self {
-            regs: [
-                0, 0, 0, 0, 0, 0, 0, //0x271, // TODO PAL = 20D?
-                0, 0, 0, 0, 0, 0, 0,
-            ],
+            regs: Registers::default(),
         }
     }
 }
 
 impl Vi {
+    pub fn regs(&self) -> &Registers {
+        &self.regs
+    }
+
     pub fn read<T: Value>(s: &System, addr: ViLocation) -> T {
-        let reg = ((addr.relative() & MASK) >> 2) as usize;
-
-        match reg {
-            FRAMEBUFFER_ADDR_REG => {
-                // TODO mask addr value???
-
-                T::read_reg(&s.vi.regs, addr.relative() & MASK)
-            }
-            CURRENT_SCANLINE_REG => {
-                // TODO half scanlines???
-
-                T::read_reg(&s.vi.regs, addr.relative() & MASK)
-            }
-            _ => unimplemented!("Read VI register @ {:08X}", addr.relative()),
-        }
+        s.vi.regs.read(addr.relative() & REGISTERS_MASK)
     }
 
     pub fn write<T: Value>(s: &mut System, addr: ViLocation, data: T) {
-        let reg = ((addr.relative() & MASK) >> 2) as usize;
+        let current_line = s.vi.regs.current_line;
 
-        // TODO possible to write mult regs???
-        debug_assert!(T::BYTES <= 4, "Writing to multiple VI registers");
+        let offset = addr.relative() & REGISTERS_MASK;
 
-        // TODO mask on w or r?
+        s.vi.regs.write(offset, data);
 
-        match reg {
-            STATUS_REG => {
-                // TODO
+        if register_overlaps!(offset, offset + T::BYTES as u32, Registers::current_line) {
+            s.mi.clear_pending_interrupt(Interrupt::Vi, &mut s.cop0);
 
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-            }
-
-            FRAMEBUFFER_ADDR_REG => {
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-
-                s.vi.regs[FRAMEBUFFER_ADDR_REG] &= FRAMEBUFFER_ADDR_MASK;
-            }
-
-            WIDTH_REG => {
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-
-                s.vi.regs[WIDTH_REG] &= WIDTH_MASK;
-            }
-
-            INTERRUPT_SCANLINE_REG => {
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-
-                s.vi.regs[INTERRUPT_SCANLINE_REG] &= INTERRUPT_SCANLINE_MASK;
-            }
-
-            CURRENT_SCANLINE_REG => {
-                // Writing anything to this register clears the interrupt
-
-                s.mi.clear_pending_interrupt(Interrupt::Vi, &mut s.cop0);
-            }
-
-            BURST_REG => {
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-            }
-
-            V_SYNC_REG => {
-                // TODO
-
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-
-                s.vi.regs[V_SYNC_REG] &= V_SYNC_MASK;
-            }
-
-            H_SYNC_REG => {
-                // TODO
-
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-            }
-
-            H_SYNC_LEAP_REG => {
-                // TODO
-
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-            }
-
-            H_VIDEO_REG => {
-                // TODO
-
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-            }
-
-            V_VIDEO_REG => {
-                // TODO
-
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-            }
-
-            V_BURST_REG => {
-                // TODO
-
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-            }
-
-            X_SCALE_REG => {
-                // TODO
-
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-            }
-
-            Y_SCALE_REG => {
-                // TODO
-
-                data.write_reg(&mut s.vi.regs, addr.relative() & MASK);
-            }
-
-            _ => unimplemented!("Write VI register {:X} @ {:08X}", data, addr.relative()),
+            // CURRENT_LINE is read-only
+            s.vi.regs.current_line = current_line;
         }
     }
 
-    pub fn reg_info(addr: ViLocation) -> Option<&'static str> {
-        match addr.relative() & MASK {
-            STATUS_LO => Some("VI_STATUS"),
-            FRAMEBUFFER_ADDR_LO => Some("VI_FRAMEBUFFER_ADDR"),
-            WIDTH_LO => Some("VI_WIDTH"),
-            INTERRUPT_SCANLINE_LO => Some("VI_INTERRUPT_SCANLINE"),
-            _ => None,
-        }
+    pub(crate) fn framebuffer_address(&self) -> u32 {
+        self.regs.origin.ram_address().value()
+    }
+
+    pub fn framebuffer_width(&self) -> usize {
+        self.regs.width.value().value() as usize
+    }
+
+    pub fn framebuffer_height(&self) -> usize {
+        480 // TODOself.regs[V_SYNC_REG] as usize
     }
 
     pub fn scanline_completed(s: &mut System) {
         // Increment the current scanline by 2 half scanlines
         // TODO Toggle the field bit?
 
-        s.vi.regs[CURRENT_SCANLINE_REG] = s.vi.regs[CURRENT_SCANLINE_REG].wrapping_add(2) & 0x3FF;
+        s.vi.regs
+            .current_line
+            .set_line(s.vi.regs.current_line.line().wrapping_add(u9::new(1))); // TODO halfline overlap in struct?
+        //s.vi.regs[CURRENT_SCANLINE_REG] = s.vi.regs[CURRENT_SCANLINE_REG].wrapping_add(2) & 0x3FF;
 
         // Reset the current scanline to 0 if it matches the V_SYNC register
 
-        if s.vi.regs[CURRENT_SCANLINE_REG] >= s.vi.regs[V_SYNC_REG] {
-            s.vi.regs[CURRENT_SCANLINE_REG] = 0;
+        if s.vi.regs.current_line.line().value() >= s.vi.regs.vertical_total.value().value() {
+            s.vi.regs.current_line.set_line(u9::ZERO); // TODO halfline overlap?
         }
 
         // Raise an interrupt if the current scanline matches the interrupt scanline
         // TODO >= or ==???
 
-        if s.vi.regs[CURRENT_SCANLINE_REG] == s.vi.regs[INTERRUPT_SCANLINE_REG] {
+        if s.vi.regs.current_line.line().value() == s.vi.regs.interrupt_line.value().value() {
+            // TODO halfline overlap?
             s.mi.set_pending_interrupt(Interrupt::Vi, &mut s.cop0);
         }
 
@@ -247,47 +301,19 @@ impl Vi {
         Events::push(s, EventType::ViScanlineComplete, SCANLINE_CPU_CYCLES);
     }
 
-    pub fn address_info(addr: ViLocation) -> Option<&'static str> {
-        // TODO check masks!
-        // TODO normalize strings
-
-        match addr.relative() & MASK {
-            STATUS_LO => Some("VI_STATUS"),
-            FRAMEBUFFER_ADDR_LO => Some("VI_FRAMEBUFFER_ADDR"),
-            WIDTH_LO => Some("VI_WIDTH"),
-            INTERRUPT_SCANLINE_LO => Some("VI_INTERRUPT_SCANLINE"),
-            // TODO others
-            _ => None,
-        }
-    }
-
-    fn color32(&self) -> bool {
-        self.regs[STATUS_REG] & 0b11 == 0b11
-        // TODO other modes?
-    }
-
-    pub(crate) fn framebuffer_address(&self) -> u32 {
-        self.regs[FRAMEBUFFER_ADDR_REG]
-    }
-
-    pub fn framebuffer_width(&self) -> usize {
-        self.regs[WIDTH_REG] as usize
-    }
-
-    pub fn framebuffer_height(&self) -> usize {
-        480 // TODOself.regs[V_SYNC_REG] as usize
-    }
-
-    pub fn extract_framebuffer(s: &System) -> (Vec<u8>, usize, usize) {
+    pub fn extract_framebuffer(s: &mut System) -> (Vec<u8>, usize, usize) {
         let base_addr = s.vi.framebuffer_address();
         let width = s.vi.framebuffer_width();
         let height = s.vi.framebuffer_height();
 
         let mut data = Vec::with_capacity(width * height * 4);
 
-        if s.vi.color32() {
+        let color32 = s.vi.regs.control.color_mode().value() == 3;
+
+        if color32 {
             for y in 0..height {
                 for x in 0..width {
+                    // TODO optim: directly access RAM?
                     let pixel = s
                         .read::<u32>(Address::p(base_addr + ((y * width + x) * 4) as u32))
                         .expect("Invalid pixel address");

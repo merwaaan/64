@@ -6,7 +6,9 @@ use env_logger::Env;
 
 use crate::ui::Ui;
 
-mod emu;
+pub(crate) mod command;
+pub(crate) mod core_thread;
+pub(crate) mod event;
 mod ui;
 
 #[derive(clap::Parser)]

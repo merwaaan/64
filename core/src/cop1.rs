@@ -118,7 +118,7 @@ pub enum Comparison {
 //     regs[reg64_index].set64(reg64);
 // }
 
-#[bitfield(u6, instrospect, default = 0, debug)]
+#[bitfield(u6, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct Cause {
     #[bit(5, rw)]
     unimplemented_operation: bool,
@@ -143,7 +143,7 @@ pub enum RoundingMode {
     NegativeInfinity = 3,
 }
 
-#[bitfield(u32, introspect, default = 0, debug)]
+#[bitfield(u32, forbid_overlaps, introspect, default = 0, debug)]
 pub struct Fcr31 {
     #[bit(24, r)]
     fs: bool,
@@ -182,7 +182,7 @@ impl Fcr31 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Cop1 {
     // Floating-point registers
     //

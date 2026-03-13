@@ -1,9 +1,18 @@
+use arbitrary_int::prelude::*;
+use bitbybit::bitfield;
 use strum::{Display, EnumIter};
 
-use crate::{cop0::Cop0, data::Value, location::Location, system::System};
+use crate::{
+    bits::BitTest, cop0::Cop0, location::Location, register_overlaps, system::System, value::Value,
+};
+
+/// MIPS interface
+///
+/// TODO doc
+/// https://n64brew.dev/wiki/MIPS_Interface
 
 #[derive(Debug, Clone, Copy, Display, EnumIter)]
-#[repr(u32)]
+#[repr(u8)]
 pub enum Interrupt {
     Sp = 1,
     Si = 1 << 1,
@@ -13,260 +22,239 @@ pub enum Interrupt {
     Dp = 1 << 5,
 }
 
-const START: u32 = 0x0430_0000;
-const END: u32 = 0x0440_0000;
+pub type MiLocation = Location<0x0430_0000, 0x0440_0000>;
 
-pub type MiLocation = Location<START, END>;
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Mode {
+    #[bits(0..=6, rw)]
+    repeat_count: u7,
 
-const MASK: u32 = 0xF;
+    #[bit(7, rw)]
+    repeat: bool,
 
-#[derive(Display, EnumIter)]
-#[repr(u32)]
-pub enum Register {
-    Mode,
-    Version,
-    Interrupt,
-    Mask,
+    #[bit(8, rw)]
+    ebus: bool,
+
+    #[bit(9, rw)]
+    upper: bool,
 }
-
-const MODE_READ_REPEAT_COUNT_MASK: u32 = 0x7F;
-const MODE_READ_REPEAT_MASK: u32 = 1 << 7;
-const MODE_READ_EBUS_MASK: u32 = 1 << 8;
-const MODE_READ_UPPER_MASK: u32 = 1 << 9;
-
-const MODE_WRITE_REPEAT_CLEAR_MASK: u32 = 1 << 7;
-const MODE_WRITE_REPEAT_SET_MASK: u32 = 1 << 8;
-const MODE_WRITE_EBUS_CLEAR_MASK: u32 = 1 << 9;
-const MODE_WRITE_EBUS_SET_MASK: u32 = 1 << 10;
-const MODE_WRITE_DP_CLEAR_MASK: u32 = 1 << 11;
-const MODE_WRITE_UPPER_CLEAR_MASK: u32 = 1 << 12;
-const MODE_WRITE_UPPER_SET_MASK: u32 = 1 << 13;
 
 const VERSION_DEFAULT: u32 = 0x02020102;
 
-const MASK_SP_CLEAR: u32 = 1;
-const MASK_SP_SET: u32 = 1 << 1;
-const MASK_SI_CLEAR: u32 = 1 << 2;
-const MASK_SI_SET: u32 = 1 << 3;
-const MASK_AI_CLEAR: u32 = 1 << 4;
-const MASK_AI_SET: u32 = 1 << 5;
-const MASK_VI_CLEAR: u32 = 1 << 6;
-const MASK_VI_SET: u32 = 1 << 7;
-const MASK_PI_CLEAR: u32 = 1 << 8;
-const MASK_PI_SET: u32 = 1 << 9;
-const MASK_DP_CLEAR: u32 = 1 << 10;
-const MASK_DP_SET: u32 = 1 << 11;
+#[bitfield(u32, forbid_overlaps, instrospect, default = VERSION_DEFAULT, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Version {
+    #[bits(0..=7, rw)]
+    io: u8,
 
-#[derive(Clone, Copy)]
-pub struct Mi {
-    pub regs: [u32; 4], // TODO not pub
+    #[bits(8..=15, rw)]
+    rac: u8,
+
+    #[bits(16..=23, rw)]
+    rdp: u8,
+
+    #[bits(24..=31, rw)]
+    rsp: u8,
 }
 
-impl Default for Mi {
-    fn default() -> Self {
-        let mut regs = [0; 4];
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Interrupts {
+    #[bit(0, rw)]
+    sp: bool,
 
-        VERSION_DEFAULT.write_reg(&mut regs, 4);
+    #[bit(1, rw)]
+    si: bool,
 
-        Self { regs }
+    #[bit(2, rw)]
+    ai: bool,
+
+    #[bit(3, rw)]
+    vi: bool,
+
+    #[bit(4, rw)]
+    pi: bool,
+
+    #[bit(5, rw)]
+    dp: bool,
+}
+
+#[repr(C)]
+#[derive(Default, Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Registers {
+    pub mode: Mode,
+    pub version: Version,
+    pub interrupts: Interrupts,
+    pub mask: Interrupts,
+}
+
+const REGISTERS_MASK: u32 = 0xF;
+
+#[derive(Default, Clone, Copy, Debug)]
+pub struct Mi {
+    regs: Registers,
+}
+
+struct WriteResult {
+    check_interrupts: bool,
+    clear_dp_interrupt: bool,
+}
+
+impl Registers {
+    fn read<T: Value>(&self, offset: u32) -> T {
+        let words = bytemuck::cast_slice(bytemuck::bytes_of(self));
+
+        T::read_reg(words, offset)
+    }
+
+    fn write<T: Value>(&mut self, offset: u32, data: T) -> WriteResult {
+        let mut result = WriteResult {
+            check_interrupts: false,
+            clear_dp_interrupt: false,
+        };
+
+        // Registers are all read-only and writes to MODE and MASK are interpreted as set/clear commands,
+        // so we write to a temporary buffer and then update the actual registers from those commands
+
+        let mut fake_regs = [0u32; 4];
+        data.write_reg(&mut fake_regs, offset);
+
+        // Mode
+
+        if register_overlaps!(offset, offset + T::BYTES as u32, Registers::mode) {
+            let mode_command = fake_regs[0];
+            let mut mode = self.mode;
+
+            if mode_command.bit_is_set::<7>() {
+                mode.set_repeat(false);
+            } else if mode_command.bit_is_set::<8>() {
+                mode.set_repeat(true);
+            }
+
+            if mode_command.bit_is_set::<9>() {
+                mode.set_ebus(false);
+            } else if mode_command.bit_is_set::<10>() {
+                mode.set_ebus(true);
+            }
+
+            if mode_command.bit_is_set::<11>() {
+                result.clear_dp_interrupt = true;
+            }
+
+            if mode_command.bit_is_set::<12>() {
+                mode.set_upper(false);
+            } else if mode_command.bit_is_set::<13>() {
+                mode.set_upper(true);
+            }
+
+            // TODO repeat count
+
+            self.mode = mode;
+        }
+
+        // Mask
+
+        if register_overlaps!(offset, offset + T::BYTES as u32, Registers::mask) {
+            let mask_command = fake_regs[3];
+            let mut mask = self.mask;
+
+            if mask_command.bit_is_set::<0>() {
+                mask.set_sp(false);
+            } else if mask_command.bit_is_set::<1>() {
+                mask.set_sp(true);
+            }
+
+            if mask_command.bit_is_set::<2>() {
+                mask.set_si(false);
+            } else if mask_command.bit_is_set::<3>() {
+                mask.set_si(true);
+            }
+
+            if mask_command.bit_is_set::<4>() {
+                mask.set_ai(false);
+            } else if mask_command.bit_is_set::<5>() {
+                mask.set_ai(true);
+            }
+
+            if mask_command.bit_is_set::<6>() {
+                mask.set_vi(false);
+            } else if mask_command.bit_is_set::<7>() {
+                mask.set_vi(true);
+            }
+
+            if mask_command.bit_is_set::<8>() {
+                mask.set_pi(false);
+            } else if mask_command.bit_is_set::<9>() {
+                mask.set_pi(true);
+            }
+
+            if mask_command.bit_is_set::<10>() {
+                mask.set_dp(false);
+            } else if mask_command.bit_is_set::<11>() {
+                mask.set_dp(true);
+            }
+
+            self.mask = mask;
+
+            result.check_interrupts = true;
+        }
+
+        result
     }
 }
 
 impl Mi {
-    pub fn read<T: Value>(_s: &System, addr: MiLocation) -> T {
-        T::read_reg(&_s.mi.regs, addr.relative() & MASK)
+    pub fn regs(&self) -> &Registers {
+        &self.regs
+    }
+
+    pub fn read<T: Value>(s: &System, addr: MiLocation) -> T {
+        s.mi.regs.read(addr.relative() & REGISTERS_MASK)
     }
 
     pub fn write<T: Value>(s: &mut System, addr: MiLocation, data: T) {
-        let reg = ((addr.relative() & MASK) >> 2) as usize;
+        let offset = addr.relative() & REGISTERS_MASK;
 
-        // TODO possible to write mult regs???
-        debug_assert!(T::BYTES <= 4, "Writing to multiple SI registers");
+        let mut result = s.mi.regs.write(offset, data);
 
-        match reg {
-            0 => {
-                let mut trigger_bits = [0u32];
-                data.write_reg(&mut trigger_bits, addr.relative() & 3);
+        if result.clear_dp_interrupt {
+            s.mi.clear_pending_interrupt(Interrupt::Dp, &mut s.cop0);
+            result.check_interrupts = true;
+        }
 
-                let mut mode_reg = s.mi.regs[Register::Mode as usize];
-
-                if trigger_bits[0] & MODE_WRITE_REPEAT_CLEAR_MASK != 0 {
-                    mode_reg &= !MODE_WRITE_REPEAT_CLEAR_MASK;
-                } else if trigger_bits[0] & MODE_WRITE_REPEAT_SET_MASK != 0 {
-                    mode_reg |= MODE_WRITE_REPEAT_SET_MASK;
-                }
-
-                if trigger_bits[0] & MODE_WRITE_EBUS_CLEAR_MASK != 0 {
-                    mode_reg &= !MODE_WRITE_EBUS_CLEAR_MASK;
-                } else if trigger_bits[0] & MODE_WRITE_EBUS_SET_MASK != 0 {
-                    mode_reg |= MODE_WRITE_EBUS_SET_MASK;
-                }
-
-                if trigger_bits[0] & MODE_WRITE_DP_CLEAR_MASK != 0 {
-                    mode_reg &= !(Interrupt::Dp as u32);
-                }
-
-                if trigger_bits[0] & MODE_WRITE_UPPER_CLEAR_MASK != 0 {
-                    mode_reg &= !MODE_WRITE_UPPER_CLEAR_MASK;
-                } else if trigger_bits[0] & MODE_WRITE_UPPER_SET_MASK != 0 {
-                    mode_reg |= MODE_WRITE_UPPER_SET_MASK;
-                }
-
-                // TODO repeat count
-
-                s.mi.regs[Register::Mode as usize] = mode_reg;
-
-                Self::update_cause_register(&mut s.mi, &mut s.cop0);
-            }
-            1 => {
-                // The interrupt register is read-only
-            }
-            2 => {}
-            3 => {
-                //log::error!("Write to MI_MASK: {:08X}", data);
-                let mut trigger_bits = [0u32];
-                data.write_reg(&mut trigger_bits, addr.relative() & 3);
-
-                let mask_reg = &mut s.mi.regs[Register::Mask as usize];
-
-                // TODO write without conds?
-
-                if trigger_bits[0] & MASK_SP_CLEAR == MASK_SP_CLEAR {
-                    *mask_reg &= !(Interrupt::Sp as u32);
-                } else if trigger_bits[0] & MASK_SP_SET == MASK_SP_SET {
-                    *mask_reg |= Interrupt::Sp as u32;
-                }
-
-                if trigger_bits[0] & MASK_SI_CLEAR == MASK_SI_CLEAR {
-                    *mask_reg &= !(Interrupt::Si as u32);
-                } else if trigger_bits[0] & MASK_SI_SET == MASK_SI_SET {
-                    *mask_reg |= Interrupt::Si as u32;
-                }
-
-                if trigger_bits[0] & MASK_AI_CLEAR == MASK_AI_CLEAR {
-                    *mask_reg &= !(Interrupt::Ai as u32);
-                } else if trigger_bits[0] & MASK_AI_SET == MASK_AI_SET {
-                    *mask_reg |= Interrupt::Ai as u32;
-                }
-
-                if trigger_bits[0] & MASK_VI_CLEAR == MASK_VI_CLEAR {
-                    *mask_reg &= !(Interrupt::Vi as u32);
-                } else if trigger_bits[0] & MASK_VI_SET == MASK_VI_SET {
-                    *mask_reg |= Interrupt::Vi as u32;
-                }
-
-                if trigger_bits[0] & MASK_PI_CLEAR == MASK_PI_CLEAR {
-                    *mask_reg &= !(Interrupt::Pi as u32);
-                } else if trigger_bits[0] & MASK_PI_SET == MASK_PI_SET {
-                    *mask_reg |= Interrupt::Pi as u32;
-                }
-
-                if trigger_bits[0] & MASK_DP_CLEAR == MASK_DP_CLEAR {
-                    *mask_reg &= !(Interrupt::Dp as u32);
-                } else if trigger_bits[0] & MASK_DP_SET == MASK_DP_SET {
-                    *mask_reg |= Interrupt::Dp as u32;
-                }
-
-                Self::update_cause_register(&s.mi, &mut s.cop0);
-            }
-            _ => panic!(
-                "Invalid MI register write: {:08X} {:X} {:X}",
-                addr.relative(),
-                data,
-                reg
-            ),
+        if result.check_interrupts {
+            Self::update_cause_register(&s.mi, &mut s.cop0);
         }
     }
 
-    /// Updates the CAUSE register when pending interrupts or masks change
     fn update_cause_register(mi: &Mi, cop0: &mut Cop0) {
-        cop0.set_ip2_interrupt(mi.has_pending_unmasked_interrupt());
+        cop0.set_ip2_interrupt(mi.has_pending_enabled_interrupt());
     }
-
-    pub fn reg_info(addr: MiLocation) -> Option<&'static str> {
-        // TODO mask?
-        match addr.relative() >> 2 {
-            0 => Some("MI_MODE"),
-            1 => Some("MI_VERSION"),
-            2 => Some("MI_INTERRUPT"),
-            3 => Some("MI_MASK"),
-            _ => None,
-        }
-    }
-
-    // MODE
-
-    // pub fn upper_mode(&self) -> bool {
-    //     self.regs[Register::Mode as usize] & MODE_READ_UPPER_MASK != 0
-    // }
-
-    // pub fn ebus_mode(&self) -> bool {
-    //     self.regs[Register::Mode as usize] & MODE_READ_EBUS_MASK != 0
-    // }
-
-    // pub fn repeat_mode(&self) -> bool {
-    //     self.regs[Register::Mode as usize] & MODE_READ_REPEAT_MASK != 0
-    // }
-
-    // pub fn repeat_count(&self) -> u32 {
-    //     self.regs[Register::Mode as usize] & MODE_READ_REPEAT_COUNT_MASK
-    // }
-
-    // VERSION
-
-    // pub fn version(&self) -> Versions {
-    //     let version = self.regs[4 * Register::Version as usize];
-
-    //     Versions {
-    //         rsp: (version >> 24) as u8,
-    //         rdp: (version >> 16) as u8,
-    //         rac: (version >> 8) as u8,
-    //         io: version as u8,
-    //     }
-    // }
-
-    // INT_PENDING
 
     pub fn set_pending_interrupt(&mut self, interrupt: Interrupt, cop0: &mut Cop0) {
-        //log::error!("SET PENDING INTERRUPT {:?}", interrupt);
-        self.regs[Register::Interrupt as usize] |= interrupt as u32;
+        self.regs.interrupts =
+            Interrupts::new_with_raw_value(self.regs.interrupts.raw_value | (interrupt as u32));
 
         Self::update_cause_register(self, cop0);
     }
 
     pub fn clear_pending_interrupt(&mut self, interrupt: Interrupt, cop0: &mut Cop0) {
-        //log::error!("CLEAR PENDING INTERRUPT {:?}", interrupt);
-        self.regs[Register::Interrupt as usize] &= !(interrupt as u32);
+        self.regs.interrupts =
+            Interrupts::new_with_raw_value(self.regs.interrupts.raw_value & !(interrupt as u32));
 
         Self::update_cause_register(self, cop0);
     }
 
-    pub fn has_pending_interrupt(&self, interrupt: Interrupt) -> bool {
-        self.regs[Register::Interrupt as usize] & (interrupt as u32) != 0
+    pub fn is_interrupt_pending(&self, interrupt: Interrupt) -> bool {
+        self.regs.interrupts.raw_value & (interrupt as u32) != 0
     }
-
-    // INT_MASK
 
     pub fn is_interrupt_enabled(&self, interrupt: Interrupt) -> bool {
-        self.regs[Register::Mask as usize] & (interrupt as u32) != 0
+        self.regs.mask.raw_value & (interrupt as u32) != 0
     }
 
-    // TODO rename
-    pub fn has_pending_unmasked_interrupt(&self) -> bool {
-        self.regs[Register::Interrupt as usize] & self.regs[Register::Mask as usize] != 0
+    pub fn has_pending_enabled_interrupt(&self) -> bool {
+        self.regs.interrupts.raw_value & self.regs.mask.raw_value != 0
     }
-
-    // TODO useless with enum?
-    pub fn reg_name(index: usize) -> &'static str {
-        const NAMES: [&str; 4] = ["MODE", "VERSION", "INT_PENDING", "INT_MASK"];
-
-        NAMES.get(index).copied().unwrap_or("?") // TODO copied?
-    }
-}
-
-pub struct Versions {
-    pub sp: u8,
-    pub dp: u8,
-    pub rac: u8,
-    pub io: u8,
 }

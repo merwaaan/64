@@ -1,12 +1,12 @@
 use strum::{Display, EnumIter};
 
 use crate::{
-    data::Value,
     events::{EventType, Events},
     location::Location,
     mi::Interrupt,
     pif::{Pif, PifRamLocation},
     system::{Address, System},
+    value::Value,
 };
 
 /// Serial interface
@@ -14,10 +14,9 @@ use crate::{
 /// Handles DMA transfers between RAM and PIF RAM/ROM.
 /// Typically used to communicate with the controllers.
 
-const START: u32 = 0x0480_0000;
-const END: u32 = 0x0490_0000;
+pub type SiLocation = Location<0x0480_0000, 0x0490_0000>;
 
-pub type SiLocation = Location<START, END>;
+// TODO modernize regs
 
 const MASK: u32 = 0x1F; // TODO?
 
@@ -52,7 +51,7 @@ enum DmaDirection {
     RamToPif,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct Si {
     pub regs: [u32; 13],
 }
@@ -161,26 +160,5 @@ impl Si {
         // Raise the interrupt
 
         s.mi.set_pending_interrupt(Interrupt::Si, &mut s.cop0);
-    }
-
-    // TODO dma_completed
-
-    pub fn reg_info(addr: SiLocation) -> Option<&'static str> {
-        let reg = ((addr.relative() & MASK) >> 2) as usize;
-
-        // TODO normalize strings
-
-        let s = match reg {
-            DRAM_ADDR_REG => "SI_DRAM_ADDR",
-            PIF_ADDR_READ64_REG => "SI_PIF_ADDR_READ64",
-            PIF_ADDR_READ4_REG => "SI_PIF_ADDR_READ4",
-            PIF_ADDR_WRITE64_REG => "SI_PIF_ADDR_WRITE64",
-            PIF_ADDR_WRITE4_REG => "SI_PIF_ADDR_WRITE4",
-            STATUS_REG => "SI_STATUS",
-            _ => "???", // TODO
-        };
-
-        // TODO cleaner way to do that?
-        if s.is_empty() { None } else { Some(s) }
     }
 }

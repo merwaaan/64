@@ -5,7 +5,7 @@ use crate::{
 };
 
 /// TLB page
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 struct Page {
     p: u32,
     cache: u8,
@@ -19,7 +19,7 @@ struct Page {
 ///
 /// An entry is more often evaluated than updated so we store shifted/masked values to avoid bit twiddling in the hot path
 /// // TODO really faster??? not sure
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct Entry {
     vpn2: u64, // u64 to preserve the high bits in case they are read back
     global: bool,
@@ -87,10 +87,46 @@ impl Entry {
                 | (self.asid as u64),
         );
     }
+
+    pub fn vpn2(&self) -> u64 {
+        self.vpn2
+    }
+
+    pub fn global(&self) -> bool {
+        self.global
+    }
+
+    pub fn asid(&self) -> u8 {
+        self.asid
+    }
+
+    pub fn mask(&self) -> u32 {
+        self.mask
+    }
+
+    pub fn page_pfn(&self, index: usize) -> u32 {
+        debug_assert!(index < self.pages.len());
+        self.pages[index].p
+    }
+
+    pub fn page_cache(&self, index: usize) -> u8 {
+        debug_assert!(index < self.pages.len());
+        self.pages[index].cache
+    }
+
+    pub fn page_writable(&self, index: usize) -> bool {
+        debug_assert!(index < self.pages.len());
+        self.pages[index].writable
+    }
+
+    pub fn page_valid(&self, index: usize) -> bool {
+        debug_assert!(index < self.pages.len());
+        self.pages[index].valid
+    }
 }
 
 /// Translation Lookaside Buffer
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct Tlb {
     entries: [Entry; 32],
 }
@@ -143,9 +179,9 @@ impl Tlb {
 
                 if !page.valid {
                     return Err(if write {
-                        Exception::TlbMissStore // TODO actually other type? with same excCode but different hanlders?
+                        Exception::TlbInvalidStore
                     } else {
-                        Exception::TlbMissLoad // TODO same
+                        Exception::TlbInvalidLoad
                     });
                 }
 

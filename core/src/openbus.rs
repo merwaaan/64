@@ -1,6 +1,6 @@
-use crate::data::Value;
+use crate::value::Value;
 
-// Open bus: https://n64brew.dev/wiki/Parallel_Interface#Open_bus_behavior
+/// Open bus: https://n64brew.dev/wiki/Parallel_Interface#Open_bus_behavior
 
 pub fn read<T: Value>(addr: u32) -> T {
     //log::warn!("read open bus {:08X}", addr);

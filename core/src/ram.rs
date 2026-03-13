@@ -1,4 +1,4 @@
-use crate::{data::Value, location::Location, system::System};
+use crate::{value::Value, location::Location, system::System};
 
 const DATA_START: u32 = 0x0000_0000;
 const DATA_END: u32 = 0x03F0_0000;

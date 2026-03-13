@@ -4,18 +4,31 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-arbitrary-int = "2.1.1"
-bitbybit = "2.0.0"
-bytemuck = "1.25.0"
+arbitrary-int = "2.1"
+bit_field = "0.10"
+bitbybit = "2.0"
+bitfield-struct = "0.12.1"
+bytemuck = { version = "1.25", features = ["derive"] }
+cgmath = "0.18"
+cpal = "0.17"
+escargot = "0.5.15"
 log = "0.4"
 paste = "1.0"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-strum = { version = "0.27.2", features = ["derive"] }
-thiserror = "2.0.18"
-zip = "8.1.0"
+pollster = "0.4"
+rand = "0.10.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+strum = { version = "0.27", features = ["derive"] }
+thiserror = "2.0"
+wgpu = "28.0"
+zip = "8.1"
 
 [dev-dependencies]
-image = { version = "0.25.9", default-features = false, features = ["png"] }
-reqwest = { version = "0.13.2", features = ["blocking"] }
-rstest = "0.26.1"
+criterion = "0.8.2"
+image = { version = "0.25", default-features = false, features = ["png"] }
+reqwest = { version = "0.13", features = ["blocking"] }
+rstest = "0.26"
+
+[[bench]]
+name = "endianness"
+harness = false

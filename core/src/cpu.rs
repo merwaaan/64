@@ -1,13 +1,20 @@
 use crate::{
+    cpu::{instructions::InstructionEffect, opcode::Opcode},
     exception::Exception,
-    instructions::{InstructionEffect, Opcode, decode},
     registers::Registers,
     system::{Address, System},
 };
 
+pub mod instructions;
+pub(crate) mod instructions_cop0;
+pub(crate) mod instructions_cop1;
+pub(crate) mod instructions_cop2;
+pub(crate) mod instructions_cpu;
+pub mod opcode;
+
 pub const FREQUENCY: f64 = 93_750_000.0;
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, Debug)]
 pub struct Cpu {
     pub regs: Registers,
 
@@ -16,21 +23,37 @@ pub struct Cpu {
     /// - Inner Option: whether the branch was taken
     delayed_branching: Option<Option<u32>>,
 
-    pub cycles: usize, // TODO priv
+    cycles: usize,
 }
 
 impl Cpu {
+    pub fn cycles(&self) -> usize {
+        self.cycles
+    }
+
     pub fn step(s: &mut System) {
         // Decode and execute the current instruction
 
-        let instruction = s
-            .read(Address::v(s.cpu.regs.pc))
-            .expect("Invalid instruction address"); // TODO handle exception
+        let instruction = s.read(Address::v(s.cpu.regs.pc)).expect(&format!(
+            "Invalid instruction address {:08X}",
+            s.cpu.regs.pc
+        )); // TODO handle exception
 
         let opcode = Opcode(instruction);
 
-        let handler = decode(opcode);
+        let handler = instructions::decode(opcode);
 
+        // if let Some((_, disassemble)) = handler
+        //     && s.cpu.cycles > 0xF78000
+        // // f7
+        // {
+        //     log::debug!(
+        //         "CPU: executing instruction {:X}  {} @ {:08X}",
+        //         instruction,
+        //         disassemble(s, opcode).mnemonics,
+        //         s.cpu.regs.pc
+        //     );
+        // }
         let result = match handler {
             Some((execute, _)) => execute(s, opcode),
             None => {
