@@ -141,6 +141,7 @@ impl CoreThread {
         command_rx: &Receiver<Command>,
         event_tx: &Sender<Event>,
     ) {
+        // TODO clean this up, once every n frames?
         const RECEIVE_COMMANDS_INTERVAL: usize = 1_000;
         const SEND_EVENTS_INTERVAL: usize = 1_000_000;
 
@@ -243,24 +244,28 @@ impl CoreThread {
                             let instructions = (base_address..base_address + 20 * 4)
                                 .step_by(4)
                                 .map(|addr| {
-                                    let instruction = system
+                                    system
                                         .peek(Address::v(addr))
-                                        .expect("Invalid instruction address");
+                                        .map(|instruction| {
+                                            let opcode = Opcode(instruction);
+                                            let handler = cpu::instructions::decode(opcode);
 
-                                    let opcode = Opcode(instruction);
-                                    let handler = cpu::instructions::decode(opcode);
-
-                                    if let Some((_, disassemble)) = handler {
-                                        (addr, disassemble(system, opcode))
-                                    } else {
-                                        (
+                                            if let Some((_, disassemble)) = handler {
+                                                (addr, disassemble(system, opcode))
+                                            } else {
+                                                (
+                                                    addr,
+                                                    Disassembly::new(format!(
+                                                        "<UNKNOWN {:08X}>",
+                                                        instruction
+                                                    )),
+                                                )
+                                            }
+                                        })
+                                        .unwrap_or((
                                             addr,
-                                            Disassembly::new(format!(
-                                                "<UNKNOWN {:08X}>",
-                                                instruction
-                                            )),
-                                        )
-                                    }
+                                            Disassembly::new("<CANNOT DECODE>".to_string()),
+                                        ))
                                 })
                                 .collect();
 
@@ -308,6 +313,7 @@ impl CoreThread {
                                 instructions,
                                 regs: system.sp.regs,
                                 regs2: system.sp.regs2,
+                                vregs: system.sp.vregs,
                             }));
                         }
 

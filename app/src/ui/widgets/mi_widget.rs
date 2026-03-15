@@ -8,9 +8,7 @@ use crate::{
     command::Command,
     event::Event,
     ui::{
-        Data,
-        colors::Color,
-        reg32,
+        Data, colors, reg32,
         text::Text,
         widgets::{ChildWidget, Widget, WidgetId},
     },
@@ -20,6 +18,10 @@ use crate::{
 pub struct MiWidget {
     id: WidgetId,
     last_update: Option<Mi>,
+
+    // Last time each interrupt was active, to fade them out progressively
+    // TODO not really working, we miss most interrupts! collect them in the core thread?
+    last_interrupt_time: [f64; 6],
 }
 
 impl Widget for MiWidget {
@@ -31,12 +33,22 @@ impl Widget for MiWidget {
         Some(HashSet::from([Data::Mi]))
     }
 
-    fn update(&mut self, _ctx: &Context, event: &Event) {
+    fn update(&mut self, ctx: &Context, event: &Event) {
         if let Event::Mi(mi) = event {
             self.last_update = Some(*mi);
+
+            let now = ctx.input(|i| i.time);
+
+            for (index, interrupt) in Interrupt::iter().enumerate() {
+                if mi.is_interrupt_pending(interrupt) && mi.is_interrupt_enabled(interrupt) {
+                    self.last_interrupt_time[index] = now;
+                }
+            }
         }
     }
 }
+
+const INTERRUPT_FADE_TIME: f64 = 1.0;
 
 impl ChildWidget for MiWidget {
     fn show(&mut self, ui: &mut egui::Ui) -> Vec<Command> {
@@ -49,20 +61,27 @@ impl ChildWidget for MiWidget {
             ui.separator();
 
             ui.horizontal(|ui| {
-                for interrupt in Interrupt::iter().rev() {
-                    ui.horizontal(|ui| {
-                        Text::new(format!("{}", interrupt))
-                            .color(if mi.is_interrupt_pending(interrupt) {
-                                if mi.is_interrupt_enabled(interrupt) {
-                                    Color::Success
-                                } else {
-                                    Color::Warning
-                                }
+                let now = ui.ctx().input(|i| i.time);
+
+                for (index, interrupt) in Interrupt::iter().enumerate().rev() {
+                    let color = {
+                        let state_color = if mi.is_interrupt_pending(interrupt) {
+                            if mi.is_interrupt_enabled(interrupt) {
+                                colors::SUCCESS
                             } else {
-                                Color::Error
-                            })
-                            .show(ui);
-                    });
+                                colors::WARNING
+                            }
+                        } else {
+                            colors::ERROR
+                        };
+
+                        let fade_progress =
+                            (now - self.last_interrupt_time[index]) / INTERRUPT_FADE_TIME;
+
+                        colors::lerp(colors::SUCCESS, state_color, fade_progress)
+                    };
+
+                    Text::new(format!("{}", interrupt)).color(color).show(ui);
                 }
             });
         }

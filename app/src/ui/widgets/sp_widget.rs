@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::simd::*;
 
 use arbitrary_int::prelude::*;
 use egui::Context;
@@ -13,9 +14,7 @@ use crate::{
     command::Command,
     event::Event,
     ui::{
-        Data,
-        colors::Color,
-        reg32,
+        Data, colors, reg32,
         text::Text,
         widgets::{ChildWidget, Widget, WidgetId},
     },
@@ -26,6 +25,7 @@ pub struct SpUpdate {
     pub pc: u12,
     pub regs: [u32; 8],
     pub regs2: sp::Registers,
+    pub vregs: [i16x8; 32],
     pub instructions: Vec<(u32, Disassembly)>,
 }
 
@@ -70,7 +70,7 @@ impl ChildWidget for SpWidget {
                     for (address, disassembly) in &update.instructions {
                         ui.horizontal(|ui| {
                             Text::new(format!("{:03X}", address))
-                                .color(Color::Active)
+                                .color(colors::ACTIVE)
                                 .show(ui);
 
                             Text::new(format!(" {}", disassembly.mnemonics)).show(ui);
@@ -97,6 +97,22 @@ impl ChildWidget for SpWidget {
                                 let value = update.regs2.read(reg_index);
 
                                 reg32(ui, name, value);
+                            }
+                        });
+                    }
+
+                    ui.separator();
+
+                    for row in 0..32 {
+                        ui.horizontal(|ui| {
+                            Text::new(format!("V{:02}", row))
+                                .color(colors::LIGHT)
+                                .show(ui);
+
+                            let data = update.vregs[row].to_array();
+
+                            for i in 0..8 {
+                                Text::new(format!("{:04X}", data[i])).show(ui);
                             }
                         });
                     }

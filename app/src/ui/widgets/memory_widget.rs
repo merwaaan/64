@@ -18,9 +18,7 @@ use crate::{
     command::Command,
     event::Event,
     ui::{
-        Data, Widget,
-        colors::Color,
-        parse_hex,
+        Data, Widget, colors, parse_hex,
         text::Text,
         widgets::{ChildWidget, WidgetId},
     },
@@ -170,7 +168,7 @@ impl ChildWidget for MemoryWidget {
                     ui.style_mut().spacing.item_spacing = vec2(0.0, 0.0);
 
                     Text::new(format!("{:08X}", addr))
-                        .color(Color::Light)
+                        .color(colors::LIGHT)
                         .show(ui);
 
                     for (byte_index, byte) in chunk.iter().enumerate() {
@@ -187,7 +185,7 @@ impl ChildWidget for MemoryWidget {
                         if let Some(address_target) = address_target
                             && address_target == addr + byte_index as u32
                         {
-                            text = text.color(Color::Active);
+                            text = text.color(colors::ACTIVE);
                         }
 
                         text.show(ui);

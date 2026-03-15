@@ -40,7 +40,7 @@ pub enum LoadError {
 pub struct VirtualAddress(pub u32);
 
 #[derive(Clone, Copy)]
-pub struct PhysicalAddress(pub u32);
+pub struct PhysicalAddress(pub u32); // TODO smaller type?
 
 #[derive(Clone, Copy)]
 pub enum Address {

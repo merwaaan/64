@@ -134,7 +134,7 @@ pub fn decode_standard(opcode: Opcode) -> Option<DecodedInstruction> {
         0x31 => inst!(lwc1),
         0x34 => inst!(lld),
         0x35 => inst!(ldc1),
-        // TODO ldc2, swc2, etc
+        // TODO ldc2, swc2, etc?? or cop2 group???
         0x37 => inst!(ld),
         0x38 => inst!(sc),
         0x39 => inst!(swc1),

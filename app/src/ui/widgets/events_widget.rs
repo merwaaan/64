@@ -7,8 +7,7 @@ use crate::{
     command::Command,
     event::Event,
     ui::{
-        Data,
-        colors::Color,
+        Data, colors,
         text::Text,
         widgets::{ChildWidget, Widget, WidgetId},
     },
@@ -46,7 +45,7 @@ impl ChildWidget for EventsWidget {
     fn show(&mut self, ui: &mut egui::Ui) -> Vec<Command> {
         if let Some(cycle) = self.current_cycle {
             ui.horizontal(|ui| {
-                Text::new("Cycle").color(Color::Light).show(ui);
+                Text::new("Cycle").color(colors::LIGHT).show(ui);
                 Text::new(format!("{}", cycle)).show(ui);
             });
             ui.separator();
@@ -58,10 +57,10 @@ impl ChildWidget for EventsWidget {
                 for (event_type, scheduled_cycle) in &self.pending {
                     ui.horizontal(|ui| {
                         Text::new(format!("{:?}", event_type))
-                            .color(Color::Active)
+                            .color(colors::ACTIVE)
                             .show(ui);
                         Text::new(format!("@ {}", scheduled_cycle))
-                            .color(Color::Light)
+                            .color(colors::LIGHT)
                             .show(ui);
                     });
                 }

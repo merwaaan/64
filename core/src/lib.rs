@@ -1,3 +1,5 @@
+#![feature(portable_simd)]
+
 use std::path::Path;
 
 pub mod ai;

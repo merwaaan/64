@@ -11,9 +11,7 @@ use crate::{
     command::Command,
     event::Event,
     ui::{
-        Data,
-        colors::Color,
-        reg32, reg64,
+        Data, colors, reg32, reg64,
         text::Text,
         widgets::{ChildWidget, Widget, WidgetId},
     },
@@ -71,9 +69,9 @@ impl ChildWidget for CpuWidget {
                                 Some(breakpoint) => {
                                     Text::new("•")
                                         .color(if breakpoint.enabled() {
-                                            Color::Active
+                                            colors::ACTIVE
                                         } else {
-                                            Color::Light
+                                            colors::LIGHT
                                         })
                                         .show(ui);
                                 }
@@ -83,7 +81,7 @@ impl ChildWidget for CpuWidget {
                             }
 
                             let opcode_response = Text::new(format!("{:08X}", address))
-                                .color(Color::Active)
+                                .color(colors::ACTIVE)
                                 .reverse(*address == last_update.cpu.regs.pc)
                                 .show(ui);
 

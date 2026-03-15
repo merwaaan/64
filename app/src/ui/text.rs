@@ -1,14 +1,14 @@
-use egui::{Response, RichText};
+use egui::{Color32, Response, RichText};
 
-use crate::ui::colors::Color;
+use crate::ui::colors;
 
 // TODO color enum?
 
 pub struct Text {
     text: String,
     bold: bool,
-    color: Color,
-    bgcolor: Color,
+    color: Color32,
+    bgcolor: Color32,
     reverse: bool,
 }
 
@@ -17,8 +17,8 @@ impl Text {
         Self {
             text: string.as_ref().to_string(),
             bold: false,
-            color: Color::Default,
-            bgcolor: Color::Default,
+            color: colors::DEFAULT,
+            bgcolor: colors::DEFAULT,
             reverse: false,
         }
     }
@@ -27,7 +27,7 @@ impl Text {
         Self { bold: true, ..self }
     }
 
-    pub fn color(self, color: Color) -> Self {
+    pub fn color(self, color: Color32) -> Self {
         Self { color, ..self }
     }
 
@@ -49,7 +49,7 @@ impl Text {
             text = text.strong();
         }
 
-        if self.color != Color::Default {
+        if self.color != colors::DEFAULT {
             text = text.color(if self.reverse {
                 self.bgcolor
             } else {
@@ -57,7 +57,7 @@ impl Text {
             });
         }
 
-        if self.bgcolor != Color::Default {
+        if self.bgcolor != colors::DEFAULT {
             text = text.background_color(self.bgcolor);
         } else if self.reverse {
             text = text.background_color(self.color);

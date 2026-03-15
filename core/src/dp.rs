@@ -88,6 +88,8 @@ impl Dp {
 
                 s.dp.regs[START_REG as usize] &= 0x00FF_FFF8;
                 s.dp.regs[STATUS_REG as usize] |= STATUS_START_PENDING;
+
+                // TODO set current = start here?? not only when writing END? unclear
             }
             END_REG => {
                 // log::debug!(
@@ -135,7 +137,7 @@ impl Dp {
                 }
                 if trigger_bits[0] & STATUS_FREEZE_SET != 0 {
                     status |= STATUS_FREEZE;
-                    panic!("DP FREEZE");
+                    log::error!("DP FREEZE");
                 }
 
                 // FLUSH
@@ -145,7 +147,7 @@ impl Dp {
                 }
                 if trigger_bits[0] & STATUS_FLUSH_SET != 0 {
                     status |= STATUS_FLUSH;
-                    panic!("DP FLUSH");
+                    log::error!("DP FLUSH");
                     // TODO do something?
                 }
 

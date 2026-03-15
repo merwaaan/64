@@ -6,8 +6,7 @@ use crate::{
     command::Command,
     event::Event,
     ui::{
-        Data, Widget,
-        colors::Color,
+        Data, Widget, colors,
         text::Text,
         widgets::{ChildWidget, WidgetId},
     },
@@ -72,7 +71,7 @@ impl ChildWidget for FramebufferWidget {
     fn show(&mut self, ui: &mut egui::Ui) -> Vec<Command> {
         if let Some(last_update) = &self.last_update {
             Text::new(format!("{}x{}", last_update.width, last_update.height))
-                .color(Color::Light)
+                .color(colors::LIGHT)
                 .show(ui);
         }
 

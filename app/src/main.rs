@@ -1,3 +1,5 @@
+#![feature(portable_simd)]
+
 use std::path::PathBuf;
 
 use clap::Parser;

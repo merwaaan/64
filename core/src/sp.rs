@@ -1,3 +1,5 @@
+use std::simd::*;
+
 use arbitrary_int::prelude::*;
 use strum::{Display, EnumIter};
 
@@ -14,6 +16,11 @@ use crate::{
 pub mod instructions;
 
 // TODO split interface and proc?
+// TODO timing = 2/3 CPU
+// TODO startup STATUS bit 0 = 1 (halted)
+// TODO DMA FULL in status bit AND own reg
+// TODO DMA BUSY in status bit AND own reg
+// TODO increment clock regs
 
 ///! Reality Signal Processor
 ///!
@@ -22,11 +29,14 @@ pub mod instructions;
 ///! - The PC is 12-bit and wraps around IMEM
 ///! - No exceptions or traps
 ///! - Less arithmetic instructions (no mult/div, no 64-bit instructions like DADD/DSUB)
-///! - TODO vector! = COP 2
-///! - TODO COP0 = interface
 ///! - Cannot access RAM directly, transfers it to/from DMEM using DMA instead
 ///!
+///! TODO COP 0 = SP + DP registers
+///!
+///! TODO vector! = COP 2
+///!
 ///! https://n64brew.dev/wiki/Reality_Signal_Processor/CPU_Core
+///! https://ultra64.ca/files/documentation/silicon-graphics/SGI_Nintendo_64_RSP_Programmers_Guide.pdf
 
 const MEM_START: u32 = 0x0400_0000;
 const MEM_END: u32 = 0x0404_0000;
@@ -37,6 +47,8 @@ pub type SpMemLocation = Location<MEM_START, MEM_END>;
 const REG_START: u32 = MEM_END;
 const REG_END: u32 = 0x040C_0000;
 const REG_MASK: u32 = 0x1F;
+
+pub type SpRegsLocation = Location<REG_START, REG_END>;
 
 // RDP / display list opcodes
 // const G_SPNOOP: u8 = 0x00;
@@ -85,8 +97,6 @@ const REG_MASK: u32 = 0x1F;
 // const G_SETTIMG: u8 = 0xFD;
 // const G_SETZIMG: u8 = 0xFE;
 // const G_SETCIMG: u8 = 0xFF;
-
-pub type SpRegsLocation = Location<REG_START, REG_END>;
 
 #[derive(Debug, Display, Clone, Copy, EnumIter)]
 #[repr(u32)]
@@ -141,6 +151,12 @@ pub struct Sp {
     pub regs: [u32; 8],   // TODO vis
     pub regs2: Registers, // TODO names? or move to SP interface? // TODO vis
 
+    pub vregs: [i16x8; 32],
+    pub vacc: [i16x8; 3], // hi, mid, lo
+    pub vcomparecode: u16,
+    pub vcarry: u16,
+    pub vcompareext: u8,
+
     pub pc: u12, // TODO vis
     delayed_branching: Option<u12>,
 }
@@ -155,6 +171,11 @@ impl Default for Sp {
             mem: vec![0; 0x2000],
             regs,
             regs2: Registers([0; 32]),
+            vregs: [i16x8::splat(0); 32],
+            vacc: [i16x8::splat(0); 3],
+            vcomparecode: 0,
+            vcarry: 0,
+            vcompareext: 0,
             pc: u12::ZERO,
             delayed_branching: None,
         }
@@ -605,7 +626,8 @@ impl Sp {
         };
 
         // Number of bytes to copy per "row"
-        // (length < 8 = transfer 8 bytes anyway)
+        //
+        // Manual: "the lower three bits of the length are ignored and assumed to be all 1's"
 
         let bytes_per_row = ((length_reg & 0x0FFF) | 7) + 1;
 
@@ -692,7 +714,7 @@ impl Sp {
         // Update the status register
 
         s.sp.regs[Register::Status as usize] |= STATUS_DMA_BUSY;
-        s.sp.regs[Register::Status as usize] &= !STATUS_DMA_FULL;
+        s.sp.regs[Register::Status as usize] &= !STATUS_DMA_FULL; // TODO set it somewhere???
 
         // TODO reset count to 0!
         // TODO IO busy?

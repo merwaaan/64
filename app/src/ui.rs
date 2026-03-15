@@ -11,7 +11,6 @@ use crate::{
     core_thread::CoreThread,
     event::Event,
     ui::{
-        colors::Color,
         text::Text,
         widgets::{
             ChildWidget, Collapsing, Floating, RootWidget, Widget,
@@ -251,7 +250,7 @@ impl eframe::App for Ui {
 
                 if let Status::Panicked(error) = &self.status {
                     Text::new("⚠ Core panicked")
-                        .color(Color::Error)
+                        .color(colors::ERROR)
                         .show(ui)
                         .on_hover_text(error)
                         .on_hover_cursor(CursorIcon::Help);
@@ -259,7 +258,7 @@ impl eframe::App for Ui {
 
                 if let Some(rom_name) = &self.last_rom_path.as_ref().and_then(|p| p.file_name()) {
                     Text::new(format!("({})", rom_name.display()))
-                        .color(Color::Light)
+                        .color(colors::LIGHT)
                         .show(ui);
                 }
             });
@@ -268,7 +267,7 @@ impl eframe::App for Ui {
         let mut commands = Vec::new();
 
         SidePanel::left("left")
-            .exact_width(650.0)
+            .exact_width(800.0)
             .resizable(false)
             .show(ctx, |ui| {
                 ScrollArea::vertical().show(ui, |ui| {
@@ -350,14 +349,14 @@ pub fn parse_hex(s: &str) -> Option<u64> {
 
 pub fn reg32(ui: &mut egui::Ui, name: impl AsRef<str>, value: u32) {
     ui.horizontal(|ui| {
-        Text::new(name).color(Color::Light).show(ui);
+        Text::new(name).color(colors::LIGHT).show(ui);
         Text::new(format!("{:08X}", value)).show(ui);
     });
 }
 
 pub fn reg64(ui: &mut egui::Ui, name: impl AsRef<str>, value: u64) {
     ui.horizontal(|ui| {
-        Text::new(name).color(Color::Light).show(ui);
+        Text::new(name).color(colors::LIGHT).show(ui);
         Text::new(format!("{:08X} {:08X}", (value >> 32) as u32, value as u32)).show(ui);
     });
 }
