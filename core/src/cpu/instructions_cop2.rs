@@ -31,7 +31,7 @@ pub fn decode(opcode: Opcode) -> Option<(ExecuteFn, DisassembleFn)> {
 fn cfc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     check_cop_usable!(2, s);
 
-    log::error!("UNIMPLEMENTED CFC2");
+    log::warn!("UNIMPLEMENTED CFC2");
     // s.cpu.regs.gpr[op.rt()].set(op.fsv(s));
 
     Ok(None)
@@ -48,7 +48,7 @@ fn cfc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
 fn ctc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     check_cop_usable!(2, s);
 
-    log::error!("UNIMPLEMENTED CTC2");
+    log::warn!("UNIMPLEMENTED CTC2");
 
     Ok(None)
 }
@@ -64,7 +64,7 @@ fn ctc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
 fn dmfc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     check_cop_usable!(2, s);
 
-    log::error!("UNIMPLEMENTED DMFC2");
+    log::warn!("UNIMPLEMENTED DMFC2");
 
     Ok(None)
 }
@@ -76,7 +76,7 @@ fn dmfc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
 fn dmtc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     check_cop_usable!(2, s);
 
-    log::error!("UNIMPLEMENTED DMTC2");
+    log::warn!("UNIMPLEMENTED DMTC2");
 
     Ok(None)
 }
@@ -88,7 +88,7 @@ fn dmtc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
 fn mfc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     check_cop_usable!(2, s);
 
-    log::error!("UNIMPLEMENTED MFC2");
+    log::warn!("UNIMPLEMENTED MFC2");
 
     Ok(None)
 }
@@ -100,7 +100,7 @@ fn mfc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
 fn mtc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     check_cop_usable!(2, s);
 
-    log::error!("UNIMPLEMENTED MTC2");
+    log::warn!("UNIMPLEMENTED MTC2");
 
     Ok(None)
 }

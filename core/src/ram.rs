@@ -1,4 +1,4 @@
-use crate::{value::Value, location::Location, system::System};
+use crate::{location::Location, system::System, value::Value};
 
 const DATA_START: u32 = 0x0000_0000;
 const DATA_END: u32 = 0x03F0_0000;
@@ -56,14 +56,14 @@ impl Ram {
     }
 
     pub fn read_reg<T: Value>(&self, addr: RamRegsLocation) -> T {
-        log::warn!("Read RAM reg UNIMPLEMENTED: {:08X}", addr.relative());
+        log::warn!("RAM: read register UNIMPLEMENTED: {:08X}", addr.relative());
 
         T::default()
     }
 
     pub fn write_reg<T: Value>(_s: &mut System, addr: RamRegsLocation, data: T) {
         log::warn!(
-            "Write RAM reg UNIMPLEMENTED: {:08X} {:X}",
+            "RAM: write register UNIMPLEMENTED: {:08X} ={:X}",
             addr.relative(),
             data
         );
@@ -72,14 +72,14 @@ impl Ram {
     pub fn read_interface<T: Value>(&self, addr: RamInterfaceLocation) -> T {
         if addr.relative() == 0x0C {
             log::warn!(
-                "Reading from RAM interface 0x14 RI_SELECT: {:08X}",
+                "RAM: read interface 0x14 RI_SELECT: {:08X}",
                 addr.relative()
             );
 
             // TODO temp
             T::read_reg(&[0x14u32], addr.relative() & 3)
         } else {
-            log::warn!("Read RAM interface UNIMPLEMENTED: {:08X}", addr.relative());
+            log::warn!("RAM: read interface UNIMPLEMENTED: {:08X}", addr.relative());
 
             T::default()
         }
@@ -87,7 +87,7 @@ impl Ram {
 
     pub fn write_interface<T: Value>(_s: &mut System, addr: RamInterfaceLocation, data: T) {
         log::warn!(
-            "Write RAM interface UNIMPLEMENTED: {:08X} {:X}",
+            "RAM: write interface UNIMPLEMENTED: {:08X} ={:X}",
             addr.relative(),
             data
         );

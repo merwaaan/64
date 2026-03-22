@@ -14,7 +14,7 @@ impl AudioRenderer {
     pub fn new() -> Self {
         // TODO better error handling, don't panic, output nothing
 
-        log::debug!("Initializing audio renderer");
+        log::debug!("Initializing audio renderer...");
 
         let host = cpal::default_host();
 
@@ -133,7 +133,7 @@ impl Resampler {
 
     pub fn set_input_rate(&mut self, input_rate: u32) {
         if input_rate != self.input_rate {
-            log::debug!(
+            log::info!(
                 "Resampler input rate changed to {} (output = {})",
                 input_rate,
                 self.output_rate

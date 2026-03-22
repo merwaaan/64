@@ -62,10 +62,10 @@ impl Pif {
     fn process_command_buffer(s: &mut System) {
         let control_byte = s.pif.ram[0x3F];
 
-        //log::error!("PIF COMMAND {:08X} @ {:08X}", control_byte, s.cpu.regs.pc);
+        //log::error!("PIF: COMMAND {:08X} @ {:08X}", control_byte, s.cpu.regs.pc);
 
         // for i in s.pif.data.iter() {
-        //     log::error!("PIF - {:X}", i);
+        //     log::error!("PIF: - {:X}", i);
         // }
 
         // https://n64brew.dev/wiki/PIF-NUS
@@ -128,7 +128,7 @@ impl Pif {
                             s.pif.channel_offsets[channel] = Some(offset + 2 + tx);
                             channel += 1;
                         } else {
-                            log::error!("PIF: UNKNOWN COMMAND TYPE {:08X}", tx_data[0]);
+                            log::warn!("PIF: UNKNOWN COMMAND TYPE {:08X}", tx_data[0]);
                             break;
                         }
 
@@ -140,7 +140,7 @@ impl Pif {
             0x10 => log::info!("PIF: ROM lockout"),
             0x20 => log::info!("PIF: acquire checksum"),
             0x40 => log::info!("PIF: run checksum"),
-            _ => log::error!("PIF: UNKNOWN COMMAND {:08X}", control_byte),
+            _ => log::warn!("PIF: unknown command {:08X}", control_byte),
         }
 
         // TODO raise SI here in case CPU writes directly???

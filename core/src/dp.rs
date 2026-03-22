@@ -137,7 +137,7 @@ impl Dp {
                 }
                 if trigger_bits[0] & STATUS_FREEZE_SET != 0 {
                     status |= STATUS_FREEZE;
-                    log::error!("DP FREEZE");
+                    log::warn!("DP FREEZE");
                 }
 
                 // FLUSH
@@ -147,7 +147,7 @@ impl Dp {
                 }
                 if trigger_bits[0] & STATUS_FLUSH_SET != 0 {
                     status |= STATUS_FLUSH;
-                    log::error!("DP FLUSH");
+                    log::warn!("DP FLUSH");
                     // TODO do something?
                 }
 
@@ -190,7 +190,7 @@ impl Dp {
         let end = s.dp.regs[END_REG as usize];
 
         // log::debug!(
-        //     "DP DMA (XBus={}): {:08X} -> {:08X} -> {:08X}",
+        //     "DP: DMA (XBus={}): {:08X} -> {:08X} -> {:08X}",
         //     from_sp,
         //     s.dp.regs[START_REG as usize],
         //     current,
@@ -377,4 +377,35 @@ impl Dp {
 
         s.dp.regs[STATUS_REG as usize] &= !STATUS_END_PENDING;
     }
+}
+
+enum Command {
+    FillTriangle,
+    TextureRectangle,
+    TextureRectangleFlip,
+    SyncLoad,
+    SyncPipe,
+    SyncTile,
+    SyncFull,
+    SetKeyGB,
+    SetKeyR,
+    SetConvert,
+    SetScissor,
+    SetPrimitiveDepth,
+    SetOtherModes,
+    LoadTLUT,
+    SetTileSize,
+    LoadBlock,
+    LoadTile,
+    SetTile,
+    FillRectangle,
+    SetFillColor,
+    SetFogColor,
+    SetBlendColor,
+    SetPrimitiveColor,
+    SetEnvironmentColor,
+    SetCombineMode,
+    SetTextureImage,
+    SetDepthImage,
+    SetColorImage,
 }

@@ -152,10 +152,10 @@ pub struct Sp {
     pub regs2: Registers, // TODO names? or move to SP interface? // TODO vis
 
     pub vregs: [i16x8; 32],
-    pub vacc: [i16x8; 3], // hi, mid, lo
-    pub vcomparecode: u16,
-    pub vcarry: u16,
-    pub vcompareext: u8,
+    pub vacc: i64x8, // hi, mid, lo
+    pub vco: u16,    // carry out
+    pub vcc: u16,    // compare code
+    pub vce: u8,     // compare extension
 
     pub pc: u12, // TODO vis
     delayed_branching: Option<u12>,
@@ -172,10 +172,10 @@ impl Default for Sp {
             regs,
             regs2: Registers([0; 32]),
             vregs: [i16x8::splat(0); 32],
-            vacc: [i16x8::splat(0); 3],
-            vcomparecode: 0,
-            vcarry: 0,
-            vcompareext: 0,
+            vacc: i64x8::splat(0),
+            vcc: 0,
+            vco: 0,
+            vce: 0,
             pc: u12::ZERO,
             delayed_branching: None,
         }

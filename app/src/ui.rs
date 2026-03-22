@@ -362,7 +362,8 @@ pub fn reg64(ui: &mut egui::Ui, name: impl AsRef<str>, value: u64) {
 }
 
 fn gilrs_event_to_controller_input(event: gilrs::EventType) -> Option<ControllerInput> {
-    log::info!("Gilrs event: {:?}", event);
+    //log::info!("Gilrs event: {:?}", event);
+
     match event {
         gilrs::EventType::ButtonPressed(button, _code) => gilrs_button_to_controller_button(button)
             .map(|button| ControllerInput::PressButton(button)),

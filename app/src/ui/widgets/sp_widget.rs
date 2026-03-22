@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use std::simd::*;
+use std::{collections::HashSet, simd::num::SimdInt};
 
 use arbitrary_int::prelude::*;
 use egui::Context;
@@ -26,6 +26,10 @@ pub struct SpUpdate {
     pub regs: [u32; 8],
     pub regs2: sp::Registers,
     pub vregs: [i16x8; 32],
+    pub vacc: i64x8,
+    pub vco: u16,
+    pub vcc: u16,
+    pub vce: u8,
     pub instructions: Vec<(u32, Disassembly)>,
 }
 
@@ -102,6 +106,42 @@ impl ChildWidget for SpWidget {
                     }
 
                     ui.separator();
+
+                    // Accumulator
+
+                    ui.horizontal(|ui| {
+                        Text::new("ACC HI").color(colors::LIGHT).show(ui);
+
+                        let data = (update.vacc >> 32).cast::<i16>();
+
+                        for i in 0..8 {
+                            Text::new(format!("{:04X}", data[i])).show(ui);
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        Text::new("ACC MI").color(colors::LIGHT).show(ui);
+
+                        let data = (update.vacc >> 16).cast::<i16>();
+
+                        for i in 0..8 {
+                            Text::new(format!("{:04X}", data[i])).show(ui);
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        Text::new("ACC LO").color(colors::LIGHT).show(ui);
+
+                        let data = update.vacc.cast::<i16>();
+
+                        for i in 0..8 {
+                            Text::new(format!("{:04X}", data[i])).show(ui);
+                        }
+                    });
+
+                    Text::new(format!("VCO: {:04X}", update.vco)).show(ui);
+                    Text::new(format!("VCC: {:04X}", update.vcc)).show(ui);
+                    Text::new(format!("VCE: {:02X}", update.vce)).show(ui);
 
                     for row in 0..32 {
                         ui.horizontal(|ui| {

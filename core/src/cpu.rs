@@ -54,6 +54,7 @@ impl Cpu {
         //         s.cpu.regs.pc
         //     );
         // }
+        
         let result = match handler {
             Some((execute, _)) => execute(s, opcode),
             None => {

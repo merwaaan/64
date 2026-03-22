@@ -20,10 +20,6 @@ pub enum Exception {
 
 impl Exception {
     pub fn raise(&self, s: &mut System) {
-        // if !matches!(self, Exception::Interrupt(8)) && !matches!(self, Exception::Interrupt(4)) {
-        //     log::warn!("Exception: {:?}", self);
-        // }
-
         let in_branch_delay = s.cpu.in_branch_delay_slot();
 
         // Set EXL to prevent nested exceptions

@@ -9,11 +9,11 @@ use thiserror::Error;
 use zip::ZipArchive;
 
 use crate::{
-    value::Value,
     is_supported_rom_file,
     isviewer::{IsViewer, IsViewerBufferLocation, IsViewerControlLocation},
     location::Location,
     system::System,
+    value::Value,
 };
 
 #[derive(Debug, Error)]

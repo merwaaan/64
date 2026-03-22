@@ -3,7 +3,7 @@ use crate::value::Value;
 /// Open bus: https://n64brew.dev/wiki/Parallel_Interface#Open_bus_behavior
 
 pub fn read<T: Value>(addr: u32) -> T {
-    //log::warn!("read open bus {:08X}", addr);
+    log::warn!("Open bus: read {:08X}", addr);
 
     let lo = addr as u16 as u32;
 
@@ -11,5 +11,5 @@ pub fn read<T: Value>(addr: u32) -> T {
 }
 
 pub fn write<T: Value>(addr: u32, data: T) {
-    log::warn!("write open bus {:08X} {:X}", addr, data);
+    log::warn!("Open bus: write {:08X} ={:X}", addr, data);
 }

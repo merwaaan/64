@@ -74,8 +74,6 @@ impl CoreThread {
                 loop {
                     // Run the core loop
 
-                    log::debug!("Core loop started");
-
                     let mut state = CoreThreadState {
                         system: None,
                         status: CoreThreadStatus::Paused { step: false },
@@ -123,8 +121,6 @@ impl CoreThread {
                         break;
                     }
                 }
-
-                log::info!("Core thread exited");
             })
             .expect("Failed to spawn core thread");
 
@@ -314,6 +310,10 @@ impl CoreThread {
                                 regs: system.sp.regs,
                                 regs2: system.sp.regs2,
                                 vregs: system.sp.vregs,
+                                vacc: system.sp.vacc,
+                                vco: system.sp.vco,
+                                vcc: system.sp.vcc,
+                                vce: system.sp.vce,
                             }));
                         }
 

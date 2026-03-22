@@ -450,7 +450,7 @@ fn cvt_execute(s: &mut System, op: Opcode) -> InstructionResult {
         // i32 from i64
         (Format::Int32, Format::Int64) => {
             // TODO
-            log::error!("CVT.W.L not implemented");
+            log::warn!("CVT.W.L not implemented");
         }
 
         // i64 from f32
@@ -470,7 +470,7 @@ fn cvt_execute(s: &mut System, op: Opcode) -> InstructionResult {
         // i64 from i32
         (Format::Int64, Format::Int32) => {
             // TODO
-            log::error!("CVT.L.W not implemented");
+            log::warn!("CVT.L.W not implemented");
         }
 
         // i64 from i64

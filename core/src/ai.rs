@@ -179,7 +179,7 @@ impl Ai {
 
     fn push_dma(s: &mut System) {
         if s.ai.pending_dma.is_some() {
-            log::error!("AI DMA transfer already pending");
+            log::warn!("AI: DMA transfer already pending");
         }
         // Active DMA transfer: queue
         else if s.ai.active_dma.is_some() {
@@ -207,7 +207,7 @@ impl Ai {
 
     fn start_dma(s: &mut System, slot: DmaSlot) {
         log::info!(
-            "AI DMA transfer: {:X} bytes from RAM {:08X}",
+            "AI: DMA {:X} bytes from RAM {:08X}",
             slot.length,
             slot.address
         );

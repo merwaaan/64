@@ -315,7 +315,7 @@ impl System {
             Some(MapLocation::Pif(addr)) => Pif::read(self, addr),
             Some(MapLocation::OpenBus(addr)) => openbus::read(addr),
             None => {
-                log::error!("Invalid read address: {}", addr);
+                log::warn!("Invalid read address: {}", addr);
                 T::default()
             }
         })
@@ -346,7 +346,7 @@ impl System {
             Some(MapLocation::Cart(addr)) => Cart::write(self, addr, data),
             Some(MapLocation::Pif(addr)) => Pif::write(self, addr, data),
             Some(MapLocation::OpenBus(addr)) => openbus::write(addr, data),
-            _ => log::error!("Invalid write address: {}", addr),
+            _ => log::warn!("Invalid write address: {}", addr),
         };
 
         Ok(())

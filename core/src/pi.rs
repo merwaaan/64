@@ -69,7 +69,7 @@ impl Pi {
 
         // TODO temp
         if addr.relative() > 0x13 {
-            log::warn!("Read from PI register {:08X}", addr.relative());
+            log::warn!("PI: read {:08X}", addr.relative());
         }
 
         T::read_reg(&s.pi.regs, addr.relative() & MASK)
@@ -78,7 +78,7 @@ impl Pi {
     pub fn write<T: Value>(s: &mut System, addr: PiLocation, data: T) {
         let reg = ((addr.relative() & MASK) >> 2) as usize;
 
-        //log::info!("Write {:X?} to PI register {:08X}", data, addr.relative());
+        //log::info!("PI: write {:X?} to {:08X}", data, addr.relative());
 
         // TODO possible to write mult regs???
         debug_assert!(T::BYTES <= 4, "Writing to multiple PI registers");
@@ -99,7 +99,7 @@ impl Pi {
 
                 s.pi.regs[READ_LEN_REG] &= 0x00FF_FFFF;
 
-                log::error!("UNIMPLEMENTED write to READ_LEN");
+                log::warn!("PI: UNIMPLEMENTED write to READ_LEN");
             }
             WRITE_LEN_REG => {
                 data.write_reg(&mut s.pi.regs, addr.relative() & MASK);
@@ -126,7 +126,7 @@ impl Pi {
                 }
             }
             _ => {
-                log::warn!("Write {:X?} to PI register {:08X}", data, addr.relative());
+                log::warn!("PI: write {:X?} to {:08X}", data, addr.relative());
 
                 data.write_reg(&mut s.pi.regs, addr.relative() & MASK);
             }
