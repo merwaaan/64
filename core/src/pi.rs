@@ -1,10 +1,12 @@
 use strum::{Display, EnumIter};
 
 use crate::{
+    cart::CartLocation,
     events::{EventType, Events},
     location::Location,
     mi::Interrupt,
-    system::{Address, System},
+    ram::RamLocation,
+    system::System,
     value::Value,
 };
 
@@ -134,32 +136,63 @@ impl Pi {
     }
 
     fn start_dma(s: &mut System) {
-        // Instant DMA transfer
+        // PI DMA transfers have quirky behaviors for small sizes (< 128 bytes)
+        // - length, if odd, is NOT rounded up to the next even value
+        // - TODO what else???
+        //
+        // https://n64brew.dev/wiki/Parallel_Interface#Unaligned_DMA_transfer
 
-        let mut length = s.pi.regs[WRITE_LEN_REG] + 1;
+        let requested_length = s.pi.regs[WRITE_LEN_REG] + 1;
+        let misalignment = s.pi.regs[DRAM_ADDR_REG] & 7;
 
-        // TODO needed to pass Lemmy's PIDMASmallSize test, but why? need some sources
-        if length >= 0x7E {
-            length = (length + 1) & !1;
-        }
+        // TODO still unclear!
+
+        // let cart_length = if requested_length >= 0x7E {
+        //     // TODO mis in cond
+        //     (requested_length + 1) & !1
+        // } else {
+        //     requested_length
+        // };
+
+        // let ram_length = if requested_length >= 0x7E {
+        //     (requested_length + 1) & !1
+        // } else {
+        //     requested_length.saturating_sub(misalignment)
+        // };
+
+        let cart_length = if (requested_length as i32) >= (126 - (misalignment as i32)) {
+            //TODO u32 bug???
+            (requested_length + 1) & !1
+        } else {
+            requested_length
+        };
+
+        let actual_length = if (requested_length as i32) < 128 - (misalignment as i32) {
+            //TODO u32 bug???
+            cart_length.saturating_sub(misalignment)
+        } else {
+            cart_length
+        };
 
         // log::info!(
         //     "PI DMA transfer: {:X} bytes from CART {:08X} to RAM {:08X}",
-        //     length,
+        //     actual_length,
         //     s.pi.regs[CART_ADDR_REG],
         //     s.pi.regs[DRAM_ADDR_REG]
         // );
 
-        let dest_base = s.pi.regs[DRAM_ADDR_REG];
+        let mut ram_offset = s.pi.regs[DRAM_ADDR_REG];
 
-        for offset in 0..length {
-            let data = s
-                .read::<u8>(Address::p(s.pi.regs[CART_ADDR_REG] + offset))
-                .expect("PI DMA CART read failed");
+        s.cart.read_block(
+            CartLocation::from_absolute(s.pi.regs[CART_ADDR_REG]),
+            actual_length as usize,
+            |cart_data| {
+                s.ram
+                    .write_block(RamLocation::from_absolute(ram_offset), cart_data);
 
-            s.write::<u8>(Address::p(dest_base + offset), data)
-                .expect("PI DMA CART to RAM write failed");
-        }
+                ram_offset = ram_offset.wrapping_add(cart_data.len() as u32);
+            },
+        );
 
         // Increment the addresses for the next transfer
         //
@@ -167,8 +200,22 @@ impl Pi {
         // - RAM: aligned to 8 bytes
         // - CART: aligned to 2 bytes
 
-        s.pi.regs[DRAM_ADDR_REG] = s.pi.regs[DRAM_ADDR_REG].wrapping_add((length + 7) & !7); // TODO should mask?
-        s.pi.regs[CART_ADDR_REG] = s.pi.regs[CART_ADDR_REG].wrapping_add((length + 1) & !1); // TODO should mask?
+        // log::info!("PI DMA RAM address: {:08X}", s.pi.regs[DRAM_ADDR_REG]);
+
+        s.pi.regs[DRAM_ADDR_REG] = s.pi.regs[DRAM_ADDR_REG]
+            .wrapping_add(((actual_length + misalignment + 7) & !7) - misalignment); // TODO should mask?
+
+        // log::info!(
+        //     "ssssssssssssss: {}, {}, {}, {}",
+        //     requested_length,
+        //     actual_length,
+        //     misalignment,
+        //     ((actual_length + misalignment + 7) & !7) - misalignment
+        // );
+        // log::info!("PI DMA RAM address 2: {:08X}", s.pi.regs[DRAM_ADDR_REG]);
+
+        s.pi.regs[CART_ADDR_REG] =
+            s.pi.regs[CART_ADDR_REG].wrapping_add((requested_length + 1) & !1); // TODO should mask?
 
         // Update the status
 
@@ -183,7 +230,7 @@ impl Pi {
         Events::push(
             s,
             EventType::PiDmaTransferComplete,
-            (length as usize) * 10, // TODO depends on the regs? TODO aligned length?
+            (requested_length as usize) * 10, // TODO depends on the regs? TODO aligned length?
         );
     }
 
@@ -200,29 +247,4 @@ impl Pi {
 
         s.mi.set_pending_interrupt(Interrupt::Pi, &mut s.cop0);
     }
-
-    // pub fn reg_info(addr: PiLocation) -> Option<&'static str> {
-    //     // TODO check masks!
-    //     // TODO normalize strings
-
-    //     let s = match addr.relative() & MASK {
-    //         DRAM_ADDR_LO => "PI_DRAM_ADDR",
-    //         CART_ADDR_LO => "PI_CART_ADDR",
-    //         READ_LEN_LO => "PI_READ_LEN",
-    //         WRITE_LEN_LO => "PI_WRITE_LEN",
-    //         STATUS_LO => "PI_STATUS",
-    //         // 0x14 => "BSD_DOM1_LAT",
-    //         // 0x18 => "BSD_DOM1_PWD",
-    //         // 0x20 => "BSD_DOM1_RLS",
-    //         // 0x24 => "BSD_DOM2_LAT",
-    //         // 0x28 => "BSD_DOM2_PWD",
-    //         // 0x1C => "BSD_DOM1_PGS",
-    //         // 0x2C => "BSD_DOM2_PGS",
-    //         // 0x30 => "BSD_DOM2_RLS",
-    //         _ => "???", // TODO
-    //     };
-
-    //     // TODO cleaner way to do that?
-    //     if s.is_empty() { None } else { Some(s) }
-    // }
 }

@@ -53,6 +53,8 @@ impl<const START: u32, const END: u32> Location<START, END> {
             END
         );
 
+        // TODO possible bug: should we mask? eg. if the abs address has high bits set?
+
         Self(addr - START)
     }
 

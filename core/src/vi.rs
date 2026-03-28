@@ -313,7 +313,7 @@ impl Vi {
         if color32 {
             for y in 0..height {
                 for x in 0..width {
-                    // TODO optim: directly access RAM?
+                    // TODO optim: directly access RAM with read_block
                     let pixel = s
                         .read::<u32>(Address::p(base_addr + ((y * width + x) * 4) as u32))
                         .expect("Invalid pixel address");
@@ -342,6 +342,7 @@ impl Vi {
         (data, width, height)
     }
 
+    // TODO move out, used elsewhere
     fn b5_to_b8(value: u16) -> u8 {
         (((value & 0x1F) * 255) / 31) as u8
     }

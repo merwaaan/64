@@ -4,10 +4,12 @@ use arbitrary_int::prelude::*;
 use strum::{Display, EnumIter};
 
 use crate::{
+    blocks::read_block,
     cpu::opcode::Opcode,
     events::{EventType, Events},
     location::Location,
     mi::Interrupt,
+    ram::RamLocation,
     sp::instructions::InstructionEffect,
     system::{Address, System},
     value::Value,
@@ -237,9 +239,19 @@ impl Sp {
         data.write_mem(&mut s.sp.mem, addr.relative() & MEM_MASK);
     }
 
+    pub fn read_block(&self, addr: SpMemLocation, length: usize, callback: impl FnMut(&[u8])) {
+        let bank_offset = (addr.relative() & 0x1000) as usize;
+        let bank = &self.mem[bank_offset..bank_offset + 0x1000];
+
+        let offset_in_bank = (addr.relative() & 0x0FFF) as usize;
+        read_block(&bank, offset_in_bank, length, callback);
+    }
+
     // TODO read/write PC while running = garbage?
 
     pub fn read_reg<T: Value>(&mut self, addr: SpRegsLocation) -> T {
+        //log::warn!("read SP reg @ {:08X}", addr.relative());
+
         // TODO possible to write mult regs??? what about reading?
         debug_assert!(T::BYTES <= 4, "Writing to multiple SP registers");
 
@@ -248,7 +260,7 @@ impl Sp {
         if addr.relative() < 0x4_0000 {
             let data = T::read_reg(&self.regs, addr.relative() & REG_MASK);
 
-            // Reading the semaphore returns the current value and set to 1
+            // Reading the semaphore returns the current value and set it to 1
 
             if addr.relative() == ((Register::Semaphore as u32) << 2) {
                 self.regs[Register::Semaphore as usize] = 1;
@@ -268,6 +280,8 @@ impl Sp {
     }
 
     pub fn write_reg<T: Value>(s: &mut System, addr: SpRegsLocation, data: T) {
+        //log::warn!("write SP reg @ {:08X} {:X}", addr.relative(), data);
+
         if addr.relative() < 0x4_0000 {
             let reg = ((addr.relative() & REG_MASK) >> 2) as usize;
 
@@ -603,23 +617,13 @@ impl Sp {
     //     s.mi.set_pending_interrupt(Interrupt::Dp, &mut s.cop0);
     // }
 
-    pub fn reg_info(addr: SpRegsLocation) -> Option<&'static str> {
-        match addr.relative() & REG_MASK {
-            0 => Some("SP_DMA_SPADDR"),
-            1 => Some("SP_DMA_RAMADDR"),
-            2 => Some("SP_DMA_RDLEN"),
-            3 => Some("SP_DMA_WRLEN"),
-            4 => Some("SP_STATUS"),
-            5 => Some("SP_DMA_FULL"),
-            6 => Some("SP_DMA_BUSY"),
-            7 => Some("SP_SEMAPHORE"),
-            _ => None,
-        }
-    }
-
     // TODO double buffering!
 
+    // TODO Bakuretsu Muteki Bangaioh: huge fishy DMAs that overwrite the SP memory many times
+
     fn start_dma(s: &mut System, direction: DmaDirection) {
+        // TODO cast to usize at the start to simplify the rest of the code
+
         let length_reg = match direction {
             DmaDirection::RamToSp => s.sp.regs[Register::DmaRdLen as usize],
             DmaDirection::SpToRam => s.sp.regs[Register::DmaWrLen as usize],
@@ -640,7 +644,7 @@ impl Sp {
 
         let skips = (length_reg >> 20) & !7;
 
-        let mut ram_addr = s.sp.regs[Register::DmaRamAddr as usize];
+        let mut ram_addr = s.sp.regs[Register::DmaRamAddr as usize] & 0x007F_FFFF;
         let mut sp_addr = s.sp.regs[Register::DmaSpAddr as usize];
 
         let sp_bank_offset = sp_addr & 0x1000;
@@ -655,6 +659,20 @@ impl Sp {
                 //     ram_addr,
                 //     sp_addr
                 // );
+
+                // for _ in 0..rows {
+                //     // TODO possible to read beyond the end of the RAM?
+                //     debug_assert!(ram_addr + bytes_per_row as u32 <= 0x007F_FFFF);
+
+                //     let ram_data = s
+                //         .ram
+                //         .read_block(RamLocation::from_relative(ram_addr), bytes_per_row as usize);
+
+                //     s.sp.write_block(SpMemLocation::from_relative(sp_addr), ram_data);
+
+                //     ram_addr = ram_addr.wrapping_add(bytes_per_row).wrapping_add(skips);
+                //     sp_addr = sp_addr.wrapping_add(bytes_per_row);
+                // }
 
                 for _ in 0..rows {
                     for byte in 0..bytes_per_row {
@@ -684,6 +702,38 @@ impl Sp {
                 //     ram_addr
                 // );
 
+                let sp_length = bytes_per_row as usize * rows as usize;
+
+                // let mut row_bytes_written = 0;
+
+                // s.sp.read_block(
+                //     SpMemLocation::from_relative(sp_addr),
+                //     sp_length,
+                //     |sp_data| {
+                //         let mut sp_offset = 0;
+
+                //         while sp_offset < sp_data.len() {
+                //             let remaining_row_bytes = bytes_per_row as usize - row_bytes_written;
+
+                //             let data_to_write =
+                //                 &sp_data[sp_offset..sp_data.len().min(remaining_row_bytes)];
+
+                //             s.ram
+                //                 .write_block(RamLocation::from_relative(ram_addr), data_to_write);
+
+                //             sp_offset = sp_offset.wrapping_add(data_to_write.len());
+
+                //             row_bytes_written += data_to_write.len();
+                //             ram_addr += data_to_write.len() as u32;
+
+                //             if row_bytes_written == bytes_per_row as usize {
+                //                 row_bytes_written = 0;
+                //                 ram_addr = ram_addr.wrapping_add(skips);
+                //             }
+                //         }
+                //     },
+                // );
+
                 for _ in 0..rows {
                     for byte in 0..bytes_per_row {
                         let wrapping_sp_addr = ((sp_addr + byte) & 0x0FFF) | sp_bank_offset;
@@ -698,13 +748,28 @@ impl Sp {
 
                     ram_addr = ram_addr.wrapping_add(bytes_per_row).wrapping_add(skips);
                 }
+
+                // for _ in 0..rows {
+                //     for byte in 0..bytes_per_row {
+                //         let wrapping_sp_addr = ((sp_addr + byte) & 0x0FFF) | sp_bank_offset;
+
+                //         let data = s.sp.mem[wrapping_sp_addr as usize];
+
+                //         s.write::<u8>(Address::p(ram_addr + byte), data)
+                //             .expect("SP DMA SP to RAM write failed");
+                //     }
+
+                //     sp_addr = sp_addr.wrapping_add(bytes_per_row);
+                //     ram_addr = ram_addr.wrapping_add(bytes_per_row).wrapping_add(skips);
+                // }
             }
         }
 
         // Increment the DMA registers for the next transfer
 
         s.sp.regs[Register::DmaSpAddr as usize] =
-            s.sp.regs[Register::DmaSpAddr as usize].wrapping_add(bytes_per_row * rows);
+            s.sp.regs[Register::DmaSpAddr as usize].wrapping_add(bytes_per_row * rows) & 0xFFF
+                | sp_bank_offset;
 
         s.sp.regs[Register::DmaRamAddr as usize] =
             s.sp.regs[Register::DmaRamAddr as usize].wrapping_add((bytes_per_row + skips) * rows);

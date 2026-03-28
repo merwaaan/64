@@ -5,6 +5,7 @@ use crate::{
     location::Location,
     mi::Interrupt,
     pif::{Pif, PifRamLocation},
+    ram::RamLocation,
     system::{Address, System},
     value::Value,
 };
@@ -119,13 +120,17 @@ impl Si {
                 //     s.si.regs[DRAM_ADDR_REG],
                 // );
 
-                for i in 0..64 {
-                    let data = Pif::read(s, PifRamLocation::from_relative(i));
-
-                    s.write::<u8>(Address::p(s.si.regs[DRAM_ADDR_REG] + i), data)
-                        .expect("SI DMA PIF to RAM write failed");
-                    // TODO stop if fails?
-                }
+                s.pif.read_block(
+                    &s.controllers,
+                    PifRamLocation::from_relative(0),
+                    0x40,
+                    |pif_data| {
+                        s.ram.write_block(
+                            RamLocation::from_absolute(s.si.regs[DRAM_ADDR_REG]),
+                            pif_data,
+                        );
+                    },
+                );
             }
             DmaDirection::RamToPif => {
                 // log::info!(
@@ -134,15 +139,14 @@ impl Si {
                 //     s.si.regs[PIF_ADDR_READ64_REG]
                 // );
 
-                for offset in 0..64 {
-                    // TODO limited to RAM? could we just read wider?
-                    let data = s
-                        .read::<u8>(Address::p(s.si.regs[DRAM_ADDR_REG] + offset))
-                        .expect("SI DMA RAM to PIF read failed");
-                    // TODO stop if fails?
-
-                    Pif::write(s, PifRamLocation::from_relative(offset), data);
-                }
+                s.ram.read_block(
+                    RamLocation::from_absolute(s.si.regs[DRAM_ADDR_REG]),
+                    0x40,
+                    |ram_data| {
+                        s.pif
+                            .write_block(PifRamLocation::from_relative(0), ram_data);
+                    },
+                );
             }
         }
 

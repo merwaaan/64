@@ -34,10 +34,9 @@ impl Cpu {
     pub fn step(s: &mut System) {
         // Decode and execute the current instruction
 
-        let instruction = s.read(Address::v(s.cpu.regs.pc)).expect(&format!(
-            "Invalid instruction address {:08X}",
-            s.cpu.regs.pc
-        )); // TODO handle exception
+        let instruction = s
+            .read(Address::v(s.cpu.regs.pc))
+            .unwrap_or_else(|_| panic!("Invalid instruction address {:08X}", s.cpu.regs.pc)); // TODO handle exception
 
         let opcode = Opcode(instruction);
 
@@ -54,7 +53,7 @@ impl Cpu {
         //         s.cpu.regs.pc
         //     );
         // }
-        
+
         let result = match handler {
             Some((execute, _)) => execute(s, opcode),
             None => {

@@ -1,4 +1,9 @@
-use crate::{location::Location, system::System, value::Value};
+use crate::{
+    blocks::{read_block, write_block},
+    location::Location,
+    system::System,
+    value::Value,
+};
 
 const DATA_START: u32 = 0x0000_0000;
 const DATA_END: u32 = 0x03F0_0000;
@@ -51,8 +56,16 @@ impl Ram {
                     //     "Invalid RAM data write: {:08X} {:X}",
                     //     addr.relative(),
                     //     data
-                    // ),
+                    // ), TODO
         }
+    }
+
+    pub fn read_block(&self, addr: RamLocation, length: usize, callback: impl FnMut(&[u8])) {
+        read_block(&self.data, addr.relative() as usize, length, callback);
+    }
+
+    pub fn write_block(&mut self, addr: RamLocation, src: &[u8]) {
+        write_block(src, &mut self.data, addr.relative() as usize)
     }
 
     pub fn read_reg<T: Value>(&self, addr: RamRegsLocation) -> T {

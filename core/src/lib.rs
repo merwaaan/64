@@ -4,6 +4,7 @@ use std::path::Path;
 
 pub mod ai;
 pub(crate) mod bits;
+pub mod blocks;
 pub mod breakpoints;
 pub mod cart;
 pub mod controller;
@@ -61,6 +62,6 @@ pub fn is_supported_file(path: &Path) -> bool {
 // - Chopper Attack: PIF out of range
 
 // TODO next steps:
-// - count/compare: interrupt cleared when compare changed??
 // - DMA double-buffering (AI ok, others now)
 // - exception on reserved/unknown instructions?
+// - DMA: directly access physical addresses, no translation

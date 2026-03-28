@@ -81,9 +81,10 @@ fn run_rom(path: &Path, cycles: usize, captures_dir: &Path) {
             system.step();
 
             if system.cpu.cycles() >= next_capture {
-                if system.vi.framebuffer_width() > 0 {
-                    framebuffer = Some(Vi::extract_framebuffer(&mut system));
-                }
+                // if system.vi.framebuffer_width() > 0 {
+                //     framebuffer = Some(Vi::extract_framebuffer(&mut system));
+                // }
+                framebuffer = Some(system.video_renderer.get_frame());
 
                 next_capture = system.cpu.cycles() + CAPTURE_INTERVAL;
             }

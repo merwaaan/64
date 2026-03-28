@@ -2,7 +2,7 @@ use arbitrary_int::prelude::*;
 use bitbybit::{bitenum, bitfield};
 use strum::Display;
 
-use crate::registers::Reg64;
+use crate::{exception::Exception, registers::Reg64};
 
 #[derive(Debug, Display)]
 #[bitenum(u5)]
@@ -134,6 +134,20 @@ pub struct Cause {
     inexact_operation: bool,
 }
 
+#[bitfield(u5, forbid_overlaps, instrospect, default = 0, debug)]
+pub struct Interrupt {
+    #[bit(4, rw)]
+    invalid_operation: bool,
+    #[bit(3, rw)]
+    division_by_zero: bool,
+    #[bit(2, rw)]
+    overflow: bool,
+    #[bit(1, rw)]
+    underflow: bool,
+    #[bit(0, rw)]
+    inexact_operation: bool,
+}
+
 #[derive(Debug)]
 #[bitenum(u2, exhaustive = true)]
 pub enum RoundingMode {
@@ -145,7 +159,7 @@ pub enum RoundingMode {
 
 #[bitfield(u32, forbid_overlaps, introspect, default = 0, debug)]
 pub struct Fcr31 {
-    #[bit(24, r)]
+    #[bit(24, rw)]
     fs: bool,
 
     /// Result of the most recent C instruction.
@@ -153,21 +167,22 @@ pub struct Fcr31 {
     #[bit(23, rw)]
     comparison_result: bool,
 
-    /// Exceptions caused by the most recent instruction
+    /// Result of the most recently executed instruction.
     #[bits(12..=17, rw)]
     exception_cause: Cause,
-    // TODO not w, use setter to update flags
-    /// Exception masking
-    #[bits(7..=11, r)]
-    exception_enabled: u5,
 
-    /// Pending exceptions
-    /// (sticky, so stays set until cleared by software)
-    /// TODO set even if masked?
-    #[bits(2..=6, r)]
-    exception_flags: u5,
+    /// Enabled exceptions.
+    /// If both a cause bit and the corresponding enabled bit are set, the exception is raised.
+    #[bits(7..=11, rw)]
+    exception_enabled: Interrupt,
 
-    #[bits(0..=1, r)]
+    /// Exceptions that were raised.
+    /// Set in case of masked exception.
+    /// "Sticky", so stays set until cleared by software using CTC1.
+    #[bits(2..=6, rw)]
+    exception_flags: Interrupt,
+
+    #[bits(0..=1, rw)]
     rounding_mode: RoundingMode,
 }
 
@@ -177,7 +192,8 @@ impl Fcr31 {
     }
 
     pub fn write(&mut self, value: u32) {
-        const MASK: u32 = 0xFFFF_FFFF; // TODO useless?
+        const MASK: u32 = 0x0183_FFFF;
+
         *self = Fcr31::new_with_raw_value(value & MASK);
     }
 }
@@ -192,23 +208,49 @@ pub struct Cop1 {
     fpr: [Reg64; 32],
 
     // Floating-point control register
-    pub fcr0: u32,
     pub fcr31: Fcr31,
 }
-
-const FCR0_DEFAULT: u32 = 0x0000_0500;
 
 impl Default for Cop1 {
     fn default() -> Self {
         Self {
             fpr: [Reg64::default(); 32],
-            fcr0: FCR0_DEFAULT,
             fcr31: Fcr31::default(),
         }
     }
 }
 
 impl Cop1 {
+    /// FCR0: read-only implementation/revision register
+    pub fn fcr0(&self) -> u32 {
+        const FCR0_DEFAULT: u32 = 0x0000_0A00;
+
+        FCR0_DEFAULT
+    }
+
+    // pub(crate) fn check_exceptions(&mut self) -> Option<Exception> {
+    //     let cause = self.fcr31.exception_cause().raw_value;
+    //     let enabled = self.fcr31.exception_enabled().raw_value | 0x20; // "unimplemented operation" is always enabled
+    //     let flags = self.fcr31.exception_flags().raw_value;
+
+    //     // Update the flags with the masked exceptions
+
+    //     let masked = cause & !enabled;
+
+    //     self.fcr31
+    //         .set_exception_flags(Interrupt::new_with_raw_value(u5::new(flags | masked)));
+
+    //     // Raise an exception if there are any enabled exception
+
+    //     let unmasked = cause & enabled;
+
+    //     if unmasked != 0 {
+    //         return Some(Exception::FloatingPoint);
+    //     } else {
+    //         None
+    //     }
+    // }
+
     /// Converts a 64-bits/32-bits mode register index to the "physical" register index that actually contains the data.
     ///
     /// 64-bits mode:

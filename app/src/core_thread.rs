@@ -364,8 +364,17 @@ impl CoreThread {
                         }
 
                         Data::Framebuffer => {
-                            let (data, width, height) = Vi::extract_framebuffer(system);
+                            //let (data, width, height) = Vi::extract_framebuffer(system);
 
+                            let (data, width, height) = system.video_renderer.get_frame();
+
+                            // if data.len() > 0 {
+                            //     log::debug!(
+                            //         "Framebuffer data: {:?} {:?}",
+                            //         data.len(),
+                            //         &data[..100]
+                            //     );
+                            // }
                             events.push(Event::Framebuffer(FramebufferUpdate {
                                 width,
                                 height,

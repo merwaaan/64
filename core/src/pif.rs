@@ -1,4 +1,9 @@
-use crate::{controller::Button, location::Location, system::System, value::Value};
+use crate::{
+    blocks::{read_block, write_block},
+    controller::{Button, Controller},
+    location::Location,
+    value::Value,
+};
 
 const START: u32 = 0x1FC0_07C0;
 const END: u32 = 0x1FC0_0800;
@@ -10,7 +15,7 @@ pub type PifRamLocation = Location<START, END>;
 pub struct Pif {
     ram: [u8; 0x40],
 
-    channel_offsets: [Option<usize>; 4],
+    channel_offsets: [Option<usize>; 4], // TODO 5?
 }
 
 impl Default for Pif {
@@ -23,123 +28,191 @@ impl Default for Pif {
 }
 
 impl Pif {
-    pub fn read<T: Value>(s: &mut System, addr: PifRamLocation) -> T {
-        for channel in 0..4 {
-            if let Some(offset) = s.pif.channel_offsets[channel] {
-                let data = &mut s.pif.ram[offset..offset + 4];
+    pub fn read<T: Value>(&mut self, controllers: &[Controller], addr: PifRamLocation) -> T {
+        self.probe_controllers(controllers);
 
-                data[0] = ((s.controllers[channel].pressed(Button::A) as u8) << 7)
-                    | ((s.controllers[channel].pressed(Button::B) as u8) << 6)
-                    | ((s.controllers[channel].pressed(Button::Z) as u8) << 5)
-                    | ((s.controllers[channel].pressed(Button::Start) as u8) << 4)
-                    | ((s.controllers[channel].pressed(Button::DUp) as u8) << 3)
-                    | ((s.controllers[channel].pressed(Button::DDown) as u8) << 2)
-                    | ((s.controllers[channel].pressed(Button::DLeft) as u8) << 1)
-                    | (s.controllers[channel].pressed(Button::DRight) as u8);
-
-                data[1] = ((s.controllers[channel].pressed(Button::LeftTrigger) as u8) << 5)
-                    | ((s.controllers[channel].pressed(Button::RightTrigger) as u8) << 4);
-
-                data[2] = 0;
-                data[3] = 0;
-            }
-        }
-
-        T::read_mem(&s.pif.ram, addr.relative())
+        T::read_mem(&self.ram, addr.relative())
     }
 
     // TODO method?
-    pub fn write<T: Value>(s: &mut System, addr: PifRamLocation, data: T) {
-        data.write_mem(&mut s.pif.ram, addr.relative());
+    pub fn write<T: Value>(&mut self, addr: PifRamLocation, data: T) {
+        data.write_mem(&mut self.ram, addr.relative());
 
         // Last byte written to: process the command buffer
 
         if addr.relative() <= 0x3F && 0x3F < addr.relative() + T::BYTES as u32 {
-            Self::process_command_buffer(s);
+            self.process_command_buffer();
         }
     }
 
-    fn process_command_buffer(s: &mut System) {
-        let control_byte = s.pif.ram[0x3F];
+    pub fn read_block(
+        &mut self,
+        controllers: &[Controller],
+        addr: PifRamLocation,
+        length: usize,
+        callback: impl FnMut(&[u8]),
+    ) {
+        self.probe_controllers(controllers);
 
-        //log::error!("PIF: COMMAND {:08X} @ {:08X}", control_byte, s.cpu.regs.pc);
+        read_block(&self.ram, addr.relative() as usize, length, callback);
+    }
 
-        // for i in s.pif.data.iter() {
-        //     log::error!("PIF: - {:X}", i);
-        // }
+    pub fn write_block(&mut self, addr: PifRamLocation, src: &[u8]) {
+        write_block(src, &mut self.ram, addr.relative() as usize);
+
+        // Last byte written to: process the command buffer
+
+        if addr.relative() <= 0x3F && 0x3F < addr.relative() + src.len() as u32 {
+            self.process_command_buffer();
+        }
+    }
+
+    fn probe_controllers(&mut self, controllers: &[Controller]) {
+        for channel in 0..4 {
+            if let Some(offset) = self.channel_offsets[channel] {
+                let data = &mut self.ram[offset..offset + 4];
+
+                data[0] = ((controllers[channel].pressed(Button::A) as u8) << 7)
+                    | ((controllers[channel].pressed(Button::B) as u8) << 6)
+                    | ((controllers[channel].pressed(Button::Z) as u8) << 5)
+                    | ((controllers[channel].pressed(Button::Start) as u8) << 4)
+                    | ((controllers[channel].pressed(Button::DUp) as u8) << 3)
+                    | ((controllers[channel].pressed(Button::DDown) as u8) << 2)
+                    | ((controllers[channel].pressed(Button::DLeft) as u8) << 1)
+                    | (controllers[channel].pressed(Button::DRight) as u8);
+
+                data[1] = ((controllers[channel].pressed(Button::LeftTrigger) as u8) << 5)
+                    | ((controllers[channel].pressed(Button::RightTrigger) as u8) << 4);
+
+                data[2] = 0;
+                data[3] = 0;
+
+                // TODO write 0x80 = no response if no device connected?
+            }
+        }
+    }
+
+    fn process_command_buffer(&mut self) {
+        let control_byte = self.ram[0x3F];
+
+        //log::error!("PIF RAM: {:X?}", self.ram);
 
         // https://n64brew.dev/wiki/PIF-NUS
 
         match control_byte {
-            //Configure Joybus frame
+            // Configure Joybus frame
             1 => {
-                s.pif.channel_offsets = [None; 4];
+                self.channel_offsets = [None; 4];
 
                 let mut offset = 0;
                 let mut channel = 0;
 
-                while offset < 0x40 {
-                    let tx = s.pif.ram[offset] as usize; //TODO mask 3f?
-                    //log::debug!("PIF??? {:X}", tx);
+                while offset < 0x40 && channel < 5 {
+                    let tx = self.ram[offset] as usize;
 
-                    // Skip channel
-                    if tx == 0 {
-                        //log::debug!("   SKIP");
-                        channel += 1;
-                        offset += 1;
-                    }
-                    // ???
-                    else if tx == 0xFF {
-                        //log::debug!("  WEIRD SKIP");
-                        offset += 1;
-                    }
-                    // ???
-                    // else if tx == 0xFD {
-                    //     //log::debug!("  WEIRD SKIP");
-                    //     offset += 1;
-                    // }
-                    // End of command buffer
-                    else if tx == 0xFE {
-                        //log::debug!("  END");
-                        break;
-                    }
-                    // Command
-                    else {
-                        let rx = (s.pif.ram[offset + 1] & 0x3F) as usize;
-                        // TODO Bit 7 = no response, bit 6 = error???
-                        //log::debug!("   COMMAND {} {}", tx, rx);
+                    //log::debug!("PIF byte: {:X}", tx);
 
-                        let tx_data = &s.pif.ram[offset + 2..offset + 2 + tx];
-                        //log::debug!("   TX DATA {:?}", tx_data);
+                    // TODO should use high bits instead? https://n64brew.dev/wiki/PIF-NUS#RX_byte:_special_flags
 
-                        // Info
-                        if tx_data[0] == 0 {
-                            s.pif.ram[offset + 2 + tx] = 0x05;
-                            s.pif.ram[offset + 2 + tx + 1] = 0x00;
-                            s.pif.ram[offset + 2 + tx + 2] = 0x02;
-                        }
-                        // Controller state
-                        else if tx_data[0] == 1 {
-                            // s.pif.ram[offset + 2 + tx] = s.cpu.cycles as u8; // TODO temp, 0x10 = start
-                            // s.pif.ram[offset + 2 + tx + 1] = 0;
-                            // s.pif.ram[offset + 2 + tx + 2] = 0;
-                            // s.pif.ram[offset + 2 + tx + 3] = 0;
-
-                            s.pif.channel_offsets[channel] = Some(offset + 2 + tx);
+                    match tx {
+                        // Skip channel
+                        0 => {
+                            //log::debug!("   SKIP");
                             channel += 1;
-                        } else {
-                            log::warn!("PIF: UNKNOWN COMMAND TYPE {:08X}", tx_data[0]);
+                            offset += 1;
+                        }
+
+                        // Skip byte
+                        // TODO diff between the two values unclear
+                        0xFD | 0xFF => {
+                            offset += 1;
+                        }
+
+                        // End of commands
+                        0xFE => {
                             break;
                         }
 
-                        offset += 2 + tx + rx;
+                        // Command
+                        _ => {
+                            let rx = self.ram[offset + 1] as usize;
+
+                            // The special "stop" byte is documented as appearing in TX spots, but it sometimes seems to appear in RX spots too.
+                            //
+                            // This often happens in that particular context:
+                            // - a game writes a "write pak" command
+                            // - after the (1 + 1 + 35 + 1) command bytes, there's a large value (often B4/F4) in place of the next TX
+                            // - the following RX is 0xFE
+                            //   -> if we don't stop here, we'll read the next B4/F4 & 3F bytes that follow and overrun the buffer
+                            //
+                            // Happens in Bust-A-Move 99 , In-Fisherman, and other games.
+                            //
+                            // It's currently unclear why this happens and my blurb about a "stop byte in RX" might be a misinterpretation of the protocol.
+
+                            if rx == 0xFE {
+                                break;
+                            }
+
+                            // Mask out the top 2 bits
+
+                            let tx = tx & 0x3F;
+                            let rx = rx & 0x3F;
+
+                            // TODO Bit 7 = no response, bit 6 = error???
+                            //log::debug!("   COMMAND {} {}", tx, rx);
+
+                            let tx_data = &self.ram[offset + 2..offset + 2 + tx];
+
+                            // Info / Reset & info
+                            match tx_data[0] {
+                                0x00 | 0xFF => {
+                                    // TODO move up in probe?
+                                    self.ram[offset + 2 + tx] = 0x05;
+                                    self.ram[offset + 2 + tx + 1] = 0x00;
+                                    self.ram[offset + 2 + tx + 2] = 0x02; // no accessory
+                                }
+
+                                // Controller state
+                                1 => {
+                                    self.channel_offsets[channel] = Some(offset + 2 + tx);
+                                }
+                                // Read pak
+                                2 => {
+                                    // TODO zero out for now
+
+                                    for i in 0..rx {
+                                        self.ram[offset + 2 + tx + i] = 0;
+                                    }
+
+                                    // TODO write CRC to rx?
+                                }
+                                // Write pak
+                                3 => {
+                                    log::warn!("PIF: pak write");
+
+                                    // TODO do it
+
+                                    // TODO write CRC to rx?
+                                }
+
+                                _ => {
+                                    log::warn!("PIF: UNKNOWN COMMAND TYPE {:08X}", tx_data[0]);
+                                    break;
+                                }
+                            }
+
+                            offset += 2 + tx + rx;
+                            channel += 1;
+                        }
                     }
                 }
             }
-            8 => log::info!("PIF: terminate boot process"),
-            0x10 => log::info!("PIF: ROM lockout"),
-            0x20 => log::info!("PIF: acquire checksum"),
-            0x40 => log::info!("PIF: run checksum"),
+
+            8 => log::debug!("PIF: terminate boot process"),
+            0x10 => log::debug!("PIF: ROM lockout"),
+            0x20 => log::debug!("PIF: acquire checksum"),
+            0x40 => log::debug!("PIF: run checksum"),
+
             _ => log::warn!("PIF: unknown command {:08X}", control_byte),
         }
 
@@ -147,6 +220,6 @@ impl Pif {
 
         // Clear the command byte
 
-        s.pif.ram[0x3F] = 0;
+        self.ram[0x3F] = 0;
     }
 }

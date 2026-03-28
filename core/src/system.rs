@@ -19,7 +19,7 @@ use crate::{
     pi::{Pi, PiLocation},
     pif::{Pif, PifRamLocation},
     ram::{Ram, RamInterfaceLocation, RamLocation, RamRegsLocation},
-    rendering::audio::AudioRenderer,
+    rendering::{audio::AudioRenderer, video::VideoRenderer},
     si::{Si, SiLocation},
     sp::{Sp, SpMemLocation, SpRegsLocation},
     value::Value,
@@ -116,7 +116,7 @@ pub struct System {
     pub controllers: [Controller; 4],
 
     pub audio_renderer: AudioRenderer,
-    // TODO video_renderer
+    pub video_renderer: VideoRenderer,
 }
 
 impl System {
@@ -144,6 +144,7 @@ impl System {
             controllers: [Controller::default(); 4],
 
             audio_renderer: AudioRenderer::new(),
+            video_renderer: VideoRenderer::new(),
         };
 
         // Load the breakpoints
@@ -312,7 +313,7 @@ impl System {
             Some(MapLocation::Si(addr)) => Si::read(self, addr),
             //Some(MapLocation::Dd(addr)) => s.dd.read(addr),
             Some(MapLocation::Cart(addr)) => Cart::read(self, addr),
-            Some(MapLocation::Pif(addr)) => Pif::read(self, addr),
+            Some(MapLocation::Pif(addr)) => self.pif.read(&self.controllers, addr),
             Some(MapLocation::OpenBus(addr)) => openbus::read(addr),
             None => {
                 log::warn!("Invalid read address: {}", addr);
@@ -344,7 +345,7 @@ impl System {
             Some(MapLocation::RamInterface(addr)) => Ram::write_interface(self, addr, data),
             Some(MapLocation::Si(addr)) => Si::write(self, addr, data),
             Some(MapLocation::Cart(addr)) => Cart::write(self, addr, data),
-            Some(MapLocation::Pif(addr)) => Pif::write(self, addr, data),
+            Some(MapLocation::Pif(addr)) => self.pif.write(addr, data),
             Some(MapLocation::OpenBus(addr)) => openbus::write(addr, data),
             _ => log::warn!("Invalid write address: {}", addr),
         };

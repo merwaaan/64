@@ -16,6 +16,7 @@ pub enum Exception {
     CoprocessorUnusable(u32),
     ArithmeticOverflow,
     Trap,
+    FloatingPoint,
 }
 
 impl Exception {
@@ -95,6 +96,7 @@ impl Exception {
             Exception::CoprocessorUnusable(_) => 11,
             Exception::ArithmeticOverflow => 12,
             Exception::Trap => 13,
+            Exception::FloatingPoint => 15,
         }
     }
 

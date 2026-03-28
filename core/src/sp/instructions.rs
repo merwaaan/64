@@ -55,14 +55,14 @@ pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
             0x27 => inst!(nor),
             0x2A => inst!(slt),
             0x2B => inst!(sltu),
-            _ => return None, // TODO reserved exception?
+            _ => return None,
         }),
         0b000001 => Some(match opcode.0 & 0x1F_0000 {
             0x00_0000 => inst!(bltz),
             0x01_0000 => inst!(bgez),
             0x10_0000 => inst!(bltzal),
             0x11_0000 => inst!(bgezal),
-            _ => return None, // TODO reserved exception?
+            _ => return None,
         }),
         0b010000 => Some(match opcode.0 & 0x03E0_0000 {
             0x000_0000 => inst!(mfc0),
@@ -96,7 +96,6 @@ pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
                 0x13 => inst!(vabs),
                 0x14 => inst!(vaddc),
                 0x15 => inst!(vsubc),
-                0x1B => inst!(vmov),
                 0x1D => inst!(vsar),
                 0x20 => inst!(vlt),
                 0x21 => inst!(veq),
@@ -115,11 +114,12 @@ pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
                 0x30 => inst!(vrcp),
                 0x31 => inst!(vrcpl),
                 0x32 => inst!(vrcph),
+                0x33 => inst!(vmov),
                 0x34 => inst!(vrsq),
                 0x35 => inst!(vrsql),
                 0x36 => inst!(vrsqh),
                 0x37 => inst!(vnop),
-                _ => inst!(vec), // TODO placeholder
+                _ => return None,
             },
         }),
         _ => Some(match opcode.group() {
@@ -173,7 +173,7 @@ pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
                 0x07 => inst!(suv),
                 0x08 => inst!(shv),
                 0x09 => inst!(sfv),
-                0x0A => inst!(swv), // TODO ? save as suv in rsp manual
+                0x0A => inst!(swv), // TODO ? sme as suv in rsp manual
                 0x0B => inst!(stv),
                 _ => return None,
             },
@@ -264,7 +264,7 @@ macro_rules! placeholder {
     ($name:ident) => {
         paste::paste! {
             fn [< $name _execute >](_s: &mut System, _op: Opcode) -> Option<InstructionEffect> {
-                panic!("Unimplemented instruction: {}", stringify!($name));
+                //log::error!("Unimplemented instruction: {}", stringify!($name));
 
                 None
             }
@@ -1127,7 +1127,6 @@ fn lrv_disassemble(_s: &System, op: Opcode) -> Disassembly {
 
 placeholder!(lfv);
 
-placeholder!(lpv);
 placeholder!(luv);
 placeholder!(lhv);
 placeholder!(ltv);
@@ -1172,9 +1171,76 @@ fn sqv_disassemble(_s: &System, op: Opcode) -> Disassembly {
     ))
 }
 
+fn lpv_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    // Contrarily to what the manual says, the element specifier offsets the source DMEM bytes.
+    // Also, the source data wraps around the 16-bytes segment that starts at the 8-bytes aligned address
+    // (eg. address = 0x29 wraps around [0x28, 0x37]).
+
+    let addr = s.sp.regs2.0[vbase(op) as usize].wrapping_add(voffset(op, 3) as u32) as usize; // TODO mask? or use correct type?
+    let addr_aligned8 = (addr & !7) as usize;
+    let addr_offset8 = (addr & 7) as usize;
+
+    let e = velement_offset(op) as usize;
+
+    let mut reg = i16x8::splat(0);
+
+    for i in 0..8usize {
+        let byte_addr =
+            (addr_aligned8 + ((addr_offset8 + (16 - e + i) & 15) & 0xF) as usize) & 0x0FFF;
+
+        let value = s.sp.mem[byte_addr];
+
+        reg[i as usize] = (value as i16) << 8;
+    }
+
+    s.sp.vregs[vt(op)] = reg;
+
+    None
+}
+
+fn lpv_disassemble(_s: &System, op: Opcode) -> Disassembly {
+    Disassembly::new(format!(
+        "LPV v{}[{}], {}({})",
+        vt(op),
+        velement_offset(op),
+        voffset(op, 4),
+        vbase(op)
+    ))
+}
+
+fn spv_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    // Contrarily to what the manual says, the element specifier offsets the source register bytes.
+    // The shift amount actually varies between 8 and 7 depending on the current offset, every 8 bytes.
+
+    let vt = s.sp.vregs[vt(op)];
+
+    let addr = s.sp.regs2.0[vbase(op) as usize].wrapping_add(voffset(op, 3) as u32); // TODO mask? or use correct type?
+
+    let e = velement_offset(op) as usize;
+
+    for i in 0..8 {
+        let vt_index = e + i;
+        let vt_lane = vt[vt_index & 7];
+        let vt_shift = if (vt_index & 8) == 0 { 8 } else { 7 };
+
+        s.sp.mem[(addr as usize + i) & 0x0FFF] = (vt_lane >> vt_shift) as u8;
+    }
+
+    None
+}
+
+fn spv_disassemble(_s: &System, op: Opcode) -> Disassembly {
+    Disassembly::new(format!(
+        "SPV v{}[{}], {}({})",
+        vt(op),
+        velement_offset(op),
+        voffset(op, 4),
+        vbase(op)
+    ))
+}
+
 placeholder!(sfv);
 placeholder!(srv);
-placeholder!(spv);
 placeholder!(suv);
 placeholder!(shv);
 placeholder!(stv);
@@ -1321,19 +1387,32 @@ fn vsar_disassemble(_s: &System, op: Opcode) -> Disassembly {
 }
 
 fn vmov_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    let vs = vs(op); // TODO rename de?
+    // The RSP manual is unclear about VMOV
+    //
+    // In practice:
+    // - vt is broadcasted and goes in acc low
+    // - vs is the lane index to write to vd AND to read from in the broadcast
 
-    let data = s.sp.vregs[vt(op)][velement(op) as usize]; // TODO not sure if this is correct? 8,9,10?
+    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
 
-    s.sp.vregs[vd(op)][vs] = data;
+    let de = vs(op) & 7;
+    s.sp.vregs[vd(op)][de] = vt[de];
 
     s.sp.vacc &= i64x8::splat(!0xFFFF);
-    s.sp.vacc |= i16x8::splat(data).cast::<u16>().cast::<i64>(); // TODO whole acc or just one lane??
+    s.sp.vacc |= vt.cast::<u16>().cast::<i64>();
 
     None
 }
 
-disassembly_vd_vs_vte!(vmov);
+fn vmov_disassemble(_s: &System, op: Opcode) -> Disassembly {
+    Disassembly::new(format!(
+        "VMOV v{}[{}], v{}[{}]",
+        vd(op),
+        velement(op),
+        vt(op),
+        velement(op)
+    ))
+}
 
 /*
  * Logical
@@ -1878,8 +1957,6 @@ fn vmadh_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
 
 disassembly_vd_vs_vte!(vmadh);
 
-placeholder!(vrndn);
-placeholder!(vrndp);
 placeholder!(vmacq);
 placeholder!(vmulq);
 
@@ -2022,68 +2099,142 @@ fn vcl_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
     let vs = s.sp.vregs[vs(op)];
     let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
 
-    const ZERO: i16x8 = i16x8::splat(0);
+    // let vsval = broadcast(velement(op), s.sp.vregs[vt(op)]);
+    // let vtval = s.sp.vregs[vs(op)];
+    // let vs = vtval;
+    // let vt = vsval;
 
-    let mut ge: Mask<i16, 8> = Mask::from_bitmask(s.sp.vcc as u64 >> 8);
-    let mut le: Mask<i16, 8> = Mask::from_bitmask(s.sp.vcc as u64 & 0xFF);
-    let eq: Mask<i16, 8> = !Mask::from_bitmask(s.sp.vco as u64 >> 8);
-    let diff_sign: Mask<i16, 8> = Mask::from_bitmask(s.sp.vco as u64 & 0xFF);
-    let vce: Mask<i16, 8> = Mask::from_bitmask(s.sp.vce as u64);
+    // let mut ge = s.sp.vcc as u64 >> 8;
+    // let mut le = s.sp.vcc as u64 & 0xFF;
+    // let eq = !(s.sp.vco as u64 >> 8);
+    // let diff_sign = s.sp.vco as u64 & 0xFF;
+    // let vce = s.sp.vce as u64;
 
-    log::info!("--------------------------------------");
-    log::info!("vs: {:0X?} {:?}", vs, vs);
-    log::info!("vt: {:0X?} {:?}", vt, vt);
-    log::info!("s.sp.vcc: {:08b}", s.sp.vcc);
-    log::info!("ge: {:?}", ge);
-    log::info!("le: {:?}", le);
-    log::info!("s.sp.vco: {:08b}", s.sp.vco);
-    log::info!("diff_sign: {:?}", diff_sign);
-    log::info!("eq: {:?}", eq);
-    log::info!("s.sp.vce: {:08b}", s.sp.vce);
-    log::info!("vce: {:?}", vce);
-    log::info!("===");
+    let mut result = u16x8::splat(0);
 
-    let sum = vs.cast::<u16>() + vt.cast::<u16>();
+    for i in 0..8 {
+        let vco_low = ((s.sp.vco >> i) & 1) != 0;
+        let vco_high = ((s.sp.vco >> (i + 8)) & 1) != 0;
+        let mut vcc_low = ((s.sp.vcc >> i) & 1) != 0;
+        let mut vcc_high = ((s.sp.vcc >> (i + 8)) & 1) != 0;
+        let vce = ((s.sp.vce >> i) & 1) != 0;
 
-    let carry = sum.simd_lt(vs.cast::<u16>());
-    // let carry = (vs.cast::<i32>() + vt.cast::<i32>())
-    //     .simd_ne(sum.cast::<i32>())
-    //     .cast::<i16>();
+        let vs_lane = vs[i] as u16;
+        let vt_lane = vt[i] as u16;
 
-    log::info!("sum: {:0X?}", sum);
-    log::info!("carry: {:?}", carry);
+        let r = if vco_low {
+            let (sum, carry) = vs_lane.overflowing_add(vt_lane);
 
+            if !vco_high {
+                // if vce {
+                //     vcc_low = (sum == 0) || !carry;
+                // } else {
+                //     vcc_low = (sum == 0) && !carry;
+                // }
+                vcc_low = ((sum == 0) && !carry) || (vce && ((sum == 0) || !carry));
+            }
+
+            if vcc_low {
+                -(vt_lane as i16) as u16
+            } else {
+                vs_lane
+            }
+        } else {
+            if !vco_high {
+                // if vce {
+                //     vcc_high = true;
+                // } else {
+                //     vcc_high = vs_lane >= vt_lane;
+                // }
+                vcc_high = vs_lane >= vt_lane;
+            }
+
+            if vcc_high { vt_lane } else { vs_lane }
+        };
+
+        // result[i] = if vco_low {
+        //     if vcc_low {
+        //         (vt_lane as i16).saturating_neg() as u16
+        //     } else {
+        //         vs_lane
+        //     }
+        // } else {
+        //     if vcc_high { vt_lane } else { vs_lane }
+        // };
+        result[i] = r;
+
+        s.sp.vcc &= !(1 << i);
+        s.sp.vcc |= (vcc_low as u16) << i;
+        s.sp.vcc &= !(1 << (i + 8));
+        s.sp.vcc |= (vcc_high as u16) << (i + 8);
+    }
+
+    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u64>().cast::<i64>();
+    s.sp.vco = 0;
+    s.sp.vce = 0;
+
+    // const ZERO: i16x8 = i16x8::splat(0);
+
+    // let mut ge: Mask<i16, 8> = Mask::from_bitmask(s.sp.vcc as u64 >> 8);
+    // let mut le: Mask<i16, 8> = Mask::from_bitmask(s.sp.vcc as u64 & 0xFF);
+    // let eq: Mask<i16, 8> = !Mask::from_bitmask(s.sp.vco as u64 >> 8);
+    // let diff_sign: Mask<i16, 8> = Mask::from_bitmask(s.sp.vco as u64 & 0xFF);
+    // let vce: Mask<i16, 8> = Mask::from_bitmask(s.sp.vce as u64);
+
+    // log::info!("--------------------------------------");
+    // log::info!("vs: {:0X?} {:?}", vs, vs);
+    // log::info!("vt: {:0X?} {:?}", vt, vt);
+    // log::info!("s.sp.vcc: {:08b}", s.sp.vcc);
+    // log::info!("ge: {:?}", ge);
+    // log::info!("le: {:?}", le);
+    // log::info!("s.sp.vco: {:08b}", s.sp.vco);
+    // log::info!("diff_sign: {:?}", diff_sign);
+    // log::info!("eq: {:?}", eq);
+    // log::info!("s.sp.vce: {:08b}", s.sp.vce);
+    // log::info!("vce: {:?}", vce);
+    // log::info!("===");
+
+    // let sum = vs.cast::<u16>() + vt.cast::<u16>();
+
+    // let carry = sum.simd_lt(vs.cast::<u16>());
+    // // let carry = (vs.cast::<i32>() + vt.cast::<i32>())
+    // //     .simd_ne(sum.cast::<i32>())
+    // //     .cast::<i16>();
+
+    // log::info!("sum: {:0X?}", sum);
+    // log::info!("carry: {:?}", carry);
+
+    // // le = diff_sign.select(
+    // //     eq.select(
+    // //         (!vce & sum.simd_eq(u16x8::splat(0)) & !carry)
+    // //             | (vce & (sum.simd_eq(u16x8::splat(0)) | !carry)),
+    // //         le,
+    // //     ),
+    // //     le,
+    // // );
     // le = diff_sign.select(
     //     eq.select(
-    //         (!vce & sum.simd_eq(u16x8::splat(0)) & !carry)
-    //             | (vce & (sum.simd_eq(u16x8::splat(0)) | !carry)),
+    //         sum.simd_eq(u16x8::splat(0)) & !carry | (vce & (sum.simd_eq(u16x8::splat(0)) | !carry)),
     //         le,
     //     ),
     //     le,
     // );
-    le = diff_sign.select(
-        eq.select(
-            sum.simd_eq(u16x8::splat(0)) & !carry | (vce & (sum.simd_eq(u16x8::splat(0)) | !carry)),
-            le,
-        ),
-        le,
-    );
-    //le = (diff_sign & eq).select(!carry, le);
+    // //le = (diff_sign & eq).select(!carry, le);
 
-    ge = diff_sign.select(ge, eq.select(vs.simd_ge(vt), ge));
+    // ge = diff_sign.select(ge, eq.select(vs.simd_ge(vt), ge));
 
-    s.sp.vcc = ((ge.to_bitmask() as u8 as u16) << 8) | (le.to_bitmask() as u8 as u16);
-    s.sp.vco = 0;
-    s.sp.vce = 0;
+    // s.sp.vcc = ((ge.to_bitmask() as u8 as u16) << 8) | (le.to_bitmask() as u8 as u16);
+    // s.sp.vco = 0;
+    // s.sp.vce = 0;
 
-    let result = diff_sign.select(le.select(-vt, vs), ge.select(vt, vs));
+    // let result = diff_sign.select(le.select(-vt, vs), ge.select(vt, vs));
 
-    log::info!("ge END: {:?}", ge);
-    log::info!("le END: {:?}", le);
-    log::info!("result: {:0X?} {:?}", result, result);
+    // log::info!("ge END: {:?}", ge);
+    // log::info!("le END: {:?}", le);
+    // log::info!("result: {:0X?} {:?}", result, result);
 
-    s.sp.vregs[vd(op)] = result;
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u16>().cast::<i64>();
+    // s.sp.vregs[vd(op)] = result;
+    // s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u16>().cast::<i64>();
 
     None
 }
@@ -2115,3 +2266,5 @@ placeholder!(vrcph);
 placeholder!(vrsq);
 placeholder!(vrsql);
 placeholder!(vrsqh);
+placeholder!(vrndn);
+placeholder!(vrndp);

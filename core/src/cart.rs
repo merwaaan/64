@@ -9,6 +9,7 @@ use thiserror::Error;
 use zip::ZipArchive;
 
 use crate::{
+    blocks::{read_block, write_block},
     is_supported_rom_file,
     isviewer::{IsViewer, IsViewerBufferLocation, IsViewerControlLocation},
     location::Location,
@@ -100,7 +101,7 @@ impl Cart {
     // }
 
     pub fn read<T: Value>(s: &System, addr: CartLocation) -> T {
-        T::read_mem(&s.cart.data, addr.relative() % (s.cart.data.len() as u32)) // TODO mod = costly?
+        T::read_mem(&s.cart.data, addr.relative() % (s.cart.data.len() as u32))
     }
 
     pub fn write<T: Value>(s: &mut System, addr: CartLocation, data: T) {
@@ -121,6 +122,14 @@ impl Cart {
             }
         }
     }
+
+    pub fn read_block(&self, addr: CartLocation, length: usize, callback: impl FnMut(&[u8])) {
+        read_block(&self.data, addr.relative() as usize, length, callback);
+    }
+
+    // pub fn write_block(&mut self, offset: usize, src: &[u8]) {
+    //     write_block(src, &mut self.data, offset)
+    // }
 }
 
 fn load_file(path: &Path) -> Result<Vec<u8>, CartError> {

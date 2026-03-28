@@ -5,8 +5,9 @@ use crate::{
     events::{EventType, Events},
     location::Location,
     mi::Interrupt,
+    ram::RamLocation,
     register_overlaps,
-    system::{Address, System},
+    system::System,
     value::Value,
 };
 
@@ -24,12 +25,16 @@ pub struct DmaRamAddress {
     value: u24,
 }
 
+const DMA_RAM_ADDRESS_MASK: u32 = 0x00FF_FFF8; // Low bits can be written but are ignored?
+
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
 #[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DmaLength {
     #[bits(0..=17, rw)]
     value: u18,
 }
+
+const DMA_LENGTH_MASK: u32 = 0x0003_FFF8;
 
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
 #[derive(bytemuck::Pod, bytemuck::Zeroable)]
@@ -53,19 +58,19 @@ pub struct Status {
     #[bit(19, rw)]
     word_clock: bool,
 
-    // TODO b24=1?
     #[bit(25, rw)]
     dma_enabled: bool,
 
-    // TODO b28/29=1?
-
-    // TODO b24=1?
     #[bit(30, rw)]
     dma_busy: bool,
 
     #[bit(31, rw)]
     dma_full: bool,
 }
+
+// Bits 24 and 20 stay set, bits 17 and 18 stay cleared
+const STATUS_DEFAULT_MASK: u32 = 0x0116_0000;
+const STATUS_DEFAULT_BITS: u32 = 0x0110_0000;
 
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
 #[derive(bytemuck::Pod, bytemuck::Zeroable)]
@@ -92,6 +97,8 @@ pub struct Registers {
     pub bit_rate: BitRate,
 }
 
+const REGISTERS_MASK: u32 = 0x1F; // TODO not exactly correct
+
 impl Registers {
     pub fn read<T: Value>(&self, offset: u32) -> T {
         let words = bytemuck::cast_slice(bytemuck::bytes_of(self));
@@ -106,10 +113,14 @@ impl Registers {
 
         data.write_reg(&mut words, offset);
 
-        // Mask out the lower bits of the DMA length register
+        // Mask out read-only bits
 
-        self.length
-            .set_value(self.length.value() & u18::new(0x3_FFF8));
+        self.ram_address.raw_value &= DMA_RAM_ADDRESS_MASK;
+
+        self.length.raw_value &= DMA_LENGTH_MASK;
+
+        self.status.raw_value &= !STATUS_DEFAULT_MASK;
+        self.status.raw_value |= STATUS_DEFAULT_BITS;
 
         // The DMA_ENABLE flag is mirrored in bit 25 of STATUS
 
@@ -117,13 +128,10 @@ impl Registers {
     }
 }
 
-// TODO generally, what's faster? match get optimized? compute index from >> 2?
-const REGISTERS_MASK: u32 = 0x1F; // TODO not exactly correct
-
 #[derive(Default, Clone, Copy, Debug)]
 struct DmaSlot {
-    address: u32,
-    length: u32,
+    address: DmaRamAddress,
+    length: DmaLength,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -184,8 +192,8 @@ impl Ai {
         // Active DMA transfer: queue
         else if s.ai.active_dma.is_some() {
             s.ai.pending_dma = Some(DmaSlot {
-                address: s.ai.regs.ram_address.value().value(),
-                length: s.ai.regs.length.value().value(),
+                address: s.ai.regs.ram_address,
+                length: s.ai.regs.length,
             });
 
             s.ai.regs.status.set_dma_full(true);
@@ -193,8 +201,8 @@ impl Ai {
         // No active DMA transfer: execute
         else {
             let slot = DmaSlot {
-                address: s.ai.regs.ram_address.value().value(),
-                length: s.ai.regs.length.value().value(),
+                address: s.ai.regs.ram_address,
+                length: s.ai.regs.length,
             };
 
             s.ai.active_dma = Some(slot);
@@ -206,25 +214,21 @@ impl Ai {
     }
 
     fn start_dma(s: &mut System, slot: DmaSlot) {
-        log::info!(
-            "AI: DMA {:X} bytes from RAM {:08X}",
-            slot.length,
-            slot.address
+        // log::info!(
+        //     "AI: DMA {:X} bytes from RAM {:08X}",
+        //     slot.length.raw_value,
+        //     slot.address.raw_value,
+        // );
+
+        // Push RAM data to the audio renderer
+
+        s.ram.read_block(
+            RamLocation::from_absolute(slot.address.raw_value),
+            slot.length.raw_value as usize,
+            |ram_data| {
+                s.audio_renderer.push(ram_data);
+            },
         );
-
-        // Push the data to the audio renderer
-
-        let mut samples = Vec::with_capacity(slot.length as usize);
-
-        for i in 0..slot.length {
-            let sample = s
-                .read(Address::p(slot.address + i)) // TODO physical/virtual?
-                .expect("AI DMA RAM read failed");
-
-            samples.push(sample);
-        }
-
-        s.audio_renderer.push(samples.as_slice());
 
         // Update the status register
 
@@ -232,8 +236,8 @@ impl Ai {
 
         // Schedule completion
 
-        let samples = (slot.length / 4) as f64; // 16-bit stereo = 4 bytes per sample
-        let cycles = ((samples / (s.ai.sample_rate() as f64)) * 93_750_000.0) as usize; // TODO crrect cycle unit?
+        let samples = (slot.length.raw_value / 4) as f64; // 16-bit stereo = 4 bytes per sample
+        let cycles = ((samples / (s.ai.sample_rate() as f64)) * 93_750_000.0) as usize; // TODO correct cycle unit?
 
         Events::push(s, EventType::AiDmaTransferComplete, cycles);
     }

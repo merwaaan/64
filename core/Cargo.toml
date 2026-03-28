@@ -13,6 +13,7 @@ cgmath = "0.18"
 cpal = "0.17"
 escargot = "0.5.15"
 log = "0.4"
+num-traits = "0.2"
 paste = "1.0"
 pollster = "0.4"
 rand = "0.10.0"
@@ -32,3 +33,10 @@ rstest = "0.26"
 [[bench]]
 name = "endianness"
 harness = false
+
+[profile.release]
+debug = true
+opt-level = 3
+lto = false
+codegen-units = 1
+panic = "abort"

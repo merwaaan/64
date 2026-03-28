@@ -1,6 +1,13 @@
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::{_mm_getcsr, _mm_setcsr};
+use std::ops::{BitAnd, Neg};
+
+use arbitrary_int::prelude::*;
+use num_traits::{Float, Signed};
+
 use crate::{
     check_cop_usable,
-    cop1::{self, Format},
+    cop1::{self, Cause, Format, Interrupt},
     cpu::{
         instructions::{
             DisassembleFn, Disassembly, ExecuteFn, InstructionEffect, InstructionResult,
@@ -45,15 +52,32 @@ pub fn decode(opcode: Opcode) -> Option<(ExecuteFn, DisassembleFn)> {
                 };
             }
 
+            // `Format::Float32` = `name_execute::<u32>`, `Format::Float64` = `name_execute::<u64>`, same disassemble
+            macro_rules! inst_fmt_fp {
+                ($name:ident) => {
+                    match opcode.cop1_format() {
+                        Some(Format::Float32) => (
+                            paste::paste! { [<$name _execute>]::<u32> },
+                            paste::paste! { [<$name _disassemble>] },
+                        ),
+                        Some(Format::Float64) => (
+                            paste::paste! { [<$name _execute>]::<u64> },
+                            paste::paste! { [<$name _disassemble>] },
+                        ),
+                        _ => return None,
+                    }
+                };
+            }
+
             match opcode.0 & 0x3F {
-                0x00 => inst_fmt!(add; Format::Float32, Format::Float64),
+                0x00 => inst_fmt_fp!(add),
                 0x01 => inst_fmt!(sub; Format::Float32, Format::Float64),
                 0x02 => inst_fmt!(mul; Format::Float32, Format::Float64),
                 0x03 => inst_fmt!(div; Format::Float32, Format::Float64),
                 0x04 => inst_fmt!(sqrt; Format::Float32, Format::Float64),
-                0x05 => inst_fmt!(abs; Format::Float32, Format::Float64),
+                0x05 => inst_fmt_fp!(abs),
                 0x06 => inst_fmt!(mov; Format::Float32, Format::Float64),
-                0x07 => inst_fmt!(neg; Format::Float32, Format::Float64),
+                0x07 => inst_fmt_fp!(neg),
                 0x08 => inst_fmt!(round; Format::Float32, Format::Float64),
                 0x09 => inst_fmt!(trunc; Format::Float32, Format::Float64),
                 0x0A => inst_fmt!(ceil; Format::Float32, Format::Float64),
@@ -96,28 +120,145 @@ pub fn decode(opcode: Opcode) -> Option<(ExecuteFn, DisassembleFn)> {
     })
 }
 
-fn abs_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    check_cop_usable!(1, s);
+fn set_exception_cause(s: &mut System, cause: Cause) -> InstructionResult {
+    s.cop1.fcr31.set_exception_cause(cause);
 
-    match op.cop1_format() {
-        Some(Format::Float32) => {
-            s.cop1.set32(
-                op.fd(),
-                f32::from_bits(op.fsv(s)).abs().to_bits(),
-                s.cop0.f64(),
-            );
+    if cause.raw_value().value() != 0 {
+        let cause = cause.raw_value().value();
+        let enabled = s.cop1.fcr31.exception_enabled().raw_value().value() | 0x20u8; // "unimplemented operation" is always enabled
+        let flags = s.cop1.fcr31.exception_flags().raw_value().value();
+
+        // Update the flags with the masked exceptions
+
+        let masked = cause & !enabled;
+
+        s.cop1
+            .fcr31
+            .set_exception_flags(Interrupt::new_with_raw_value(u5::new(flags | masked)));
+
+        // Raise an exception if there are any enabled exception
+
+        let unmasked = cause & enabled;
+
+        if unmasked != 0 {
+            return Err(Exception::FloatingPoint);
         }
-        Some(Format::Float64) => {
-            s.cop1.set64(
-                op.fd(),
-                f64::from_bits(op.fsv64(s)).abs().to_bits(),
-                s.cop0.f64(),
-            );
-        }
-        _ => unimplemented!("ABS with invalid format {:08X}", op.0),
     }
 
-    s.cop1.fcr31.set_exception_cause(cop1::Cause::default());
+    Ok(None)
+}
+
+trait Data: Copy + BitAnd<Output = Self> + Eq + Default {
+    // u32 -> f32, u64 -> f64
+    type FP: Copy + Float;
+
+    const EXPONENT_MASK: Self;
+    const MANTISSA_MASK: Self;
+    const QUIET_BIT: Self;
+
+    /// Canonical quiet NaN value.
+    const QNAN: Self;
+
+    fn to_float(self) -> Self::FP;
+    fn from_float(value: Self::FP) -> Self;
+
+    #[inline(always)]
+    fn is_nan(self) -> bool {
+        (self & Self::EXPONENT_MASK) == Self::EXPONENT_MASK
+            && (self & Self::MANTISSA_MASK) != Self::default()
+    }
+
+    #[inline(always)]
+    fn is_qnan(self) -> bool {
+        self.is_nan() && (self & Self::QUIET_BIT) != Self::default()
+    }
+
+    #[inline(always)]
+    fn is_snan(self) -> bool {
+        self.is_nan() && (self & Self::QUIET_BIT) == Self::default()
+    }
+
+    #[inline(always)]
+    fn is_subnormal(self) -> bool {
+        (self & Self::EXPONENT_MASK) == Self::default()
+            && (self & Self::MANTISSA_MASK) != Self::default()
+    }
+
+    fn read_reg(s: &System, reg: usize) -> Self;
+    fn write_reg(s: &mut System, reg: usize, value: Self);
+}
+
+impl Data for u32 {
+    type FP = f32;
+
+    const EXPONENT_MASK: u32 = 0x7F80_0000;
+    const MANTISSA_MASK: u32 = 0x007F_FFFF;
+    const QUIET_BIT: u32 = 0x0040_0000;
+    const QNAN: u32 = 0x7FBF_FFFF;
+
+    fn to_float(self) -> f32 {
+        f32::from_bits(self)
+    }
+
+    fn from_float(value: f32) -> u32 {
+        value.to_bits()
+    }
+
+    fn read_reg(s: &System, reg: usize) -> u32 {
+        s.cop1.get32(reg, s.cop0.f64())
+    }
+
+    fn write_reg(s: &mut System, reg: usize, value: u32) {
+        s.cop1.set32(reg, value, s.cop0.f64());
+    }
+}
+
+impl Data for u64 {
+    type FP = f64;
+
+    const EXPONENT_MASK: u64 = 0x7FF0_0000_0000_0000;
+    const MANTISSA_MASK: u64 = 0x000F_FFFF_FFFF_FFFF;
+    const QUIET_BIT: u64 = 0x0008_0000_0000_0000;
+    const QNAN: u64 = 0x7FF7_FFFF_FFFF_FFFF;
+
+    fn to_float(self) -> f64 {
+        f64::from_bits(self)
+    }
+
+    fn from_float(value: f64) -> u64 {
+        value.to_bits()
+    }
+
+    fn read_reg(s: &System, reg: usize) -> u64 {
+        s.cop1.get64(reg, s.cop0.f64())
+    }
+
+    fn write_reg(s: &mut System, reg: usize, value: u64) {
+        s.cop1.set64(reg, value, s.cop0.f64());
+    }
+}
+
+fn abs_execute<T: Data>(s: &mut System, op: Opcode) -> InstructionResult {
+    check_cop_usable!(1, s);
+
+    let fs = T::read_reg(s, op.fs());
+
+    set_exception_cause(
+        s,
+        Cause::default()
+            .with_unimplemented_operation(fs.is_snan() || fs.is_subnormal())
+            .with_invalid_operation(fs.is_qnan()),
+    )?;
+
+    T::write_reg(
+        s,
+        op.fd(),
+        if fs.is_nan() {
+            T::QNAN
+        } else {
+            T::from_float(fs.to_float().abs())
+        },
+    );
 
     Ok(None)
 }
@@ -131,24 +272,56 @@ fn abs_disassemble(_s: &System, op: Opcode) -> Disassembly {
     ))
 }
 
-fn add_execute(s: &mut System, op: Opcode) -> InstructionResult {
+const _MM_EXCEPT_INEXACT: u32 = 0x0020;
+const _MM_MASK_INEXACT: u32 = 0x1000;
+
+fn add_execute<T: Data>(s: &mut System, op: Opcode) -> InstructionResult {
     check_cop_usable!(1, s);
 
-    match op.cop1_format() {
-        Some(Format::Float32) => {
-            let ft = f32::from_bits(op.ftv(s));
-            let fs = f32::from_bits(op.fsv(s));
-            s.cop1.set32(op.fd(), (ft + fs).to_bits(), s.cop0.f64());
-        }
-        Some(Format::Float64) => {
-            let ft = f64::from_bits(op.ftv64(s));
-            let fs = f64::from_bits(op.fsv64(s));
-            s.cop1.set64(op.fd(), (ft + fs).to_bits(), s.cop0.f64());
-        }
-        _ => unimplemented!("ADD with invalid format {:08X}", op.0),
-    }
+    let ft = T::read_reg(s, op.ft());
+    let fs = T::read_reg(s, op.fs());
 
-    s.cop1.fcr31.set_exception_cause(cop1::Cause::default());
+    set_exception_cause(
+        s,
+        Cause::default().with_unimplemented_operation(
+            fs.is_snan() || ft.is_snan() || fs.is_subnormal() || ft.is_subnormal(),
+        ),
+    )?;
+
+    let inexact = unsafe {
+        // Clear the inexact bit in the host CPU
+        let mut mxcsr = _mm_getcsr();
+        mxcsr &= !_MM_EXCEPT_INEXACT;
+        _mm_setcsr(mxcsr);
+
+        // Do the math
+        let result = std::hint::black_box(fs.to_float() + ft.to_float());
+
+        // Check if the CPU set the bit back to 1
+        (_mm_getcsr() & _MM_EXCEPT_INEXACT) != 0
+    };
+
+    let invalid = fs.is_qnan()
+        || ft.is_qnan()
+        || (fs.to_float() == T::FP::infinity() && ft.to_float() == T::FP::neg_infinity())
+        || (fs.to_float() == T::FP::neg_infinity() && ft.to_float() == T::FP::infinity());
+
+    set_exception_cause(
+        s,
+        Cause::default()
+            .with_inexact_operation(inexact)
+            .with_invalid_operation(invalid),
+    )?;
+
+    T::write_reg(
+        s,
+        op.fd(),
+        if invalid {
+            T::QNAN
+        } else {
+            T::from_float(ft.to_float() + fs.to_float())
+        },
+    );
 
     Ok(None)
 }
@@ -338,7 +511,7 @@ fn cfc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
     check_cop_usable!(1, s);
 
     match op.fs() {
-        0 => s.cpu.regs.gpr[op.rt()].set(s.cop1.fcr0),
+        0 => s.cpu.regs.gpr[op.rt()].set(s.cop1.fcr0()),
         31 => s.cpu.regs.gpr[op.rt()].set(s.cop1.fcr31.read()),
         _ => unreachable!("CFC1 with invalid fs {}", op.fs()),
     }
@@ -360,7 +533,7 @@ fn ctc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
     check_cop_usable!(1, s);
 
     match op.fs() {
-        0 => {}
+        0 => { /* read-only */ }
         31 => s.cop1.fcr31.write(op.rtv(s)),
         _ => unreachable!("CTC1 with invalid fs {}", op.fs()),
     }
@@ -634,26 +807,27 @@ fn mul_disassemble(_s: &System, op: Opcode) -> Disassembly {
     ))
 }
 
-fn neg_execute(s: &mut System, op: Opcode) -> InstructionResult {
+fn neg_execute<T: Data>(s: &mut System, op: Opcode) -> InstructionResult {
     check_cop_usable!(1, s);
 
-    match op.cop1_format() {
-        Some(Format::Float32) => {
-            s.cop1.set32(
-                op.fd(),
-                (-f32::from_bits(op.fsv(s))).to_bits(),
-                s.cop0.f64(),
-            );
-        }
-        Some(Format::Float64) => {
-            s.cop1.set64(
-                op.fd(),
-                (-f64::from_bits(op.fsv64(s))).to_bits(),
-                s.cop0.f64(),
-            );
-        }
-        _ => unimplemented!("NEG with invalid format {:08X}", op.0),
-    }
+    let fs = T::read_reg(s, op.fs());
+
+    set_exception_cause(
+        s,
+        Cause::default()
+            .with_unimplemented_operation(fs.is_snan() || fs.is_subnormal())
+            .with_invalid_operation(fs.is_qnan()),
+    )?;
+
+    T::write_reg(
+        s,
+        op.fd(),
+        if fs.is_nan() {
+            T::QNAN
+        } else {
+            T::from_float(-fs.to_float())
+        },
+    );
 
     Ok(None)
 }
