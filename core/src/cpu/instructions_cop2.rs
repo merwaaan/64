@@ -1,7 +1,7 @@
 use crate::{
     check_cop_usable,
     cpu::{
-        instructions::{DisassembleFn, Disassembly, ExecuteFn, InstructionResult},
+        instructions::{DecodedInstruction, Disassembly, InstructionResult, RESERVED_INSTRUCTION},
         opcode::Opcode,
     },
     exception::Exception,
@@ -14,18 +14,18 @@ fn cop2_rs(opcode: Opcode) -> u32 {
     (opcode.0 >> 21) & 0x1F
 }
 
-pub fn decode(opcode: Opcode) -> Option<(ExecuteFn, DisassembleFn)> {
+pub fn decode(opcode: Opcode) -> DecodedInstruction {
     debug_assert_eq!(opcode.group(), 0x12);
 
-    Some(match cop2_rs(opcode) {
+    match cop2_rs(opcode) {
         0x00 => inst!(mfc2),
         0x01 => inst!(dmfc2),
         0x02 => inst!(cfc2),
         0x04 => inst!(mtc2),
         0x05 => inst!(dmtc2),
         0x06 => inst!(ctc2),
-        _ => return None,
-    })
+        _ => RESERVED_INSTRUCTION,
+    }
 }
 
 fn cfc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {

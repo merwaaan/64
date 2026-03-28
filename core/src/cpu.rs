@@ -40,29 +40,9 @@ impl Cpu {
 
         let opcode = Opcode(instruction);
 
-        let handler = instructions::decode(opcode);
+        let (execute, _disassemble) = instructions::decode(opcode);
 
-        // if let Some((_, disassemble)) = handler
-        //     && s.cpu.cycles > 0xF78000
-        // // f7
-        // {
-        //     log::debug!(
-        //         "CPU: executing instruction {:X}  {} @ {:08X}",
-        //         instruction,
-        //         disassemble(s, opcode).mnemonics,
-        //         s.cpu.regs.pc
-        //     );
-        // }
-
-        let result = match handler {
-            Some((execute, _)) => execute(s, opcode),
-            None => {
-                panic!(
-                    "Unknown instruction {:08X} at {:08X} / {}",
-                    instruction, s.cpu.regs.pc, s.cpu.cycles
-                );
-            }
-        };
+        let result = execute(s, opcode);
 
         // Advance the PC
 

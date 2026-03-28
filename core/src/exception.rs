@@ -12,7 +12,7 @@ pub enum Exception {
     AddressStore(u32),
     Syscall,
     Breakpoint,
-    // TODO ReservedInstruction
+    ReservedInstruction,
     CoprocessorUnusable(u32),
     ArithmeticOverflow,
     Trap,
@@ -93,6 +93,7 @@ impl Exception {
             Exception::AddressStore(_) => 5,
             Exception::Syscall => 8,
             Exception::Breakpoint => 9,
+            Exception::ReservedInstruction => 10,
             Exception::CoprocessorUnusable(_) => 11,
             Exception::ArithmeticOverflow => 12,
             Exception::Trap => 13,

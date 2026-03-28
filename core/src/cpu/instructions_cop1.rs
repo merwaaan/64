@@ -3,14 +3,15 @@ use std::arch::x86_64::{_mm_getcsr, _mm_setcsr};
 use std::ops::{BitAnd, Neg};
 
 use arbitrary_int::prelude::*;
-use num_traits::{Float, Signed};
+use num_traits::Float;
 
 use crate::{
     check_cop_usable,
     cop1::{self, Cause, Format, Interrupt},
     cpu::{
         instructions::{
-            DisassembleFn, Disassembly, ExecuteFn, InstructionEffect, InstructionResult,
+            DecodedInstruction, Disassembly, InstructionEffect, InstructionResult,
+            RESERVED_INSTRUCTION,
         },
         opcode::Opcode,
     },
@@ -20,12 +21,12 @@ use crate::{
     system::System,
 };
 
-pub fn decode(opcode: Opcode) -> Option<(ExecuteFn, DisassembleFn)> {
+pub fn decode(opcode: Opcode) -> DecodedInstruction {
     debug_assert_eq!(opcode.group(), 0x11);
 
     // TODO can avoid & 1F as they all have the same prefix
 
-    Some(match (opcode.0 >> 21) & 0x1F {
+    match (opcode.0 >> 21) & 0x1F {
         0x00 => inst!(mfc1),
         0x01 => inst!(dmfc1),
         0x02 => inst!(cfc1),
@@ -37,7 +38,7 @@ pub fn decode(opcode: Opcode) -> Option<(ExecuteFn, DisassembleFn)> {
             0x01 => inst!(bc1t),
             0x02 => inst!(bc1fl),
             0x03 => inst!(bc1tl),
-            _ => return None,
+            _ => RESERVED_INSTRUCTION,
         },
         _ => {
             // Expands to `inst!(name)` for the valid formats
@@ -46,7 +47,7 @@ pub fn decode(opcode: Opcode) -> Option<(ExecuteFn, DisassembleFn)> {
                     {
                         match opcode.cop1_format() {
                             $( Some($fmt) )|* => inst!($name),
-                            _ => return None,
+                            _ => RESERVED_INSTRUCTION,
                         }
                     }
                 };
@@ -64,7 +65,7 @@ pub fn decode(opcode: Opcode) -> Option<(ExecuteFn, DisassembleFn)> {
                             paste::paste! { [<$name _execute>]::<u64> },
                             paste::paste! { [<$name _disassemble>] },
                         ),
-                        _ => return None,
+                        _ => RESERVED_INSTRUCTION,
                     }
                 };
             }
@@ -114,10 +115,10 @@ pub fn decode(opcode: Opcode) -> Option<(ExecuteFn, DisassembleFn)> {
                 0x3D => inst_fmt!(c; Format::Float32, Format::Float64),
                 0x3E => inst_fmt!(c; Format::Float32, Format::Float64),
                 0x3F => inst_fmt!(c; Format::Float32, Format::Float64),
-                _ => return None,
+                _ => RESERVED_INSTRUCTION,
             }
         }
-    })
+    }
 }
 
 fn set_exception_cause(s: &mut System, cause: Cause) -> InstructionResult {

@@ -1,7 +1,7 @@
 use crate::{
     cop0,
     cpu::{
-        instructions::{DecodedInstruction, Disassembly, InstructionResult},
+        instructions::{DecodedInstruction, Disassembly, InstructionResult, RESERVED_INSTRUCTION},
         opcode::Opcode,
     },
     inst,
@@ -9,10 +9,10 @@ use crate::{
     tlb,
 };
 
-pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
+pub fn decode(opcode: Opcode) -> DecodedInstruction {
     debug_assert_eq!(opcode.group(), 0x10);
 
-    Some(match opcode.0 & 0x03E0_0000 {
+    match opcode.0 & 0x03E0_0000 {
         0x000_0000 => inst!(mfc0),
         0x020_0000 => inst!(dmfc0),
         0x080_0000 => inst!(mtc0),
@@ -23,10 +23,10 @@ pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
             0x04 => inst!(tlbwr),
             0x08 => inst!(tlbp),
             0x18 => inst!(eret),
-            _ => return None,
+            _ => RESERVED_INSTRUCTION,
         },
-        _ => return None,
-    })
+        _ => RESERVED_INSTRUCTION,
+    }
 }
 
 fn dmfc0_execute(s: &mut System, op: Opcode) -> InstructionResult {

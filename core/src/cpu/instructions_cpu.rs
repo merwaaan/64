@@ -1,7 +1,10 @@
 use crate::{
     check_aligned, check_cop_usable,
     cpu::{
-        instructions::{DecodedInstruction, Disassembly, InstructionEffect, InstructionResult},
+        instructions::{
+            DecodedInstruction, Disassembly, InstructionEffect, InstructionResult,
+            RESERVED_INSTRUCTION,
+        },
         opcode::Opcode,
     },
     exception::Exception,
@@ -9,10 +12,10 @@ use crate::{
     system::{Address, System},
 };
 
-pub fn decode_special(opcode: Opcode) -> Option<DecodedInstruction> {
+pub fn decode_special(opcode: Opcode) -> DecodedInstruction {
     debug_assert_eq!(opcode.group(), 0x00);
 
-    Some(match opcode.0 & 0x3F {
+    match opcode.0 & 0x3F {
         0x00 => inst!(sll),
         0x02 => inst!(srl),
         0x03 => inst!(sra),
@@ -65,14 +68,14 @@ pub fn decode_special(opcode: Opcode) -> Option<DecodedInstruction> {
         0x3C => inst!(dsll32),
         0x3E => inst!(dsrl32),
         0x3F => inst!(dsra32),
-        _ => return None, // TODO reserved exception?
-    })
+        _ => RESERVED_INSTRUCTION,
+    }
 }
 
-pub fn decode_regimm(opcode: Opcode) -> Option<DecodedInstruction> {
+pub fn decode_regimm(opcode: Opcode) -> DecodedInstruction {
     debug_assert_eq!(opcode.group(), 0x01);
 
-    Some(match opcode.0 & 0x1F_0000 {
+    match opcode.0 & 0x1F_0000 {
         0x00_0000 => inst!(bltz),
         0x01_0000 => inst!(bgez),
         0x02_0000 => inst!(bltzl),
@@ -86,12 +89,12 @@ pub fn decode_regimm(opcode: Opcode) -> Option<DecodedInstruction> {
         0x10_0000 => inst!(bltzal),
         0x11_0000 => inst!(bgezal),
         0x13_0000 => inst!(bgezall),
-        _ => return None, // TODO reserved exception?
-    })
+        _ => RESERVED_INSTRUCTION,
+    }
 }
 
-pub fn decode_standard(opcode: Opcode) -> Option<DecodedInstruction> {
-    Some(match opcode.group() {
+pub fn decode_standard(opcode: Opcode) -> DecodedInstruction {
+    match opcode.group() {
         0x02 => inst!(j),
         0x03 => inst!(jal),
         0x04 => inst!(beq),
@@ -141,8 +144,8 @@ pub fn decode_standard(opcode: Opcode) -> Option<DecodedInstruction> {
         0x3C => inst!(scd),
         0x3D => inst!(sdc1),
         0x3F => inst!(sd),
-        _ => return None, // TODO reserved exception?
-    })
+        _ => RESERVED_INSTRUCTION,
+    }
 }
 
 fn add_execute(s: &mut System, op: Opcode) -> InstructionResult {

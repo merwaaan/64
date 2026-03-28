@@ -244,19 +244,11 @@ impl CoreThread {
                                         .peek(Address::v(addr))
                                         .map(|instruction| {
                                             let opcode = Opcode(instruction);
-                                            let handler = cpu::instructions::decode(opcode);
 
-                                            if let Some((_, disassemble)) = handler {
-                                                (addr, disassemble(system, opcode))
-                                            } else {
-                                                (
-                                                    addr,
-                                                    Disassembly::new(format!(
-                                                        "<UNKNOWN {:08X}>",
-                                                        instruction
-                                                    )),
-                                                )
-                                            }
+                                            let (_execute, disassemble) =
+                                                cpu::instructions::decode(opcode);
+
+                                            (addr, disassemble(system, opcode))
                                         })
                                         .unwrap_or((
                                             addr,

@@ -6,20 +6,6 @@ use crate::{
     system::System,
 };
 
-// #[derive(Clone, Copy, Debug)]
-// pub enum InstructionResult {
-//     /// The instruction was a delayed branching.
-//     /// If the branch was taken, contains the target address.
-//     DelayedBranching(Option<u32>),
-
-//     /// TODO delay slot skipped
-//     //
-//     /// The instruction caused an exception
-//     Exception(Exception),
-
-//     Dma(Dma),
-// }
-
 #[derive(Clone, Copy, Debug)]
 pub enum InstructionEffect {
     /// The instruction was a delayed branching.
@@ -50,19 +36,6 @@ impl Disassembly {
             ..self
         }
     }
-
-    pub fn with_address_hint(self, _addr: u32) -> Self {
-        self
-        // TODO rework and interpret from app?
-        // if let Some(hint) = address_info(addr) {
-        //     Self {
-        //         hint: Some(hint.to_string()),
-        //         ..self
-        //     }
-        // } else {
-        //     self
-        // }
-    }
 }
 
 pub type ExecuteFn = fn(&mut System, Opcode) -> InstructionResult;
@@ -80,7 +53,7 @@ macro_rules! inst {
     };
 }
 
-pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
+pub fn decode(opcode: Opcode) -> DecodedInstruction {
     match opcode.group() {
         0b000000 => instructions_cpu::decode_special(opcode),
         0b000001 => instructions_cpu::decode_regimm(opcode),
@@ -90,3 +63,15 @@ pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
         _ => instructions_cpu::decode_standard(opcode),
     }
 }
+
+// Reserved instruction
+
+fn reserved_execute(s: &mut System, _op: Opcode) -> InstructionResult {
+    Err(Exception::ReservedInstruction)
+}
+
+pub fn reserved_disassemble(_s: &System, op: Opcode) -> Disassembly {
+    Disassembly::new(format!("<RESERVED {:08X}>", op.0))
+}
+
+pub const RESERVED_INSTRUCTION: DecodedInstruction = (reserved_execute, reserved_disassemble);
