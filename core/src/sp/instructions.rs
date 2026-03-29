@@ -257,7 +257,7 @@ macro_rules! placeholder {
     ($name:ident) => {
         paste::paste! {
             fn [< $name _execute >](_s: &mut System, _op: Opcode) -> Option<InstructionEffect> {
-                //log::error!("Unimplemented instruction: {}", stringify!($name));
+                log::warn!("SP: unimplemented {}", stringify!($name));
 
                 None
             }
@@ -1120,7 +1120,6 @@ fn lrv_disassemble(_s: &System, op: Opcode) -> Disassembly {
 
 placeholder!(lfv);
 
-placeholder!(luv);
 placeholder!(lhv);
 placeholder!(ltv);
 placeholder!(lwv);
@@ -1164,7 +1163,8 @@ fn sqv_disassemble(_s: &System, op: Opcode) -> Disassembly {
     ))
 }
 
-fn lpv_execute(s: &mut System, op: Opcode) -> InstructionResult {
+/// Generic LPV/LUV implementation, only the shift amount differs
+fn lxv_execute<const SHIFT: usize>(s: &mut System, op: Opcode) -> InstructionResult {
     // Contrarily to what the manual says, the element specifier offsets the source DMEM bytes.
     // Also, the source data wraps around the 16-bytes segment that starts at the 8-bytes aligned address
     // (eg. address = 0x29 wraps around [0x28, 0x37]).
@@ -1183,12 +1183,16 @@ fn lpv_execute(s: &mut System, op: Opcode) -> InstructionResult {
 
         let value = s.sp.mem[byte_addr];
 
-        reg[i as usize] = (value as i16) << 8;
+        reg[i as usize] = (value as i16) << SHIFT;
     }
 
     s.sp.vregs[vt(op)] = reg;
 
     None
+}
+
+fn lpv_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    lxv_execute::<8>(s, op)
 }
 
 fn lpv_disassemble(_s: &System, op: Opcode) -> Disassembly {
@@ -1201,7 +1205,25 @@ fn lpv_disassemble(_s: &System, op: Opcode) -> Disassembly {
     ))
 }
 
-fn spv_execute(s: &mut System, op: Opcode) -> InstructionResult {
+fn luv_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    lxv_execute::<7>(s, op)
+}
+
+fn luv_disassemble(_s: &System, op: Opcode) -> Disassembly {
+    Disassembly::new(format!(
+        "LUV v{}[{}], {}({})",
+        vt(op),
+        velement_offset(op),
+        voffset(op, 4),
+        vbase(op)
+    ))
+}
+
+/// Generic SPV/SUV implementation, only the shift amount differs
+fn sxv_execute<const EVEN_SHIFT: usize, const ODD_SHIFT: usize>(
+    s: &mut System,
+    op: Opcode,
+) -> InstructionResult {
     // Contrarily to what the manual says, the element specifier offsets the source register bytes.
     // The shift amount actually varies between 8 and 7 depending on the current offset, every 8 bytes.
 
@@ -1214,12 +1236,21 @@ fn spv_execute(s: &mut System, op: Opcode) -> InstructionResult {
     for i in 0..8 {
         let vt_index = e + i;
         let vt_lane = vt[vt_index & 7];
-        let vt_shift = if (vt_index & 8) == 0 { 8 } else { 7 };
+
+        let vt_shift = if (vt_index & 8) == 0 {
+            EVEN_SHIFT
+        } else {
+            ODD_SHIFT
+        };
 
         s.sp.mem[(addr as usize + i) & 0x0FFF] = (vt_lane >> vt_shift) as u8;
     }
 
     None
+}
+
+fn spv_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    sxv_execute::<8, 7>(s, op)
 }
 
 fn spv_disassemble(_s: &System, op: Opcode) -> Disassembly {
@@ -1232,9 +1263,22 @@ fn spv_disassemble(_s: &System, op: Opcode) -> Disassembly {
     ))
 }
 
+fn suv_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    sxv_execute::<7, 8>(s, op)
+}
+
+fn suv_disassemble(_s: &System, op: Opcode) -> Disassembly {
+    Disassembly::new(format!(
+        "SUV v{}[{}], {}({})",
+        vt(op),
+        velement_offset(op),
+        voffset(op, 4),
+        vbase(op)
+    ))
+}
+
 placeholder!(sfv);
 placeholder!(srv);
-placeholder!(suv);
 placeholder!(shv);
 placeholder!(stv);
 placeholder!(swv);
