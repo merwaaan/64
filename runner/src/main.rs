@@ -4,7 +4,7 @@ use std::{
 };
 
 use clap::Parser;
-use n64_core::{cart::Cart, is_supported_file, system::System, vi::Vi};
+use n64_core::{cart::Cart, is_supported_file, system::System};
 
 #[derive(Parser)]
 #[command(about = "Run ROMs for N cycles and dump framebuffers")]
@@ -93,8 +93,10 @@ fn run_rom(path: &Path, cycles: usize, captures_dir: &Path) {
         Ok(()) as Result<(), String>
     }));
 
-    if let Some((data, width, height)) = framebuffer {
-        if let Some(img) = image::RgbaImage::from_raw(width as u32, height as u32, data) {
+    if let Some(frame) = framebuffer {
+        if let Some(img) =
+            image::RgbaImage::from_raw(frame.width as u32, frame.height as u32, frame.rgba.clone())
+        {
             let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("frame");
             let framebuffer_path = captures_dir.join(format!("{}.png", stem));
 
@@ -102,8 +104,8 @@ fn run_rom(path: &Path, cycles: usize, captures_dir: &Path) {
                 log::debug!(
                     "Saved {} ({}x{})",
                     framebuffer_path.display(),
-                    width,
-                    height,
+                    frame.width,
+                    frame.height,
                 );
             }
         }

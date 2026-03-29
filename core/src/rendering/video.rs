@@ -1,22 +1,41 @@
-use std::mem;
+use std::{
+    mem,
+    sync::Arc,
+    thread::{self, JoinHandle},
+};
+
+use arc_swap::ArcSwap;
+use crossbeam::channel::{Receiver, RecvError, Sender, unbounded};
 
 use crate::rendering::atlas::Atlas;
 
-// trait VideoRenderer {
-//     //fn render(&self);
-// }
+#[derive(Debug)]
+pub struct Frame {
+    pub index: usize,
+    pub rgba: Vec<u8>,
+    pub width: usize,
+    pub height: usize,
+}
 
-// TODO double buffering?
-// struct Buffer {}
+pub struct Texture {
+    pub data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
 
-pub enum TriangleFill {
-    Color { colors: [[f32; 4]; 3] },
-    Texture { tile_slot: u8, uvs: [[f32; 2]; 3] },
+struct Triangle {
+    vertices: [[f32; 2]; 3],
+    fill: TriangleFillIndexed,
 }
 
 pub enum QuadFill {
     Color { color: [f32; 4] },
     Texture { tile_slot: u8, uvs: [[f32; 2]; 4] },
+}
+
+pub enum TriangleFill {
+    Color { colors: [[f32; 4]; 3] },
+    Texture { tile_slot: u8, uvs: [[f32; 2]; 3] },
 }
 
 enum TriangleFillIndexed {
@@ -29,17 +48,22 @@ enum TriangleFillIndexed {
     },
 }
 
-const ERROR_COLOR: [f32; 4] = [1.0, 0.078, 0.576, 1.0]; // deeppink
-
-struct Triangle {
-    vertices: [[f32; 2]; 3],
-    fill: TriangleFillIndexed,
-}
-
-pub struct Texture {
-    pub data: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
+pub enum Command {
+    PushTile {
+        slot: u8,
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+    PushTriangle {
+        vertices: [[f32; 2]; 3],
+        fill: TriangleFill,
+    },
+    PushQuad {
+        vertices: [[f32; 2]; 4],
+        fill: QuadFill,
+    },
+    Render,
 }
 
 #[repr(C)]
@@ -51,6 +75,109 @@ struct GpuVertex {
 }
 
 pub struct VideoRenderer {
+    /// Rendering thread handle
+    _thread: JoinHandle<()>,
+
+    /// Command sender for the rendering thread
+    command_tx: Sender<Command>,
+
+    /// Last frame received from the rendering thread
+    last_frame: Arc<ArcSwap<Frame>>,
+
+    // TODO temp
+    atlas_texture_debug: Arc<ArcSwap<Frame>>,
+}
+
+impl VideoRenderer {
+    pub fn new() -> Self {
+        let (command_tx, command_rx) = unbounded::<Command>();
+
+        let last_frame = Arc::new(ArcSwap::new(Arc::new(Frame {
+            index: 0,
+            rgba: vec![],
+            width: 0,
+            height: 0,
+        })));
+
+        let atlas_texture_debug = Arc::new(ArcSwap::new(Arc::new(Frame {
+            index: 0,
+            rgba: vec![0; 1024 * 1024 * 4],
+            width: 1024,
+            height: 1024,
+        })));
+
+        let thread_last_frame = last_frame.clone();
+        let thread_atlas_texture_debug = atlas_texture_debug.clone();
+
+        let thread = thread::Builder::new()
+            .name("Render".to_string())
+            .spawn(move || {
+                render_thread(command_rx, thread_last_frame, thread_atlas_texture_debug);
+            })
+            .expect("Failed to spawn render thread");
+
+        Self {
+            _thread: thread,
+            command_tx,
+            last_frame,
+            atlas_texture_debug,
+        }
+    }
+
+    pub fn push_command(&mut self, command: Command) {
+        self.command_tx
+            .send(command)
+            .expect("Failed to send command to render thread");
+    }
+
+    pub fn get_frame(&self) -> Arc<Frame> {
+        self.last_frame.load_full()
+    }
+
+    pub fn get_atlas_texture(&self) -> Arc<Frame> {
+        self.atlas_texture_debug.load_full()
+    }
+}
+
+fn render_thread(
+    command_rx: Receiver<Command>,
+    last_frame: Arc<ArcSwap<Frame>>,
+    atlas_texture_debug: Arc<ArcSwap<Frame>>,
+) {
+    let mut renderer = WgpuRenderer::new();
+
+    loop {
+        match command_rx.recv() {
+            Ok(command) => match command {
+                Command::PushTile {
+                    slot,
+                    rgba,
+                    width,
+                    height,
+                } => {
+                    renderer.push_tile(slot, rgba, width, height);
+                }
+
+                Command::PushTriangle { vertices, fill } => {
+                    renderer.push_triangle(vertices, fill);
+                }
+
+                Command::PushQuad { vertices, fill } => {
+                    renderer.push_quad(vertices, fill);
+                }
+
+                Command::Render => {
+                    renderer.render(&last_frame, &atlas_texture_debug);
+                }
+            },
+            Err(RecvError) => {
+                return;
+            }
+        }
+    }
+}
+
+struct WgpuRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
 
@@ -65,6 +192,8 @@ pub struct VideoRenderer {
     sampler: wgpu::Sampler,
     bind_group_layout: wgpu::BindGroupLayout,
 
+    atlas_texture_debug: Vec<u8>,
+
     pipeline: wgpu::RenderPipeline,
     readback_buffer: wgpu::Buffer,
 
@@ -78,7 +207,9 @@ pub struct VideoRenderer {
     last_tile_texture_texture_per_slot: [Option<usize>; 8],
 }
 
-impl VideoRenderer {
+const ERROR_COLOR: [f32; 4] = [1.0, 0.078, 0.576, 1.0]; // deeppink
+
+impl WgpuRenderer {
     pub fn new() -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
@@ -263,6 +394,8 @@ impl VideoRenderer {
             mapped_at_creation: false,
         });
 
+        // Receive commands
+
         Self {
             device,
             queue,
@@ -275,6 +408,7 @@ impl VideoRenderer {
 
             atlas_texture: texture,
             atlas_texture_view: texture_view,
+            atlas_texture_debug: vec![0; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize],
             sampler,
             bind_group_layout,
 
@@ -364,7 +498,11 @@ impl VideoRenderer {
         self.push_triangle(triangle2_vertices, triangle2_fill);
     }
 
-    pub fn render(&mut self) {
+    pub fn render(
+        &mut self,
+        last_frame: &Arc<ArcSwap<Frame>>,
+        atlas_texture_debug: &Arc<ArcSwap<Frame>>,
+    ) {
         // let mut fake_data: Vec<u8> = vec![0; 1024 * 1024 * 4];
         // for y in 0..1024 {
         //     for x in 0..1024 {
@@ -437,6 +575,42 @@ impl VideoRenderer {
             );
         }
 
+        // TODO temp
+
+        self.atlas_texture_debug.fill(0);
+
+        for cell in atlas.cells() {
+            let tile_texture = &self.tile_textures[cell.tile_index];
+
+            let atlas_stride = 1024 as usize * 4;
+            let tile_stride = cell.width as usize * 4;
+
+            for y in 0..cell.height {
+                let atlas_offset = (cell.y + y) as usize * atlas_stride + (cell.x as usize * 4);
+
+                let tile_offset = y as usize * tile_stride;
+
+                if y == 0 {
+                    self.atlas_texture_debug[atlas_offset] = 0xFF;
+                    self.atlas_texture_debug[atlas_offset + 1] = 0;
+                    self.atlas_texture_debug[atlas_offset + 2] = 0;
+                    self.atlas_texture_debug[atlas_offset + 3] = 0xFF;
+                } else {
+                    self.atlas_texture_debug[atlas_offset..atlas_offset + tile_stride]
+                        .copy_from_slice(
+                            &tile_texture.data[tile_offset..tile_offset + tile_stride],
+                        );
+                }
+            }
+        }
+
+        atlas_texture_debug.store(Arc::new(Frame {
+            index: atlas_texture_debug.load().index + 1,
+            rgba: self.atlas_texture_debug.clone(),
+            width: 1024,
+            height: 1024,
+        }));
+
         // TODO once???
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bind group"),
@@ -454,22 +628,6 @@ impl VideoRenderer {
         });
 
         // Upload the geometry
-
-        //TODO temp
-        // self.triangle_queue.clear();
-        // let offset = 0.9;
-        // self.push_quad(
-        //     [
-        //         [-offset, -offset],
-        //         [-offset, offset],
-        //         [offset, offset],
-        //         [offset, -offset],
-        //     ],
-        //     QuadFill::Texture {
-        //         texture_slot: 0,
-        //         uvs: [[0.0, 1.0], [0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
-        //     },
-        // );
 
         let triangle_count = self.triangle_queue.len();
         let vertex_count = triangle_count * 3;
@@ -564,38 +722,48 @@ impl VideoRenderer {
             },
         );
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        let submission = self.queue.submit(std::iter::once(encoder.finish()));
+
+        // Read the output buffer
+
+        let last_frame = last_frame.clone();
+        let readback_buffer = self.readback_buffer.clone();
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let bytes_per_row = self.bytes_per_row as usize;
+
+        self.readback_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |_| {
+                let data = readback_buffer.slice(..).get_mapped_range();
+
+                let rgba = unpack_rgba_rows(&data, width, height, bytes_per_row);
+
+                drop(data);
+
+                readback_buffer.unmap();
+
+                last_frame.store(Arc::new(Frame {
+                    index: last_frame.load().index + 1,
+                    rgba,
+                    width,
+                    height,
+                }));
+            });
+
+        self.device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: None,
+            })
+            .expect("Failed to wait for submission");
+
+        // Clear the rendered data
 
         self.triangle_queue.clear();
 
         self.tile_textures.clear();
         self.last_tile_texture_texture_per_slot = [None; 8];
-    }
-
-    pub fn get_frame(&self) -> (Vec<u8>, usize, usize) {
-        self.readback_buffer
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, move |_| {});
-
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .expect("Failed to poll device");
-
-        let data = self.readback_buffer.slice(..).get_mapped_range();
-
-        let rgba = unpack_rgba_rows(
-            &data,
-            self.width as usize,
-            self.height as usize,
-            self.bytes_per_row as usize,
-        );
-
-        drop(data);
-
-        self.readback_buffer.unmap();
-
-        //return (vec![], 0, 0);
-        (rgba.to_vec(), self.width as usize, self.height as usize)
     }
 }
 

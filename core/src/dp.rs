@@ -8,7 +8,7 @@ use crate::{
     location::Location,
     mi::Interrupt,
     ram::RamLocation,
-    rendering::video::QuadFill,
+    rendering::video::{self, QuadFill},
     sp::SpMemLocation,
     system::System,
     value::Value,
@@ -70,11 +70,11 @@ pub struct Dp {
     /// Applied when we receive a Sync full command.
     decoded_commands: Vec<Command>,
 
-    /// Texture memory.
-    tmem: [u8; 0x1000],
-
-    /// Rendering state, update by applying commands..
+    /// Rendering state, updated by applied commands.
     state: State,
+
+    /// Texture memory.
+    pub tmem: [u8; 0x1000], // TODO vis
 }
 
 #[derive(Default, Clone, Copy)]
@@ -615,6 +615,8 @@ impl Dp {
                 }
 
                 Command::LoadTLUT(data) => {
+                    // Load a palette to TMEM
+
                     let slot = &s.dp.state.tile_slots[data.tile().value() as usize];
 
                     let left = data.upper_left_x().value();
@@ -622,7 +624,7 @@ impl Dp {
 
                     let width = (right >> 2).wrapping_sub(left >> 2) + 1; // TODO +1?
 
-                    let bytes_to_copy = width * 2; // TODO format 4b?
+                    let bytes_to_copy = width * 2; // Palette colors are 16-bit
 
                     s.ram.read_block(
                         RamLocation::from_absolute(s.dp.state.texture.ram_address().value()),
@@ -634,25 +636,17 @@ impl Dp {
                 }
 
                 Command::LoadTile(data) => {
+                    // Load a tile from RAM to TMEM
+
                     let slot = &s.dp.state.tile_slots[data.tile().value() as usize];
 
                     // TODO fast-path for image width = tile width?
-                    // s.ram.read_block(
-                    //     RamLocation::from_absolute(current_texture.ram_address().value()),
-                    //     bytes_to_copy as usize,
-                    //     |ram_data| {
-                    //         write_block(ram_data, &mut tmem, slot.tile.tmem_address_byte());
-                    //     },
-                    // );
-
-                    let pixel_bits = slot.tile.pixel_size().bits();
 
                     let image_width = s.dp.state.texture.width().value() as u32 + 1;
-                    let image_stride = image_width * pixel_bits as u32 / 8; // TODO probably wrong for 4-bits?
 
-                    // Load the tile from RAM to TMEM
-
-                    // Start from the top-left of the RAM texture and offset by the left and top coordinates
+                    let texel_bits = slot.tile.texel_size().bits();
+                    let image_stride_bits = (image_width * texel_bits as u32 + 7) & !7; // Round up to byte alignment to not miss any 4-bit values
+                    let image_stride = image_stride_bits / 8;
 
                     // TODO helper in command
                     let left = data.upper_left_x().value();
@@ -663,22 +657,35 @@ impl Dp {
                     debug_assert!(left < right);
                     debug_assert!(top < bottom);
 
-                    let width = (right >> 2).wrapping_sub(left >> 2) + 1; // TODO not used? debug_assert matches line size?
-                    let height = (bottom >> 2).wrapping_sub(top >> 2) + 1; // TODO +1
+                    let tile_width = (right >> 2).wrapping_sub(left >> 2) + 1;
+                    let tile_height = (bottom >> 2).wrapping_sub(top >> 2) + 1;
+
+                    // TODO simplify and just copy stride?
+                    let tile_bytes_per_row = ((tile_width * texel_bits as u16 + 7) & !7) / 8; // Round up to byte alignment to not miss any 4-bit values
+
+                    let tile_stride = slot.tile.stride() as u32;
 
                     let mut ram_address = s.dp.state.texture.ram_address().value()
-                        + ((top as u32 * image_width) + left as u32) * pixel_bits as u32 / 8;
+                        + ((top as u32 * image_width) + left as u32) * texel_bits as u32 / 8; // TODO rounding
 
                     // Copy each row
+                    // TODO 4 bits formats: last 4bits copied when they should not sometimes?
 
                     let mut tmem_address = slot.tile.tmem_address_byte() as u32;
 
-                    let tile_stride = slot.tile.tile_stride() as u32;
+                    // log::error!(
+                    //     "Loading tile: {}, {}, {}, {}, {}",
+                    //     tile_width,
+                    //     tile_height,
+                    //     tile_stride,
+                    //     texel_bits,
+                    //     tile_bytes_per_row
+                    // );
 
-                    for _ in 0..height {
+                    for _row in 0..tile_height {
                         s.ram.read_block(
                             RamLocation::from_absolute(ram_address),
-                            tile_stride as usize, // TODO or width?
+                            tile_bytes_per_row as usize,
                             |ram_data| {
                                 write_block(ram_data, &mut s.dp.tmem, tmem_address as usize);
                             },
@@ -696,23 +703,23 @@ impl Dp {
                     let right = data.lower_right_x();
                     let bottom = data.lower_right_y();
 
-                    s.video_renderer.push_quad(
-                        [
+                    s.video_renderer.push_command(video::Command::PushQuad {
+                        vertices: [
                             coord(left, bottom),
                             coord(left, top),
                             coord(right, top),
                             coord(right, bottom),
                         ],
-                        QuadFill::Color {
+                        fill: QuadFill::Color {
                             color: s.dp.state.fill_color,
                         },
-                    );
+                    });
                 }
 
                 Command::TextureRectangle(data) => {
                     // Push the texture to the renderer
 
-                    let slot = &s.dp.state.tile_slots[data.tile().value() as usize]; // Convert to RGBA
+                    let slot = &s.dp.state.tile_slots[data.tile().value() as usize];
 
                     let left = slot.size.upper_left_x().value();
                     let right = slot.size.lower_right_x().value();
@@ -722,209 +729,268 @@ impl Dp {
                     debug_assert!(left < right);
                     debug_assert!(top < bottom);
 
-                    let width = ((right >> 2).wrapping_sub(left >> 2) + 1) as usize;
-                    let height = ((bottom >> 2).wrapping_sub(top >> 2) + 1) as usize;
+                    let tile_width = ((right >> 2).wrapping_sub(left >> 2) + 1) as usize;
+                    let tile_height = ((bottom >> 2).wrapping_sub(top >> 2) + 1) as usize;
+                    let tile_stride = slot.tile.stride();
 
-                    let pixel_bits = slot.tile.pixel_size().bits();
-                    let bits_to_copy = (width * height * pixel_bits + 8) & !7; // Round up to byte alignment to not miss any 4-bit values
-                    let bytes_to_copy = bits_to_copy / 8;
+                    let mut rgba: Vec<u8> = Vec::with_capacity(tile_width * tile_height * 4); // TODO allocate once? stack?
 
-                    // TODO allocate once? stack?
-                    let mut rgba: Vec<u8> = Vec::with_capacity(width * height * 4);
+                    // We copy rows individually to account for the tile's stride which can be different from its width
 
-                    read_block(
-                        &s.dp.tmem,
-                        slot.tile.tmem_address_byte(),
-                        bytes_to_copy,
-                        |tmem_data| {
-                            match (slot.tile.format(), slot.tile.pixel_size()) {
-                                (ImageFormat::RGBA, PixelSize::B16) => {
-                                    for color_bytes in tmem_data.chunks_exact(2) {
-                                        let color16 = ((color_bytes[0] as u16) << 8)
-                                            | (color_bytes[1] as u16);
+                    let mut row_address = slot.tile.tmem_address_byte();
 
-                                        rgba.push(b5_to_b8(color16 >> 11));
-                                        rgba.push(b5_to_b8(color16 >> 6));
-                                        rgba.push(b5_to_b8(color16 >> 1));
-                                        rgba.push(0xFF); // TODO
-                                    }
-                                }
+                    for _row in 0..tile_height {
+                        match (slot.tile.format(), slot.tile.texel_size()) {
+                            (ImageFormat::RGBA, TexelSize::B16) => {
+                                // 2 bytes per texel: 5 bits red, 5 bits green, 5 bits blue, 1 bit alpha
 
-                                (ImageFormat::RGBA, PixelSize::B32) => {
-                                    rgba.extend_from_slice(tmem_data);
-                                }
+                                let bytes_per_row = tile_width * 2;
 
-                                (ImageFormat::ColorIndexed, PixelSize::B4) => {
-                                    let palette_index = slot.tile.palette().value() as usize;
-
-                                    let palette_offset = 0x800 + (palette_index << 4);
-
-                                    for byte in tmem_data {
-                                        // TODO use palette index param?
-
-                                        let hi = (*byte >> 4) as usize;
-
-                                        let color16 = ((s.dp.tmem[0x800 + hi] as u16) << 8)
-                                            | (s.dp.tmem[0x800 + hi + 1] as u16);
-
-                                        rgba.push(b5_to_b8(color16 >> 11));
-                                        rgba.push(b5_to_b8(color16 >> 6));
-                                        rgba.push(b5_to_b8(color16 >> 1));
-                                        rgba.push(0xFF); // TODO
-
-                                        let lo = (*byte & 0x0F) as usize;
-
-                                        let color16 = ((s.dp.tmem[0x800 + lo] as u16) << 8)
-                                            | (s.dp.tmem[0x800 + lo + 1] as u16);
-
-                                        rgba.push(b5_to_b8(color16 >> 11));
-                                        rgba.push(b5_to_b8(color16 >> 6));
-                                        rgba.push(b5_to_b8(color16 >> 1));
-                                        rgba.push(0xFF); // TODO
-                                    }
-                                }
-
-                                (ImageFormat::ColorIndexed, PixelSize::B8) => {
-                                    for palette_index in tmem_data {
-                                        let palette_index = *palette_index as usize;
-
-                                        // TODO use palette index param?
-
-                                        let color16 = ((s.dp.tmem[0x800 + palette_index] as u16)
-                                            << 8)
-                                            | (s.dp.tmem[0x800 + palette_index + 1] as u16);
-
-                                        rgba.push(b5_to_b8(color16 >> 11));
-                                        rgba.push(b5_to_b8(color16 >> 6));
-                                        rgba.push(b5_to_b8(color16 >> 1));
-                                        rgba.push(0xFF); // TODO
-                                    }
-                                }
-
-                                (ImageFormat::IntensityAlpha, PixelSize::B4) => {
-                                    for mut byte in tmem_data.iter().copied() {
-                                        // 3-bit intensity, 1-bit alpha
-
-                                        for _ in 0..2 {
-                                            let half = byte & 0x0F;
-                                            let i = ((half >> 1) & 7) * 255 / 7;
-                                            let a = (half & 1) * 255;
-
-                                            rgba.push(i);
-                                            rgba.push(i);
-                                            rgba.push(i);
-                                            rgba.push(a);
-
-                                            byte >>= 4;
-                                        }
-                                    }
-                                }
-
-                                (ImageFormat::IntensityAlpha, PixelSize::B8) => {
-                                    for byte in tmem_data {
-                                        // 4-bit intensity, 4-bit alpha
-
-                                        let i = (*byte >> 4) * 255 / 15;
-                                        let a = (*byte & 0x0F) * 255 / 15;
-
-                                        rgba.push(i);
-                                        rgba.push(i);
-                                        rgba.push(i);
-                                        rgba.push(a);
-                                    }
-                                }
-
-                                (ImageFormat::IntensityAlpha, PixelSize::B16) => {
-                                    for bytes in tmem_data.chunks_exact(2) {
-                                        // 8-bit intensity, 8-bit alpha
-
-                                        let i = bytes[0];
-                                        let a = bytes[1];
-
-                                        rgba.push(i);
-                                        rgba.push(i);
-                                        rgba.push(i);
-                                        rgba.push(a);
-                                    }
-                                }
-
-                                (ImageFormat::Intensity, PixelSize::B4)
-                                | (ImageFormat::Intensity2, PixelSize::B4)
-                                | (ImageFormat::Intensity3, PixelSize::B4)
-                                | (ImageFormat::Intensity4, PixelSize::B4) => {
-                                    for byte in tmem_data {
-                                        let hi = *byte & 0xF0;
-                                        rgba.push(hi);
-                                        rgba.push(hi);
-                                        rgba.push(hi);
-                                        rgba.push(hi);
-
-                                        let lo = (*byte & 0x0F) << 4;
-                                        rgba.push(lo);
-                                        rgba.push(lo);
-                                        rgba.push(lo);
-                                        rgba.push(lo);
-                                    }
-                                }
-
-                                (ImageFormat::Intensity, PixelSize::B8)
-                                | (ImageFormat::Intensity2, PixelSize::B8)
-                                | (ImageFormat::Intensity3, PixelSize::B8)
-                                | (ImageFormat::Intensity4, PixelSize::B8) => {
-                                    for byte in tmem_data {
-                                        rgba.push(*byte);
-                                        rgba.push(*byte);
-                                        rgba.push(*byte);
-                                        rgba.push(*byte);
-                                    }
-                                }
-
-                                _ => panic!(
-                                    "Unsupported {:?} / {:?} format",
-                                    slot.tile.format(),
-                                    slot.tile.pixel_size()
-                                ),
+                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
+                                    rgba.extend(
+                                        tmem.chunks_exact(2)
+                                            .flat_map(|texel| rgba5551_to_8888(texel[0], texel[1])),
+                                    );
+                                });
                             }
-                        },
-                    );
 
-                    // Remove the extra 4-bit color that might have slipped through due to rounding up to byte alignment
+                            (ImageFormat::RGBA, TexelSize::B32) => {
+                                // 4 bytes per texel: 8 bits red, 8 bits green, 8 bits blue, 8 bits alpha
 
-                    rgba.truncate(width * height * 4);
+                                let bytes_per_row = tile_width * 4;
 
-                    s.video_renderer.push_tile(
-                        slot.tile.tile().value(),
+                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
+                                    rgba.extend_from_slice(tmem);
+                                });
+                            }
+
+                            (ImageFormat::ColorIndexed, TexelSize::B4) => {
+                                // 4 bits per texel: 4-bit color index into one of the 16-bit palettes
+
+                                let bytes_per_row = tile_width.div_ceil(2);
+
+                                let palette_offset =
+                                    0x800 + (slot.tile.palette().value() as usize) * 16;
+
+                                // TODO optim: convert palettes on LoadTLUT? also when writing tex in case games do crazy hacks?
+
+                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
+                                    rgba.extend(
+                                        tmem.iter()
+                                            // Split each byte into two 4-bit texels
+                                            .flat_map(|byte| [byte & 0xF0 >> 4, byte & 0x0F])
+                                            // Convert each texel to RGBA
+                                            .flat_map(|color_index| {
+                                                let color_offset =
+                                                    palette_offset + (color_index as usize) * 2;
+
+                                                rgba5551_to_8888(
+                                                    s.dp.tmem[color_offset],
+                                                    s.dp.tmem[color_offset + 1],
+                                                )
+                                            }),
+                                    );
+                                });
+
+                                // If the tile width is odd, we pushed an extraneous 4-bit entry last, so remove it
+
+                                if tile_width & 1 != 0 {
+                                    for _ in 0..4 {
+                                        rgba.pop();
+                                    }
+                                }
+                            }
+
+                            (ImageFormat::ColorIndexed, TexelSize::B8) => {
+                                // 1 byte per texel: 8-bit color index into the full 16-bit palette
+
+                                let bytes_per_row = tile_width;
+
+                                let palette_offset = 0x800;
+
+                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
+                                    rgba.extend(tmem.iter().flat_map(|color_index| {
+                                        let color_offset =
+                                            palette_offset + (*color_index as usize) * 2;
+
+                                        rgba5551_to_8888(
+                                            s.dp.tmem[color_offset],
+                                            s.dp.tmem[color_offset + 1],
+                                        )
+                                    }));
+                                });
+                            }
+
+                            (ImageFormat::IntensityAlpha, TexelSize::B4) => {
+                                // 4 bits per texel: 3 bits intensity, 1 bit alpha
+
+                                let bytes_per_row = tile_width.div_ceil(2);
+
+                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
+                                    rgba.extend(
+                                        tmem.iter()
+                                            // Split each byte into two 4-bit texels
+                                            .flat_map(|byte| [byte & 0xF0 >> 4, byte & 0x0F])
+                                            // Convert each texel to RGBA
+                                            .flat_map(|texel| {
+                                                let intensity = ((texel >> 1) & 7) * 255 / 7; // TODO optim?
+                                                let alpha = (texel & 1) * 255; // TODO optim?
+
+                                                [intensity, intensity, intensity, alpha]
+                                            }),
+                                    );
+                                });
+
+                                // If the tile width is odd, we pushed an extraneous 4-bit entry last, so remove it
+
+                                if tile_width & 1 != 0 {
+                                    for _ in 0..4 {
+                                        rgba.pop();
+                                    }
+                                }
+                            }
+
+                            (ImageFormat::IntensityAlpha, TexelSize::B8) => {
+                                // 1 byte per texel: 4 bits intensity, 4 bits alpha
+
+                                let bytes_per_row = tile_width;
+
+                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
+                                    rgba.extend(tmem.iter().flat_map(|texel| {
+                                        let intensity = (*texel >> 4) * 255 / 15; // TODO optim?
+                                        let alpha = (*texel & 0x0F) * 255 / 15; // TODO optim?
+
+                                        [intensity, intensity, intensity, alpha]
+                                    }));
+                                });
+                            }
+
+                            (ImageFormat::IntensityAlpha, TexelSize::B16) => {
+                                // 2 bytes per texel: 8-bit intensity, 8-bit alpha
+
+                                let bytes_per_row = tile_width * 2;
+
+                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
+                                    rgba.extend(tmem.chunks_exact(2).flat_map(|texel| {
+                                        let intensity = texel[0];
+                                        let alpha = texel[1];
+
+                                        [intensity, intensity, intensity, alpha]
+                                    }));
+                                });
+                            }
+
+                            (ImageFormat::Intensity, TexelSize::B4)
+                            | (ImageFormat::Intensity2, TexelSize::B4)
+                            | (ImageFormat::Intensity3, TexelSize::B4)
+                            | (ImageFormat::Intensity4, TexelSize::B4) => {
+                                // 4 bits of intensity per texel
+
+                                let bytes_per_row = tile_width.div_ceil(2);
+
+                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
+                                    rgba.extend(
+                                        tmem.iter()
+                                            // Split each byte into two 4-bit texels
+                                            .flat_map(|byte| [byte & 0xF0 >> 4, byte & 0x0F])
+                                            // Convert each texel to RGBA
+                                            .flat_map(|texel| {
+                                                let intensity = (texel << 4) | texel;
+
+                                                [intensity, intensity, intensity, intensity]
+                                            }),
+                                    );
+                                });
+
+                                // If the tile width is odd, we pushed an extraneous 4-bit entry last, so remove it
+
+                                if tile_width & 1 != 0 {
+                                    for _ in 0..4 {
+                                        rgba.pop();
+                                    }
+                                }
+                            }
+
+                            (ImageFormat::Intensity, TexelSize::B8)
+                            | (ImageFormat::Intensity2, TexelSize::B8)
+                            | (ImageFormat::Intensity3, TexelSize::B8)
+                            | (ImageFormat::Intensity4, TexelSize::B8) => {
+                                // 1 byte per texel: 8-bit intensity
+
+                                let bytes_per_row = tile_width;
+
+                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
+                                    rgba.extend(tmem.iter().flat_map(|intensity| {
+                                        [*intensity, *intensity, *intensity, *intensity]
+                                    }));
+                                });
+                            }
+
+                            _ => panic!(
+                                "Unsupported {:?} / {:?} format",
+                                slot.tile.format(),
+                                slot.tile.texel_size()
+                            ),
+                        }
+
+                        row_address += tile_stride;
+                    }
+
+                    debug_assert_eq!(rgba.len(), tile_width * tile_height * 4);
+
+                    s.video_renderer.push_command(video::Command::PushTile {
+                        slot: slot.tile.tile().value(),
                         rgba,
-                        width as u32,
-                        height as u32,
-                    );
+                        width: tile_width as u32,
+                        height: tile_height as u32,
+                    });
 
                     // Push the geometry to the renderer
 
-                    let left = data.top_left_x();
-                    let top = data.top_left_y();
-                    let right = data.bottom_right_x();
-                    let bottom = data.bottom_right_y();
-
                     let tile_index = slot.tile.tile().value();
 
-                    const UVS: [[f32; 2]; 4] = [[0.0, 1.0], [0.0, 0.0], [1.0, 0.0], [1.0, 1.0]];
+                    let rect_left = data.top_left_x();
+                    let rect_top = data.top_left_y();
+                    let rect_right = data.bottom_right_x();
+                    let rect_bottom = data.bottom_right_y();
 
-                    const FLIPPED_UVS: [[f32; 2]; 4] =
-                        [[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]];
+                    assert!(rect_left < rect_right);
+                    assert!(rect_top < rect_bottom);
 
-                    s.video_renderer.push_quad(
-                        [
-                            coord(left, bottom),
-                            coord(left, top),
-                            coord(right, top),
-                            coord(right, bottom),
+                    let tile_s_start = data.top_left_s() as f32 / 32.0 / tile_width as f32;
+                    let tile_t_start = data.top_left_t() as f32 / 32.0 / tile_height as f32;
+
+                    let tile_dsdx = data.dsdx() as i16 as f32 / 1024.0;
+                    let tile_dtdy = data.dtdy() as i16 as f32 / 1024.0;
+
+                    let tile_s_end = tile_s_start + tile_dsdx;
+                    let tile_t_end = tile_t_start + tile_dtdy;
+
+                    let uvs = [
+                        [tile_s_start, tile_t_start],
+                        [tile_s_end, tile_t_start],
+                        [tile_s_end, tile_t_end],
+                        [tile_s_start, tile_t_end],
+                    ];
+
+                    // TODO flip?
+
+                    if data.flip() {
+                        panic!("Rectangle flip");
+                    }
+
+                    s.video_renderer.push_command(video::Command::PushQuad {
+                        vertices: [
+                            coord(rect_left, rect_top),
+                            coord(rect_right, rect_top),
+                            coord(rect_right, rect_bottom),
+                            coord(rect_left, rect_bottom),
                         ],
-                        QuadFill::Texture {
+                        fill: QuadFill::Texture {
                             tile_slot: tile_index,
-                            uvs: if data.flip() { FLIPPED_UVS } else { UVS },
+                            uvs,
                         },
-                    );
+                    });
                 }
 
                 _ => {}
@@ -935,7 +1001,7 @@ impl Dp {
         // (we should be here because we got a SYNC FULL command)
 
         if s.dp.decoded_commands.len() > 0 {
-            s.video_renderer.render();
+            s.video_renderer.push_command(video::Command::Render);
         }
 
         // Clear the command queue
@@ -957,12 +1023,12 @@ fn convert_color(color: RGBA) -> [f32; 4] {
 
 fn coord(x: u12, y: u12) -> [f32; 2] {
     // 10.2 fixed point to float
-    // TODO keep frac part
 
     let x = (x.value() >> 2) as f32;
-    let y = (y.value() >> 2) as f32;
+    let y = (y.value() >> 2) as f32; // TODO div to keep frac
 
     // To NDC
+    // TODO just handle that in renderer?
 
     let x = (x / 320.0) * 2.0 - 1.0;
     let y = -((y / 240.0) * 2.0 - 1.0); // flip Y
@@ -1019,20 +1085,20 @@ enum ImageFormat {
 
 #[bitenum(u2, exhaustive = true)]
 #[derive(Debug)]
-enum PixelSize {
+enum TexelSize {
     B4 = 0,
     B8 = 1,
     B16 = 2,
     B32 = 3,
 }
 
-impl PixelSize {
+impl TexelSize {
     pub fn bits(&self) -> usize {
         match self {
-            PixelSize::B4 => 4,
-            PixelSize::B8 => 8,
-            PixelSize::B16 => 16,
-            PixelSize::B32 => 32,
+            TexelSize::B4 => 4,
+            TexelSize::B8 => 8,
+            TexelSize::B16 => 16,
+            TexelSize::B32 => 32,
         }
     }
 }
@@ -1055,7 +1121,7 @@ pub struct SetTextureImage {
     format: ImageFormat,
 
     #[bits(51..=52, r)]
-    pixel_size: PixelSize,
+    texel_size: TexelSize,
 
     /// Width in pixels of the texture in RAM, minus one.
     #[bits(32..=41, r)]
@@ -1094,20 +1160,21 @@ pub struct TextureRectangle {
     #[bit(120, r)]
     flip: bool,
 
+    // NOTE: the official RDP manual seems to be wrong, the bottom coordinates come first
     #[bits(108..=119, r)]
-    top_left_x: u12,
+    bottom_right_x: u12,
 
     #[bits(96..=107, r)]
-    top_left_y: u12,
+    bottom_right_y: u12,
 
     #[bits(88..=90, r)]
     tile: u3,
 
     #[bits(76..=87, r)]
-    bottom_right_x: u12,
+    top_left_x: u12,
 
     #[bits(64..=75, r)]
-    bottom_right_y: u12,
+    top_left_y: u12,
 
     #[bits(48..=63, r)]
     top_left_s: u16,
@@ -1146,7 +1213,7 @@ pub struct SetTile {
     format: ImageFormat,
 
     #[bits(51..=52, r)]
-    pixel_size: PixelSize,
+    texel_size: TexelSize,
 
     /// Tile stride in 64-bit words
     #[bits(41..=49, r)]
@@ -1188,7 +1255,7 @@ pub struct SetTile {
 
 impl SetTile {
     /// Returns the tile width in bytes, as it's defined in 64-bit words in the command.
-    pub fn tile_stride(&self) -> usize {
+    pub fn stride(&self) -> usize {
         (self.line_size().value() as usize) << 3
     }
 }
@@ -1262,6 +1329,15 @@ pub struct RGBA {
 }
 
 // TODO used elsewhere, make common
-fn b5_to_b8(value: u16) -> u8 {
-    (((value & 0x1F) * 255) / 31) as u8
+fn b5_to_b8(value: u8) -> u8 {
+    (((value as u16 & 0x1F) * 255) / 31) as u8 // TODO correct? optim?
+}
+
+pub fn rgba5551_to_8888(hi: u8, lo: u8) -> [u8; 4] {
+    [
+        b5_to_b8(hi >> 3),
+        b5_to_b8(((hi & 7) << 2) | (lo >> 6)),
+        b5_to_b8((lo >> 1) & 0x1F),
+        0xFF, // TODO
+    ]
 }

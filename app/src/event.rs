@@ -1,5 +1,4 @@
 use n64_core::{
-    ai::Ai,
     breakpoints::Breakpoints,
     cop0::Cop0,
     cop1::Cop1,
@@ -14,8 +13,8 @@ use n64_core::{
 use crate::ui::{
     Status,
     widgets::{
-        ai_widget::AiUpdate, cpu_widget::CpuUpdate, framebuffer_widget::FramebufferUpdate,
-        memory_widget::MemoryUpdate, sp_widget::SpUpdate,
+        ai_widget::AiUpdate, cpu_widget::CpuUpdate, dp_widget::DpUpdate,
+        framebuffer_widget::FramebufferUpdate, memory_widget::MemoryUpdate, sp_widget::SpUpdate,
     },
 };
 
@@ -32,7 +31,7 @@ pub enum Event {
     Ai(AiUpdate),
     Pi(Pi),
     Sp(SpUpdate),
-    Dp([u32; 8]),
+    Dp(DpUpdate),
     Si(Si),
     Tlb(Tlb),
     Framebuffer(FramebufferUpdate),

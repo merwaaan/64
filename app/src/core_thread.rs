@@ -10,10 +10,10 @@ use n64_core::{
     sp,
     system::{Address, System},
     value::Value,
-    vi::Vi,
 };
 
 use crate::ui::widgets::ai_widget::AiUpdate;
+use crate::ui::widgets::dp_widget::DpUpdate;
 use crate::ui::widgets::memory_widget::MemoryUpdate;
 use crate::{
     command::Command,
@@ -280,19 +280,10 @@ impl CoreThread {
 
                                     let instruction = u32::read_mem(&system.sp.mem, 0x1000 + addr);
                                     let opcode = Opcode(instruction);
-                                    let handler = sp::instructions::decode(opcode);
 
-                                    if let Some((_, disassemble)) = handler {
-                                        (addr, disassemble(system, opcode))
-                                    } else {
-                                        (
-                                            addr,
-                                            Disassembly::new(format!(
-                                                "<UNKNOWN {:08X}>",
-                                                instruction
-                                            )),
-                                        )
-                                    }
+                                    let (_execute, disassemble) = sp::instructions::decode(opcode);
+
+                                    (addr, disassemble(system, opcode))
                                 })
                                 .collect();
 
@@ -329,7 +320,11 @@ impl CoreThread {
                         }
 
                         Data::Dp => {
-                            events.push(Event::Dp(system.dp.regs));
+                            events.push(Event::Dp(DpUpdate {
+                                regs: system.dp.regs,
+                                tmem: system.dp.tmem,
+                                atlas_texture: system.video_renderer.get_atlas_texture(),
+                            }));
                         }
 
                         Data::Si => {
@@ -358,20 +353,9 @@ impl CoreThread {
                         Data::Framebuffer => {
                             //let (data, width, height) = Vi::extract_framebuffer(system);
 
-                            let (data, width, height) = system.video_renderer.get_frame();
+                            let frame = system.video_renderer.get_frame();
 
-                            // if data.len() > 0 {
-                            //     log::debug!(
-                            //         "Framebuffer data: {:?} {:?}",
-                            //         data.len(),
-                            //         &data[..100]
-                            //     );
-                            // }
-                            events.push(Event::Framebuffer(FramebufferUpdate {
-                                width,
-                                height,
-                                data,
-                            }));
+                            events.push(Event::Framebuffer(FramebufferUpdate(frame)));
                         }
                     }
                 }

@@ -1,6 +1,7 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use egui::{ColorImage, Context, TextureFilter, TextureHandle, TextureOptions};
+use n64_core::rendering::video::Frame;
 
 use crate::{
     command::Command,
@@ -13,11 +14,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub struct FramebufferUpdate {
-    pub width: usize,
-    pub height: usize,
-    pub data: Vec<u8>,
-}
+pub struct FramebufferUpdate(pub Arc<Frame>);
 
 #[derive(Default)]
 pub struct FramebufferWidget {
@@ -45,8 +42,10 @@ impl Widget for FramebufferWidget {
         if let Event::Framebuffer(update) = event {
             self.last_update = Some(update.clone());
 
-            let image =
-                ColorImage::from_rgba_unmultiplied([update.width, update.height], &update.data);
+            let image = ColorImage::from_rgba_unmultiplied(
+                [update.0.width, update.0.height],
+                &update.0.rgba,
+            );
 
             let options = TextureOptions {
                 magnification: TextureFilter::Nearest,
@@ -70,7 +69,7 @@ impl Widget for FramebufferWidget {
 impl ChildWidget for FramebufferWidget {
     fn show(&mut self, ui: &mut egui::Ui) -> Vec<Command> {
         if let Some(last_update) = &self.last_update {
-            Text::new(format!("{}x{}", last_update.width, last_update.height))
+            Text::new(format!("{}x{}", last_update.0.width, last_update.0.height))
                 .color(colors::LIGHT)
                 .show(ui);
         }

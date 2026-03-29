@@ -158,6 +158,8 @@ impl ChildWidget for MemoryWidget {
 
         let address_target = parse_hex(&self.address_input).map(|addr| addr as u32);
 
+        // TODO abstract away this? use in other widgets
+
         if let Some(last_update) = &self.last_update {
             for (chunk_index, chunk) in last_update.data.chunks(16).enumerate() {
                 let offset = (chunk_index * 16) as u32;

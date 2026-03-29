@@ -196,17 +196,9 @@ impl Sp {
 
         let opcode = Opcode(instruction);
 
-        let handler = instructions::decode(opcode);
+        let (execute, _disassemble) = instructions::decode(opcode);
 
-        let result = match handler {
-            Some((execute, _)) => execute(s, opcode),
-            None => {
-                panic!(
-                    "Unknown SP instruction {:08X} at {:08X}",
-                    instruction, s.sp.pc
-                );
-            }
-        };
+        let result = execute(s, opcode);
 
         Self::advance_pc(s);
 

@@ -1708,7 +1708,7 @@ pub fn swc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
 }
 
 fn sync_execute(_s: &mut System, _op: Opcode) -> InstructionResult {
-    // TODO??
+    // TODO?
 
     Ok(None)
 }

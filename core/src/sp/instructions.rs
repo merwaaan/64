@@ -33,9 +33,9 @@ pub type DecodedInstruction = (ExecuteFn, DisassembleFn);
 
 // Create a big jumptable with regs pre-decoded?
 
-pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
+pub fn decode(opcode: Opcode) -> DecodedInstruction {
     match opcode.group() {
-        0b000000 => Some(match opcode.0 & 0x3F {
+        0b000000 => match opcode.0 & 0x3F {
             0x00 => inst!(sll),
             0x02 => inst!(srl),
             0x03 => inst!(sra),
@@ -55,21 +55,21 @@ pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
             0x27 => inst!(nor),
             0x2A => inst!(slt),
             0x2B => inst!(sltu),
-            _ => return None,
-        }),
-        0b000001 => Some(match opcode.0 & 0x1F_0000 {
+            _ => RESERVED_INSTRUCTION,
+        },
+        0b000001 => match opcode.0 & 0x1F_0000 {
             0x00_0000 => inst!(bltz),
             0x01_0000 => inst!(bgez),
             0x10_0000 => inst!(bltzal),
             0x11_0000 => inst!(bgezal),
-            _ => return None,
-        }),
-        0b010000 => Some(match opcode.0 & 0x03E0_0000 {
+            _ => RESERVED_INSTRUCTION,
+        },
+        0b010000 => match opcode.0 & 0x03E0_0000 {
             0x000_0000 => inst!(mfc0),
             0x080_0000 => inst!(mtc0),
-            _ => return None,
-        }),
-        0b010010 => Some(match (opcode.0 >> 21) & 0x1F {
+            _ => RESERVED_INSTRUCTION,
+        },
+        0b010010 => match (opcode.0 >> 21) & 0x1F {
             0x00 => inst!(mfc2),
             0x02 => inst!(cfc2),
             0x04 => inst!(mtc2),
@@ -119,10 +119,10 @@ pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
                 0x35 => inst!(vrsql),
                 0x36 => inst!(vrsqh),
                 0x37 => inst!(vnop),
-                _ => return None,
+                _ => RESERVED_INSTRUCTION,
             },
-        }),
-        _ => Some(match opcode.group() {
+        },
+        _ => match opcode.group() {
             // TODO redundant match???
             0x02 => inst!(j),
             0x03 => inst!(jal),
@@ -160,7 +160,7 @@ pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
                 0x09 => inst!(lfv),
                 0x0A => inst!(lwv),
                 0x0B => inst!(ltv),
-                _ => return None,
+                _ => RESERVED_INSTRUCTION,
             },
             0x3A => match (opcode.0 >> 11) & 0x1F {
                 0x00 => inst!(sbv),
@@ -175,12 +175,14 @@ pub fn decode(opcode: Opcode) -> Option<DecodedInstruction> {
                 0x09 => inst!(sfv),
                 0x0A => inst!(swv), // TODO ? sme as suv in rsp manual
                 0x0B => inst!(stv),
-                _ => return None,
+                _ => RESERVED_INSTRUCTION,
             },
-            _ => return None,
-        }),
+            _ => RESERVED_INSTRUCTION,
+        },
     }
 }
+
+// TODO to opcode struct
 
 fn offset_addr(s: &System, op: Opcode) -> u12 {
     let base = s.sp.regs2.read(op.base());
@@ -213,15 +215,6 @@ fn vbase(op: Opcode) -> usize {
 fn voffset(op: Opcode, shift: usize) -> usize {
     ((op.0 & 0x7F) as usize) << shift
 }
-
-// enum Element {
-//     All,
-//     Quarter(u1),
-//     Half(u2),
-//     Single(u3),
-// }
-
-// impl Element {} // TODO rm
 
 fn broadcast(e: u8, v: i16x8) -> i16x8 {
     debug_assert!(e < 16);
@@ -276,7 +269,7 @@ macro_rules! placeholder {
     };
 }
 
-/// Helper to reuse the disassembly function from the CPU module.
+/// Helper to reuse the disassembly function from the CPU module, as many instructions are shared.
 macro_rules! reuse_cpu_disassembly {
     ($name:ident) => {
         paste::paste! {
@@ -304,17 +297,17 @@ macro_rules! disassembly_vd_vs_vte {
     };
 }
 
-fn vec_execute(_s: &mut System, _op: Opcode) -> InstructionResult {
-    // TODO temp
-    //log::error!(" SP: UNIMPLEMENTED VEC {:08X}", op.0);
+fn reserved_execute(_s: &mut System, op: Opcode) -> InstructionResult {
+    log::warn!("SP: reserved instruction: {:08X}", op.0);
 
     None
 }
 
-fn vec_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    // TODO temp
-    Disassembly::new(format!("<UNIMPLEMENTED VEC> {:08X}", op.0))
+fn reserved_disassemble(_s: &System, op: Opcode) -> Disassembly {
+    Disassembly::new(format!("<RESERVED {:08X}>", op.0))
 }
+
+pub const RESERVED_INSTRUCTION: DecodedInstruction = (reserved_execute, reserved_disassemble);
 
 fn add_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
     let rs = s.sp.regs2.read(op.rs());

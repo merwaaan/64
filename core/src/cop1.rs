@@ -2,7 +2,7 @@ use arbitrary_int::prelude::*;
 use bitbybit::{bitenum, bitfield};
 use strum::Display;
 
-use crate::{exception::Exception, registers::Reg64};
+use crate::registers::Reg64;
 
 #[derive(Debug, Display)]
 #[bitenum(u5)]

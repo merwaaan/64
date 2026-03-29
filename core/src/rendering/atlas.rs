@@ -74,8 +74,10 @@ impl Atlas {
         let cell = &self.cells[tile_index];
 
         [
-            (cell.x as f32) / (self.width as f32) + tile_uv[0] / (cell.width as f32),
-            (cell.y as f32) / (self.height as f32) + tile_uv[1] / (cell.height as f32),
+            (cell.x as f32) / (self.width as f32)
+                + tile_uv[0] * (cell.width as f32) / (self.width as f32),
+            (cell.y as f32) / (self.height as f32)
+                + tile_uv[1] * (cell.height as f32) / (self.height as f32),
         ]
     }
 }
