@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, HashSet},
     mem,
     sync::Arc,
     thread::{self, JoinHandle},
@@ -7,7 +8,7 @@ use std::{
 use arc_swap::ArcSwap;
 use crossbeam::channel::{Receiver, RecvError, Sender, unbounded};
 
-use crate::rendering::atlas::Atlas;
+use crate::rendering::tile_cache::Tile;
 
 #[derive(Debug)]
 pub struct Frame {
@@ -17,43 +18,20 @@ pub struct Frame {
     pub height: usize,
 }
 
-pub struct Texture {
-    pub data: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-}
-
-struct Triangle {
-    vertices: [[f32; 2]; 3],
-    fill: TriangleFillIndexed,
-}
-
 pub enum QuadFill {
     Color { color: [f32; 4] },
-    Texture { tile_slot: u8, uvs: [[f32; 2]; 4] },
+    Texture { tile_id: u64, uvs: [[f32; 2]; 4] },
 }
 
 pub enum TriangleFill {
     Color { colors: [[f32; 4]; 3] },
-    Texture { tile_slot: u8, uvs: [[f32; 2]; 3] },
-}
-
-enum TriangleFillIndexed {
-    Color {
-        colors: [[f32; 4]; 3],
-    },
-    Texture {
-        tile_index: usize,
-        uvs: [[f32; 2]; 3],
-    },
+    Texture { tile_id: u64, uvs: [[f32; 2]; 3] },
 }
 
 pub enum Command {
     PushTile {
-        slot: u8,
-        rgba: Vec<u8>,
-        width: u32,
-        height: u32,
+        tile_id: u64,
+        tile: Tile,
     },
     PushTriangle {
         vertices: [[f32; 2]; 3],
@@ -66,12 +44,23 @@ pub enum Command {
     Render,
 }
 
+struct Triangle {
+    vertices: [[f32; 2]; 3],
+    fill: TriangleFill,
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Debug)]
 struct GpuVertex {
     pos: [f32; 2],
     color: [f32; 4],
     uv: [f32; 2],
+}
+
+struct TileTexture {
+    tile: Tile,
+    texture: wgpu::Texture,
+    texture_view: wgpu::TextureView,
 }
 
 pub struct VideoRenderer {
@@ -84,8 +73,9 @@ pub struct VideoRenderer {
     /// Last frame received from the rendering thread
     last_frame: Arc<ArcSwap<Frame>>,
 
-    // TODO temp
-    atlas_texture_debug: Arc<ArcSwap<Frame>>,
+    ///
+    debug_tiles: Vec<(u64, Tile)>,
+    debug_tile_ids: HashSet<u64>,
 }
 
 impl VideoRenderer {
@@ -99,32 +89,34 @@ impl VideoRenderer {
             height: 0,
         })));
 
-        let atlas_texture_debug = Arc::new(ArcSwap::new(Arc::new(Frame {
-            index: 0,
-            rgba: vec![0; 1024 * 1024 * 4],
-            width: 1024,
-            height: 1024,
-        })));
-
         let thread_last_frame = last_frame.clone();
-        let thread_atlas_texture_debug = atlas_texture_debug.clone();
 
         let thread = thread::Builder::new()
             .name("Render".to_string())
             .spawn(move || {
-                render_thread(command_rx, thread_last_frame, thread_atlas_texture_debug);
+                render_thread(command_rx, thread_last_frame);
             })
             .expect("Failed to spawn render thread");
 
         Self {
             _thread: thread,
             command_tx,
+
             last_frame,
-            atlas_texture_debug,
+
+            debug_tiles: Vec::new(),
+            debug_tile_ids: HashSet::new(),
         }
     }
 
     pub fn push_command(&mut self, command: Command) {
+        if let Command::PushTile { tile_id, tile } = &command
+            && !self.debug_tile_ids.contains(tile_id)
+        {
+            self.debug_tiles.push((*tile_id, tile.clone()));
+            self.debug_tile_ids.insert(*tile_id);
+        }
+
         self.command_tx
             .send(command)
             .expect("Failed to send command to render thread");
@@ -134,28 +126,19 @@ impl VideoRenderer {
         self.last_frame.load_full()
     }
 
-    pub fn get_atlas_texture(&self) -> Arc<Frame> {
-        self.atlas_texture_debug.load_full()
+    pub fn get_debug_tiles(&self) -> &Vec<(u64, Tile)> {
+        &self.debug_tiles
     }
 }
 
-fn render_thread(
-    command_rx: Receiver<Command>,
-    last_frame: Arc<ArcSwap<Frame>>,
-    atlas_texture_debug: Arc<ArcSwap<Frame>>,
-) {
+fn render_thread(command_rx: Receiver<Command>, last_frame: Arc<ArcSwap<Frame>>) {
     let mut renderer = WgpuRenderer::new();
 
     loop {
         match command_rx.recv() {
             Ok(command) => match command {
-                Command::PushTile {
-                    slot,
-                    rgba,
-                    width,
-                    height,
-                } => {
-                    renderer.push_tile(slot, rgba, width, height);
+                Command::PushTile { tile_id, tile } => {
+                    renderer.push_tile(tile_id, tile);
                 }
 
                 Command::PushTriangle { vertices, fill } => {
@@ -167,10 +150,10 @@ fn render_thread(
                 }
 
                 Command::Render => {
-                    renderer.render(&last_frame, &atlas_texture_debug);
+                    renderer.render(&last_frame);
                 }
             },
-            Err(RecvError) => {
+            Err(e) => {
                 return;
             }
         }
@@ -187,14 +170,10 @@ struct WgpuRenderer {
     // depth_view: wgpu::TextureView,
     vertex_buffer: wgpu::Buffer,
 
-    atlas_texture: wgpu::Texture,
-    atlas_texture_view: wgpu::TextureView,
-    sampler: wgpu::Sampler,
-    bind_group_layout: wgpu::BindGroupLayout,
-
-    atlas_texture_debug: Vec<u8>,
+    sampler: wgpu::Sampler, // TODO mult?
 
     pipeline: wgpu::RenderPipeline,
+    bind_group_layout: wgpu::BindGroupLayout,
     readback_buffer: wgpu::Buffer,
 
     width: u32,
@@ -203,14 +182,18 @@ struct WgpuRenderer {
 
     triangle_queue: Vec<Triangle>,
 
-    tile_textures: Vec<Texture>,
-    last_tile_texture_texture_per_slot: [Option<usize>; 8],
+    neutral_texture: wgpu::Texture,
+    neutral_texture_view: wgpu::TextureView,
+
+    tile_textures: HashMap<u64, TileTexture>,
 }
 
 const ERROR_COLOR: [f32; 4] = [1.0, 0.078, 0.576, 1.0]; // deeppink
 
 impl WgpuRenderer {
     pub fn new() -> Self {
+        // Device
+
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
@@ -226,6 +209,8 @@ impl WgpuRenderer {
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                 .expect("Failed to request device");
+
+        // Color target
 
         let width = 512;
         let height = 512;
@@ -264,6 +249,8 @@ impl WgpuRenderer {
 
         // let depth_view = depth_target.create_view(&wgpu::TextureViewDescriptor::default());
 
+        // Vertex buffer
+
         const MAX_VERTICES: u64 = 10_000;
 
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -273,34 +260,17 @@ impl WgpuRenderer {
             mapped_at_creation: false,
         });
 
-        const ATLAS_SIZE: u32 = 1024;
-
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("texture"),
-            size: wgpu::Extent3d {
-                width: ATLAS_SIZE,
-                height: ATLAS_SIZE,
-                depth_or_array_layers: 1,
+        let (neutral_texture, neutral_texture_view) = create_texture(
+            &Tile {
+                width: 1,
+                height: 1,
+                rgba: Arc::new(vec![0xFF; 4]),
             },
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            mip_level_count: 1,
-            sample_count: 1,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+            &device,
+            &queue,
+        );
 
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("texture_view"),
-            format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
-            dimension: Some(wgpu::TextureViewDimension::D2),
-            aspect: wgpu::TextureAspect::All,
-            base_mip_level: 0,
-            mip_level_count: None,
-            base_array_layer: 0,
-            array_layer_count: None,
-            ..Default::default()
-        });
+        // Pipeline
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("texture_layout"),
@@ -326,8 +296,8 @@ impl WgpuRenderer {
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_u: wgpu::AddressMode::Repeat, // TODO?
+            address_mode_v: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
@@ -362,19 +332,13 @@ impl WgpuRenderer {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
-                //strip_index_format: None,
-                //front_face: wgpu::FrontFace::Ccw,
-                //cull_mode: None,
-                //unclipped_depth: false,
-                //polygon_mode: wgpu::PolygonMode::Fill,
-                //conservative: false,
                 ..Default::default()
             },
             depth_stencil: None,
@@ -394,8 +358,6 @@ impl WgpuRenderer {
             mapped_at_creation: false,
         });
 
-        // Receive commands
-
         Self {
             device,
             queue,
@@ -406,13 +368,10 @@ impl WgpuRenderer {
             // depth_view,
             vertex_buffer,
 
-            atlas_texture: texture,
-            atlas_texture_view: texture_view,
-            atlas_texture_debug: vec![0; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize],
             sampler,
-            bind_group_layout,
 
             pipeline,
+            bind_group_layout,
             readback_buffer: readback,
 
             width,
@@ -421,46 +380,30 @@ impl WgpuRenderer {
 
             triangle_queue: Vec::new(),
 
-            tile_textures: Vec::new(),
-            last_tile_texture_texture_per_slot: [None; 8],
+            tile_textures: HashMap::new(),
+
+            neutral_texture,
+            neutral_texture_view,
         }
     }
 
-    pub fn push_tile(&mut self, tile_slot: u8, rgba: Vec<u8>, width: u32, height: u32) {
-        self.tile_textures.push(Texture {
-            data: rgba,
-            width,
-            height,
-        });
+    pub fn push_tile(&mut self, tile_id: u64, tile: Tile) {
+        if !self.tile_textures.contains_key(&tile_id) {
+            let (texture, texture_view) = create_texture(&tile, &self.device, &self.queue);
 
-        self.last_tile_texture_texture_per_slot[tile_slot as usize] =
-            Some(self.tile_textures.len() - 1);
+            self.tile_textures.insert(
+                tile_id,
+                TileTexture {
+                    tile,
+                    texture,
+                    texture_view,
+                },
+            );
+        }
     }
 
     pub fn push_triangle(&mut self, vertices: [[f32; 2]; 3], fill: TriangleFill) {
-        let fill_indexed = match fill {
-            TriangleFill::Color { colors } => TriangleFillIndexed::Color { colors },
-
-            // Textured: associate the triangle with the last loaded texture corresponding to that slot
-            TriangleFill::Texture { tile_slot, uvs } => {
-                if let Some(tile_index) =
-                    self.last_tile_texture_texture_per_slot[tile_slot as usize]
-                {
-                    TriangleFillIndexed::Texture { tile_index, uvs }
-                } else {
-                    log::error!("Video renderer: texture slot {} not loaded", tile_slot);
-
-                    TriangleFillIndexed::Color {
-                        colors: [ERROR_COLOR; 3],
-                    }
-                }
-            }
-        };
-
-        self.triangle_queue.push(Triangle {
-            vertices,
-            fill: fill_indexed,
-        });
+        self.triangle_queue.push(Triangle { vertices, fill });
     }
 
     pub fn push_quad(&mut self, vertices: [[f32; 2]; 4], fill: QuadFill) {
@@ -479,16 +422,13 @@ impl WgpuRenderer {
                 },
             ),
 
-            QuadFill::Texture {
-                tile_slot: texture_slot,
-                uvs,
-            } => (
+            QuadFill::Texture { tile_id, uvs } => (
                 TriangleFill::Texture {
-                    tile_slot: texture_slot,
+                    tile_id,
                     uvs: [uvs[0], uvs[1], uvs[3]],
                 },
                 TriangleFill::Texture {
-                    tile_slot: texture_slot,
+                    tile_id,
                     uvs: [uvs[2], uvs[3], uvs[1]],
                 },
             ),
@@ -498,146 +438,18 @@ impl WgpuRenderer {
         self.push_triangle(triangle2_vertices, triangle2_fill);
     }
 
-    pub fn render(
-        &mut self,
-        last_frame: &Arc<ArcSwap<Frame>>,
-        atlas_texture_debug: &Arc<ArcSwap<Frame>>,
-    ) {
-        // let mut fake_data: Vec<u8> = vec![0; 1024 * 1024 * 4];
-        // for y in 0..1024 {
-        //     for x in 0..1024 {
-        //         let offset = y * 1024 * 4 + x * 4;
-        //         fake_data[offset + 0] = ((y as f32) / 1024.0 * 255.0) as u8;
-        //         fake_data[offset + 1] = ((x as f32) / 1024.0 * 255.0) as u8;
-        //         fake_data[offset + 3] = 0xFF;
-        //     }
-        // }
-
-        // self.queue.write_texture(
-        //     wgpu::TexelCopyTextureInfo {
-        //         texture: &self.atlas_texture,
-        //         mip_level: 0,
-        //         origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-        //         aspect: wgpu::TextureAspect::All,
-        //     },
-        //     &fake_data,
-        //     wgpu::TexelCopyBufferLayout {
-        //         offset: 0,
-        //         bytes_per_row: Some(4 * 1024),
-        //         rows_per_image: Some(1024),
-        //     },
-        //     wgpu::Extent3d {
-        //         width: 1024,
-        //         height: 1024,
-        //         depth_or_array_layers: 1,
-        //     },
-        // );
-
-        // Generate and upload the atlas texture
-
-        let atlas = Atlas::build(&self.tile_textures, 1024, 1024);
-
-        //log::warn!("atlas cells COUNT {:?}", atlas.cells().len());
-
-        for cell in atlas.cells() {
-            // log::warn!(
-            //     "cell {:?}, {:?}, {:?}, {:?}",
-            //     cell.x,
-            //     cell.y,
-            //     cell.width,
-            //     cell.height
-            // );
-
-            let tile_texture = &self.tile_textures[cell.tile_index];
-
-            self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.atlas_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d {
-                        x: cell.x,
-                        y: cell.y,
-                        z: 0,
-                    },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &tile_texture.data,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4 * cell.width),
-                    rows_per_image: Some(cell.height),
-                },
-                wgpu::Extent3d {
-                    width: cell.width,
-                    height: cell.height,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
-
-        // TODO temp
-
-        self.atlas_texture_debug.fill(0);
-
-        for cell in atlas.cells() {
-            let tile_texture = &self.tile_textures[cell.tile_index];
-
-            let atlas_stride = 1024 as usize * 4;
-            let tile_stride = cell.width as usize * 4;
-
-            for y in 0..cell.height {
-                let atlas_offset = (cell.y + y) as usize * atlas_stride + (cell.x as usize * 4);
-
-                let tile_offset = y as usize * tile_stride;
-
-                if y == 0 {
-                    self.atlas_texture_debug[atlas_offset] = 0xFF;
-                    self.atlas_texture_debug[atlas_offset + 1] = 0;
-                    self.atlas_texture_debug[atlas_offset + 2] = 0;
-                    self.atlas_texture_debug[atlas_offset + 3] = 0xFF;
-                } else {
-                    self.atlas_texture_debug[atlas_offset..atlas_offset + tile_stride]
-                        .copy_from_slice(
-                            &tile_texture.data[tile_offset..tile_offset + tile_stride],
-                        );
-                }
-            }
-        }
-
-        atlas_texture_debug.store(Arc::new(Frame {
-            index: atlas_texture_debug.load().index + 1,
-            rgba: self.atlas_texture_debug.clone(),
-            width: 1024,
-            height: 1024,
-        }));
-
-        // TODO once???
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bind group"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&self.atlas_texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-            ],
-        });
-
+    pub fn render(&mut self, last_frame: &Arc<ArcSwap<Frame>>) {
         // Upload the geometry
 
         let triangle_count = self.triangle_queue.len();
         let vertex_count = triangle_count * 3;
 
-        // TODO alloc once
+        // TODO alloc once OR do it on push?
         let mut gpu_vertices = Vec::with_capacity(vertex_count);
 
         for triangle in self.triangle_queue.iter() {
             match triangle.fill {
-                TriangleFillIndexed::Color { colors } => {
+                TriangleFill::Color { colors } => {
                     for (vertex_pos, vertex_color) in triangle.vertices.iter().zip(colors) {
                         gpu_vertices.push(GpuVertex {
                             pos: *vertex_pos,
@@ -647,25 +459,17 @@ impl WgpuRenderer {
                     }
                 }
 
-                TriangleFillIndexed::Texture { tile_index, uvs } => {
+                TriangleFill::Texture { uvs, .. } => {
                     for (vertex_pos, vertex_uv) in triangle.vertices.iter().zip(uvs) {
                         gpu_vertices.push(GpuVertex {
                             pos: *vertex_pos,
                             color: [1.0, 1.0, 1.0, 1.0],
-                            uv: atlas.remap_uv(vertex_uv, tile_index),
+                            uv: vertex_uv,
                         });
                     }
                 }
             };
         }
-
-        //log::warn!("quad count {:?}", triangle_count / 2);
-        // log::warn!(
-        //     "gpu_vertices  {:?}, vertex_count {:?}, triangle_count {:?}",
-        //     gpu_vertices,
-        //     vertex_count,
-        //     triangle_count
-        // );
 
         self.queue.write_buffer(
             &self.vertex_buffer,
@@ -697,12 +501,60 @@ impl WgpuRenderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
+                // TODO simplify
             });
 
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.draw(0..vertex_count as u32, 0..triangle_count as u32);
+
+            // One draw call per ???? TODO doc
+
+            let mut rendered_vertices = 0;
+
+            self.triangle_queue
+                .chunk_by(|a, b| same_render_group(&a.fill, &b.fill))
+                .for_each(|triangles| {
+                    // Get the texture used by this chunk, if any
+
+                    let texture_view = triangles
+                        .iter()
+                        .find_map(|triangle| {
+                            if let TriangleFill::Texture { tile_id, .. } = &triangle.fill
+                                && let Some(tile) = self.tile_textures.get(tile_id)
+                            {
+                                Some(&tile.texture_view)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(&self.neutral_texture_view);
+
+                    // Render
+
+                    let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("bind group"),
+                        layout: &self.bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&texture_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&self.sampler),
+                            },
+                        ],
+                    });
+
+                    pass.set_bind_group(0, &bind_group, &[]);
+
+                    pass.draw(
+                        rendered_vertices..rendered_vertices + (triangles.len() * 3) as u32,
+                        0..1,
+                    );
+
+                    rendered_vertices += (triangles.len() * 3) as u32;
+                });
         }
 
         encoder.copy_texture_to_buffer(
@@ -758,12 +610,9 @@ impl WgpuRenderer {
             })
             .expect("Failed to wait for submission");
 
-        // Clear the rendered data
+        // Clear the rendered triangles
 
         self.triangle_queue.clear();
-
-        self.tile_textures.clear();
-        self.last_tile_texture_texture_per_slot = [None; 8];
     }
 }
 
@@ -775,4 +624,78 @@ fn unpack_rgba_rows(padded: &[u8], width: usize, height: usize, bytes_per_row: u
         out.extend_from_slice(&padded[start..start + row_pixels]);
     }
     out
+}
+
+fn create_texture(
+    tile: &Tile,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    // TODO default params?
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d {
+            width: tile.width,
+            height: tile.height,
+            depth_or_array_layers: 1,
+        },
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        mip_level_count: 1,
+        sample_count: 1,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+            aspect: wgpu::TextureAspect::All,
+        },
+        &tile.rgba,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * tile.width),
+            rows_per_image: Some(tile.height),
+        },
+        wgpu::Extent3d {
+            width: tile.width,
+            height: tile.height,
+            depth_or_array_layers: 1,
+        },
+    );
+
+    let view = texture.create_view(&wgpu::TextureViewDescriptor {
+        label: None,
+        format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+        dimension: Some(wgpu::TextureViewDimension::D2),
+        aspect: wgpu::TextureAspect::All,
+        base_mip_level: 0,
+        mip_level_count: None,
+        base_array_layer: 0,
+        array_layer_count: None,
+        ..Default::default()
+    });
+
+    (texture, view)
+}
+
+fn same_render_group(a: &TriangleFill, b: &TriangleFill) -> bool {
+    // TODO split color/tex?
+    match (a, b) {
+        (TriangleFill::Color { .. }, TriangleFill::Color { .. }) => true,
+        (TriangleFill::Color { .. }, TriangleFill::Texture { .. }) => true,
+        (TriangleFill::Texture { .. }, TriangleFill::Color { .. }) => true,
+        (
+            TriangleFill::Texture {
+                tile_id: a_tile_id, ..
+            },
+            TriangleFill::Texture {
+                tile_id: b_tile_id, ..
+            },
+        ) => a_tile_id == b_tile_id,
+    }
 }

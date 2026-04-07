@@ -14,7 +14,7 @@ struct Args {
     dir: PathBuf,
 
     /// Number of emulator cycles to run per ROM
-    #[arg(short, long, default_value = "100000000")]
+    #[arg(short, long, default_value = "1000000000")]
     cycles: usize,
 }
 

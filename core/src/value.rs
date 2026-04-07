@@ -14,7 +14,7 @@ use std::{
 /// However, we have to convert data from/to native endianness when writing/reading memory.
 ///
 /// This trait adds methods to read from and write to big-endian memory and little-endian registers using the N64 big-endian addressing.
-/// It handles the mixed endianness at the boundary between memory and registers and spares us from having to converting between BE and LE everywhere.
+/// It handles the mixed endianness at the boundary between memory and registers and spares us from having to convert between BE and LE everywhere.
 ///
 /// ```
 /// use n64_core::value::Value;

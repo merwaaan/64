@@ -50,11 +50,19 @@ impl Entry {
             },
         ];
 
+        // The TLB considers bits in pairs and "normalizes" the mask:
+        // - only the high bit of a pair is set: set both bits
+        // - only the low bit of a pair is set: clear both bits
+
+        let mask_shifted = (mask >> 13) & 0xFFF;
+        let mask_odd = mask_shifted & 0xAAA;
+        let mask_normalized = mask_odd | (mask_odd >> 1);
+
         Self {
             vpn2: (hi >> 13) & 0xFFFE0000_07FFFFFF, // clear the fill bits
             global: (lo0 & lo1 & 1) != 0,
             asid: (hi & 0xFF) as u8,
-            mask: (mask >> 13) & 0x0000_0FFF,
+            mask: mask_normalized,
             pages,
         }
     }
@@ -133,15 +141,11 @@ pub struct Tlb {
 
 impl Tlb {
     pub fn read(&self, index: u32) -> Entry {
-        debug_assert!(index < 32);
-
-        self.entries[(index & 0x3F) as usize]
+        self.entries[(index & 0x1F) as usize]
     }
 
     pub fn write(&mut self, index: u32, entry: Entry) {
-        debug_assert!(index < 32);
-
-        self.entries[(index & 0x3F) as usize] = entry;
+        self.entries[(index & 0x1F) as usize] = entry;
     }
 
     #[must_use]
@@ -179,9 +183,13 @@ impl Tlb {
 
                 if !page.valid {
                     return Err(if write {
-                        Exception::TlbInvalidStore
+                        Exception::TlbInvalidStore {
+                            virtual_address: addr.0,
+                        }
                     } else {
-                        Exception::TlbInvalidLoad
+                        Exception::TlbInvalidLoad {
+                            virtual_address: addr.0,
+                        }
                     });
                 }
 
@@ -200,9 +208,13 @@ impl Tlb {
         }
 
         Err(if write {
-            Exception::TlbMissStore
+            Exception::TlbMissStore {
+                virtual_address: addr.0,
+            }
         } else {
-            Exception::TlbMissLoad
+            Exception::TlbMissLoad {
+                virtual_address: addr.0,
+            }
         })
     }
 

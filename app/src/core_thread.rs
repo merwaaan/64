@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::panic::{self, AssertUnwindSafe};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use crossbeam::channel::{Receiver, Sender, TryRecvError, unbounded};
+
 use n64_core::{
     cpu,
     cpu::instructions::Disassembly,
@@ -10,6 +12,7 @@ use n64_core::{
     sp,
     system::{Address, System},
     value::Value,
+    vi::Vi,
 };
 
 use crate::ui::widgets::ai_widget::AiUpdate;
@@ -323,7 +326,7 @@ impl CoreThread {
                             events.push(Event::Dp(DpUpdate {
                                 regs: system.dp.regs,
                                 tmem: system.dp.tmem,
-                                atlas_texture: system.video_renderer.get_atlas_texture(),
+                                tiles: system.video_renderer.get_debug_tiles().clone(),
                             }));
                         }
 
@@ -351,7 +354,7 @@ impl CoreThread {
                         }
 
                         Data::Framebuffer => {
-                            //let (data, width, height) = Vi::extract_framebuffer(system);
+                            //let frame = Arc::new(Vi::extract_framebuffer(system));
 
                             let frame = system.video_renderer.get_frame();
 

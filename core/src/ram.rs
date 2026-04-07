@@ -39,14 +39,15 @@ impl Default for Ram {
 
 impl Ram {
     pub fn read<T: Value>(s: &System, addr: RamLocation) -> T {
-        match addr.relative() {
-            0..DATA_MAPPED_SIZE => T::read_mem(&s.ram.data, addr.relative()),
-            _ => {
-                //log::warn!("Invalid RAM data read: {:08X}", addr.relative());
-
-                T::default()
-            }
-        }
+        T::read_mem(&s.ram.data, addr.relative())
+        // match addr.relative() {
+        //     0..DATA_MAPPED_SIZE => T::read_mem(&s.ram.data, addr.relative()),
+        //     _ => {
+        //         log::warn!("Invalid RAM data read: {:08X}", addr.relative());
+        //         // TODO???? should not happen??
+        //         T::default()
+        //     }
+        // }
     }
 
     pub fn write<T: Value>(s: &mut System, addr: RamLocation, data: T) {

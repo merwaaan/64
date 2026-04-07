@@ -2,18 +2,18 @@ use crate::{cop0, system::System};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Exception {
-    Interrupt(u8), // u8 = interrupt bits
+    Interrupt { cause: u8 },
     TlbModification,
-    TlbMissLoad,
-    TlbMissStore,
-    TlbInvalidLoad,
-    TlbInvalidStore,
-    AddressLoad(u32),
-    AddressStore(u32),
+    TlbMissLoad { virtual_address: u32 },
+    TlbMissStore { virtual_address: u32 },
+    TlbInvalidLoad { virtual_address: u32 },
+    TlbInvalidStore { virtual_address: u32 },
+    AddressLoad { address: u32 },
+    AddressStore { address: u32 },
     Syscall,
     Breakpoint,
     ReservedInstruction,
-    CoprocessorUnusable(u32),
+    CoprocessorUnusable { coprocessor: u32 },
     ArithmeticOverflow,
     Trap,
     FloatingPoint,
@@ -51,22 +51,40 @@ impl Exception {
         s.cop0.set_coprocessor_error(0);
 
         match self {
-            Exception::AddressLoad(address) => {
+            Exception::TlbMissLoad { virtual_address }
+            | Exception::TlbMissStore { virtual_address }
+            | Exception::TlbInvalidLoad { virtual_address }
+            | Exception::TlbInvalidStore { virtual_address } => {
+                s.cop0.set_bad_virtual_address(*virtual_address);
+
+                let vpn2 = (*virtual_address >> 13) & 0x7FFFF;
+
+                // TODO probably wrong
+
+                s.cop0
+                    .set_context(s.cop0.read(cop0::Register::Context as usize).get() | (vpn2 << 4));
+
+                s.cop0.set_xcontext(
+                    s.cop0.read(cop0::Register::XContext as usize).get() | (vpn2 << 4),
+                );
+            }
+
+            Exception::AddressLoad { address } | Exception::AddressStore { address } => {
                 s.cop0.set_bad_virtual_address(*address);
             }
-            Exception::AddressStore(address) => {
-                s.cop0.set_bad_virtual_address(*address);
+
+            Exception::CoprocessorUnusable { coprocessor } => {
+                s.cop0.set_coprocessor_error(*coprocessor);
             }
-            Exception::CoprocessorUnusable(cop) => {
-                s.cop0.set_coprocessor_error(*cop);
-            }
+
             _ => {}
         }
 
         // Jump to the exception handler
 
         s.cpu.regs.pc = match self {
-            Exception::TlbMissLoad | Exception::TlbMissStore => 0x8000_0080,
+            Exception::TlbMissLoad { .. } | Exception::TlbMissStore { .. } => 0x8000_0000,
+            // TODO other tlb errors?
             _ => 0x8000_0180,
         };
 
@@ -83,18 +101,18 @@ impl Exception {
 
     pub fn exception_code(&self) -> u32 {
         match self {
-            Exception::Interrupt(_) => 0,
+            Exception::Interrupt { .. } => 0,
             Exception::TlbModification => 1,
-            Exception::TlbMissLoad => 2,
-            Exception::TlbMissStore => 3,
-            Exception::TlbInvalidLoad => 2,
-            Exception::TlbInvalidStore => 3,
-            Exception::AddressLoad(_) => 4,
-            Exception::AddressStore(_) => 5,
+            Exception::TlbMissLoad { .. } => 2,
+            Exception::TlbMissStore { .. } => 3,
+            Exception::TlbInvalidLoad { .. } => 2,
+            Exception::TlbInvalidStore { .. } => 3,
+            Exception::AddressLoad { .. } => 4,
+            Exception::AddressStore { .. } => 5,
             Exception::Syscall => 8,
             Exception::Breakpoint => 9,
             Exception::ReservedInstruction => 10,
-            Exception::CoprocessorUnusable(_) => 11,
+            Exception::CoprocessorUnusable { .. } => 11,
             Exception::ArithmeticOverflow => 12,
             Exception::Trap => 13,
             Exception::FloatingPoint => 15,
@@ -125,7 +143,7 @@ impl Exception {
             let interrupts = mask & pending;
 
             if interrupts != 0 {
-                Exception::Interrupt(interrupts).raise(s);
+                Exception::Interrupt { cause: interrupts }.raise(s);
 
                 return true;
             }
@@ -141,24 +159,24 @@ impl Exception {
 macro_rules! check_aligned {
     (load, $addr:expr, $mask:expr) => {
         if ($addr & $mask) != 0 {
-            return Err(Exception::AddressLoad($addr));
+            return Err(Exception::AddressLoad { address: $addr });
         }
     };
     (store, $addr:expr, $mask:expr) => {
         if ($addr & $mask) != 0 {
-            return Err(Exception::AddressStore($addr));
+            return Err(Exception::AddressStore { address: $addr });
         }
     };
 }
 
 /// Checks coprocessor usability.
-/// Returns an exception if unusable, convenient for instruction implementations.
+/// Returns an exception if the given coprocessor is unusable, convenient for instruction implementations.
 #[macro_export]
 macro_rules! check_cop_usable {
     ($cop:literal, $s:expr) => {
         paste::paste! {
             if !$s.cop0.[<cop $cop _usable>]() {
-                return Err(Exception::CoprocessorUnusable($cop));
+                return Err(Exception::CoprocessorUnusable { coprocessor: $cop });
             }
         }
     };

@@ -34,15 +34,13 @@ impl Cpu {
     pub fn step(s: &mut System) {
         // Decode and execute the current instruction
 
-        let instruction = s
-            .read(Address::v(s.cpu.regs.pc))
-            .unwrap_or_else(|_| panic!("Invalid instruction address {:08X}", s.cpu.regs.pc)); // TODO handle exception
+        let result = s.read(Address::v(s.cpu.regs.pc)).and_then(|instruction| {
+            let opcode = Opcode(instruction);
 
-        let opcode = Opcode(instruction);
+            let (execute, _disassemble) = instructions::decode(opcode);
 
-        let (execute, _disassemble) = instructions::decode(opcode);
-
-        let result = execute(s, opcode);
+            execute(s, opcode)
+        });
 
         // Advance the PC
 
@@ -83,7 +81,7 @@ impl Cpu {
             // Raise an exception if the target address is unaligned
 
             if target & 3 != 0 {
-                Exception::AddressLoad(target).raise(s);
+                Exception::AddressLoad { address: target }.raise(s);
             }
         } else {
             s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);

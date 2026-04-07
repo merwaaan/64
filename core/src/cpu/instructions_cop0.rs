@@ -87,8 +87,6 @@ fn mtc0_disassemble(_s: &System, op: Opcode) -> Disassembly {
 }
 
 fn tlbp_execute(s: &mut System, _op: Opcode) -> InstructionResult {
-    //log::debug!("TLBP");
-
     if let Some(index) = s.cop0.tlb.probe(&s.cop0) {
         s.cop0.write(cop0::Register::Index as usize, index as u32);
     } else {
@@ -103,8 +101,6 @@ fn tlbp_disassemble(_s: &System, _op: Opcode) -> Disassembly {
 }
 
 fn tlbr_execute(s: &mut System, _op: Opcode) -> InstructionResult {
-    //log::debug!("TLBR");
-
     s.cop0
         .tlb
         .read(s.cop0.read(cop0::Register::Index as usize).get())
@@ -118,8 +114,6 @@ fn tlbr_disassemble(_s: &System, _op: Opcode) -> Disassembly {
 }
 
 fn tlbwi_execute(s: &mut System, _op: Opcode) -> InstructionResult {
-    //log::debug!("TLBWI");
-
     s.cop0.tlb.write(
         s.cop0.read(cop0::Register::Index as usize).get(),
         tlb::Entry::from_cop0_regs(&s.cop0),

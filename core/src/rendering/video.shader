@@ -45,13 +45,16 @@ fn vs_main(
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
-    let f = fwidth(in.barycentric);
-    let edge = smoothstep(vec3<f32>(0.0), f * 2.0, in.barycentric);
-    let is_edge = 1.0 - min(min(edge.x, edge.y), edge.z);
+    // let f = fwidth(in.barycentric);
+    // let edge = smoothstep(vec3<f32>(0.0), f * 0.75, in.barycentric);
+    // let is_edge = 1.0 - min(min(edge.x, edge.y), edge.z);
 
-    if (is_edge > 0.5) {
-        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
-    }
+    // // //if (in.uv.x < 0.05 && in.uv.y < 0.05) {
+    // if (is_edge > 0.5) {
+    //     return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+    // }
+
+    //return vec4<f32>(in.uv, 0.0, 1.0);
 
     return textureSample(texture, texture_sampler, in.uv); // TODO mix color with texture?
     //return vec4<f32>(1.0, 0.0, 0.0, 1.0);

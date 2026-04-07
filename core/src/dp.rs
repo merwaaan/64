@@ -1,14 +1,17 @@
 use std::collections::VecDeque;
 
 use arbitrary_int::prelude::*;
-use bitbybit::{bitenum, bitfield};
+use bitbybit::bitfield;
 
 use crate::{
-    blocks::{read_block, write_block},
+    blocks::write_block,
     location::Location,
     mi::Interrupt,
     ram::RamLocation,
-    rendering::video::{self, QuadFill},
+    rendering::{
+        tile_cache::{ImageFormat, TexelSize, TileCache},
+        video::{self, QuadFill},
+    },
     sp::SpMemLocation,
     system::System,
     value::Value,
@@ -24,20 +27,20 @@ const START_REG: u32 = 0;
 const END_REG: u32 = 1;
 const CURRENT_REG: u32 = 2;
 const STATUS_REG: u32 = 3;
-const _CLOCK_REG: u32 = 4;
-const _BUF_BUSY_REG: u32 = 5;
-const _PIPE_BUSY_REG: u32 = 6;
-const _TMEM_BUSY_REG: u32 = 7;
+const CLOCK_REG: u32 = 4;
+const BUF_BUSY_REG: u32 = 5;
+const PIPE_BUSY_REG: u32 = 6;
+const TMEM_BUSY_REG: u32 = 7;
 
 const STATUS_XBUS: u32 = 1;
 const STATUS_FREEZE: u32 = 1 << 1;
 const STATUS_FLUSH: u32 = 1 << 2;
-const _STATUS_GCLK: u32 = 1 << 3;
-const _STATUS_TMEM_BUSY: u32 = 1 << 4;
-const _STATUS_PIPE_BUSY: u32 = 1 << 5;
-const _STATUS_CMD_BUSY: u32 = 1 << 6;
-const _STATUS_CBUF_READY: u32 = 1 << 7;
-const _STATUS_DMA_BUSY: u32 = 1 << 8;
+const STATUS_GCLK: u32 = 1 << 3;
+const STATUS_TMEM_BUSY: u32 = 1 << 4;
+const STATUS_PIPE_BUSY: u32 = 1 << 5;
+const STATUS_COMMAND_BUSY: u32 = 1 << 6;
+const STATUS_COMMAND_BUFFER_READY: u32 = 1 << 7;
+const STATUS_DMA_BUSY: u32 = 1 << 8;
 const STATUS_END_PENDING: u32 = 1 << 9;
 const STATUS_START_PENDING: u32 = 1 << 10;
 
@@ -47,17 +50,22 @@ const STATUS_FREEZE_CLEAR: u32 = 1 << 2;
 const STATUS_FREEZE_SET: u32 = 1 << 3;
 const STATUS_FLUSH_CLEAR: u32 = 1 << 4;
 const STATUS_FLUSH_SET: u32 = 1 << 5;
-const _STATUS_TMEM_BUSY_CLEAR: u32 = 1 << 6;
-const _STATUS_PIPE_BUSY_CLEAR: u32 = 1 << 7;
-const _STATUS_BUF_BUSY_CLEAR: u32 = 1 << 8;
-const _STATUS_CLK_CLEAR: u32 = 1 << 9;
+const STATUS_TMEM_BUSY_CLEAR: u32 = 1 << 6;
+const STATUS_PIPE_BUSY_CLEAR: u32 = 1 << 7;
+const STATUS_BUF_BUSY_CLEAR: u32 = 1 << 8;
+const STATUS_CLK_CLEAR: u32 = 1 << 9;
+
+// For now, we keep the "command buffer ready" bit set as we process commands instantly
+const STATUS_DEFAULT: u32 = STATUS_COMMAND_BUFFER_READY;
 
 // TODO double buffering
 
-#[derive(Clone)]
 pub struct Dp {
     // TODO struct regs
     pub regs: [u32; 8],
+
+    /// Texture memory.
+    pub tmem: [u8; 0x1000], // TODO vis
 
     /// Pending command buffer.
     ///
@@ -73,11 +81,15 @@ pub struct Dp {
     /// Rendering state, updated by applied commands.
     state: State,
 
-    /// Texture memory.
-    pub tmem: [u8; 0x1000], // TODO vis
+    /// Cache that stores decoded RGBA tiles.
+    tile_cache: TileCache,
+
+    /// Whether a DMA is pending due to a frozen state.
+    /// Hardware tests show that END_PENDING is not set if frozen, so we cannot use it to trigger the DMA when unfrozen.
+    frozen_dma: bool,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default)]
 struct State {
     fill_color: [f32; 4],
     texture: SetTextureImage,
@@ -94,14 +106,18 @@ struct TileSlot {
 impl Default for Dp {
     fn default() -> Self {
         Self {
-            regs: [0; 8],
+            regs: [0, 0, 0, STATUS_DEFAULT, 0, 0, 0, 0],
+
+            tmem: [0; 0x1000],
 
             command_buffer: VecDeque::new(),
             decoded_commands: Vec::new(),
 
-            tmem: [0; 0x1000],
-
             state: State::default(),
+
+            tile_cache: TileCache::default(),
+
+            frozen_dma: false,
         }
     }
 }
@@ -129,111 +145,128 @@ impl Dp {
 
         match (addr.relative() >> 2) & 7 {
             START_REG => {
-                // log::debug!(
-                //     "DP: Write START address {:08X} start pending={} end pending={} current={}",
-                //     data,
-                //     s.dp.regs[STATUS_REG as usize] & STATUS_START_PENDING != 0,
-                //     s.dp.regs[STATUS_REG as usize] & STATUS_END_PENDING != 0,
-                //     s.dp.regs[CURRENT_REG as usize]
-                // );
-                // Write the START address and make it "pending", ie. we're waiting for END to be written
+                // Write the START address and make it "pending", ie. we're waiting for END to be written.
+                // If START is already pending, ignore the new address (confirmed by n64-systemtest).
 
-                data.write_reg(&mut s.dp.regs, addr.relative() & 0x1F);
+                // TODO unclear if this is correct, some docs mention some form of double-buffering?!
 
-                s.dp.regs[START_REG as usize] &= 0x00FF_FFF8;
-                s.dp.regs[STATUS_REG as usize] |= STATUS_START_PENDING;
+                if s.dp.regs[STATUS_REG as usize] & STATUS_START_PENDING == 0 {
+                    data.write_reg(&mut s.dp.regs, addr.relative() & 0x1F);
+                    s.dp.regs[START_REG as usize] &= 0x00FF_FFF8;
 
-                // TODO set current = start here?? not only when writing END? unclear
+                    s.dp.regs[STATUS_REG as usize] |= STATUS_START_PENDING;
+                    s.dp.regs[STATUS_REG as usize] &= !STATUS_END_PENDING;
+                } else {
+                    log::warn!(
+                        "DP: START already pending, ignoring new address {:08X}",
+                        data
+                    );
+                }
             }
             END_REG => {
-                // log::debug!(
-                //     "DP: Write END address {:08X} start pending={} end pending={} current={}",
-                //     data,
-                //     s.dp.regs[STATUS_REG as usize] & STATUS_START_PENDING != 0,
-                //     s.dp.regs[STATUS_REG as usize] & STATUS_END_PENDING != 0,
-                //     s.dp.regs[CURRENT_REG as usize]
-                // );
                 data.write_reg(&mut s.dp.regs, addr.relative() & 0x1F);
-
                 s.dp.regs[END_REG as usize] &= 0x00FF_FFF8;
 
-                // If START was "pending", set CURRENT to START and clear the pending flag.
-                // If END is written again before START, the DMA will continue from CURRENT (ie. the previous END if the DMA completed).
+                // If START was "pending", set CURRENT to START and clear the pending flag, this is a new transfer.
+                // If END is written again before START, the DMA will continue from CURRENT, this is an increment transfer.
 
                 if s.dp.regs[STATUS_REG as usize] & STATUS_START_PENDING != 0 {
                     s.dp.regs[CURRENT_REG as usize] = s.dp.regs[START_REG as usize];
-                    s.dp.regs[STATUS_REG as usize] &= !STATUS_START_PENDING;
                 }
 
-                s.dp.regs[STATUS_REG as usize] |= STATUS_END_PENDING;
+                s.dp.regs[STATUS_REG as usize] &= !STATUS_START_PENDING;
 
-                Self::start_dma(s);
+                // Start the transfer if not frozen, otherwise it will start later when unfrozen
+                //
+                // Hardware tests show that END_PENDING is not set if frozen
+
+                if s.dp.regs[STATUS_REG as usize] & STATUS_FREEZE == 0 {
+                    s.dp.regs[STATUS_REG as usize] |= STATUS_END_PENDING;
+
+                    Self::start_dma(s);
+                } else {
+                    s.dp.frozen_dma = true;
+                }
             }
             STATUS_REG => {
-                let mut status = s.dp.regs[STATUS_REG as usize];
-
                 let mut trigger_bits = [0u32];
                 data.write_reg(&mut trigger_bits, addr.relative() & 3);
+
+                // TODO what if both clear/set bits are set? similar to SP (does nothing)?
 
                 // XBUS
 
                 if trigger_bits[0] & STATUS_XBUS_CLEAR != 0 {
-                    status &= !STATUS_XBUS;
+                    s.dp.regs[STATUS_REG as usize] &= !STATUS_XBUS;
                 }
+
                 if trigger_bits[0] & STATUS_XBUS_SET != 0 {
-                    status |= STATUS_XBUS;
+                    s.dp.regs[STATUS_REG as usize] |= STATUS_XBUS;
                 }
 
                 // FREEZE
 
                 if trigger_bits[0] & STATUS_FREEZE_CLEAR != 0 {
-                    status &= !STATUS_FREEZE;
+                    log::warn!("DP: UNFROZEN",);
+
+                    s.dp.regs[STATUS_REG as usize] &= !STATUS_FREEZE;
+
+                    // Start any pending DMA
+
+                    if s.dp.frozen_dma {
+                        s.dp.frozen_dma = false;
+
+                        s.dp.regs[STATUS_REG as usize] |= STATUS_END_PENDING;
+
+                        Self::start_dma(s);
+                    }
                 }
+
                 if trigger_bits[0] & STATUS_FREEZE_SET != 0 {
-                    status |= STATUS_FREEZE;
-                    log::warn!("DP FREEZE");
+                    log::warn!("DP: FREEZE",);
+
+                    s.dp.regs[STATUS_REG as usize] |= STATUS_FREEZE;
                 }
 
                 // FLUSH
 
                 if trigger_bits[0] & STATUS_FLUSH_CLEAR != 0 {
-                    status &= !STATUS_FLUSH;
+                    s.dp.regs[STATUS_REG as usize] &= !STATUS_FLUSH;
                 }
+
                 if trigger_bits[0] & STATUS_FLUSH_SET != 0 {
-                    status |= STATUS_FLUSH;
+                    s.dp.regs[STATUS_REG as usize] |= STATUS_FLUSH;
                     log::warn!("DP FLUSH");
                     // TODO do something?
                 }
 
-                // TODO?
+                // TMEM_BUSY
 
-                // // TMEM_BUSY
+                if trigger_bits[0] & STATUS_TMEM_BUSY_CLEAR != 0 {
+                    s.dp.regs[TMEM_BUSY_REG as usize] = 0;
+                }
 
-                // if trigger_bits[0] & STATUS_TMEM_BUSY_CLEAR != 0 {
-                //     status &= !STATUS_TMEM_BUSY;
-                // }
+                // PIPE_BUSY
 
-                // // PIPE_BUSY
+                if trigger_bits[0] & STATUS_PIPE_BUSY_CLEAR != 0 {
+                    s.dp.regs[PIPE_BUSY_REG as usize] = 0;
+                }
 
-                // if trigger_bits[0] & STATUS_PIPE_BUSY_CLEAR != 0 {
-                //     status &= !STATUS_PIPE_BUSY;
-                // }
+                // BUF_BUSY
 
-                // // BUF_BUSY
+                if trigger_bits[0] & STATUS_BUF_BUSY_CLEAR != 0 {
+                    s.dp.regs[BUF_BUSY_REG as usize] = 0;
+                }
 
-                // if trigger_bits[0] & STATUS_BUF_BUSY_CLEAR != 0 {
-                //     s.dp.regs[BUF_BUSY_REG as usize] = 0;
-                // }
+                // CLK
 
-                // // CLK
-
-                // if trigger_bits[0] & STATUS_CLK_CLEAR != 0 {
-                //     s.dp.regs[CLOCK_REG as usize] = 0;
-                // }
-
-                s.dp.regs[STATUS_REG as usize] = status;
+                if trigger_bits[0] & STATUS_CLK_CLEAR != 0 {
+                    s.dp.regs[CLOCK_REG as usize] = 0;
+                }
             }
-            _ => {}
+            _ => {
+                // Other registers are read-only
+            }
         }
     }
 
@@ -243,6 +276,8 @@ impl Dp {
         let current = s.dp.regs[CURRENT_REG as usize];
         let end = s.dp.regs[END_REG as usize];
 
+        debug_assert!(current <= end, "DP DMA current > end");
+
         // log::debug!(
         //     "DP: DMA (XBus={}): {:08X} -> {:08X} -> {:08X}",
         //     from_sp,
@@ -250,6 +285,11 @@ impl Dp {
         //     current,
         //     end
         // );
+
+        // Set the busy bits
+        // TODO unclear when they get cleared and if this is even accurate
+
+        s.dp.regs[STATUS_REG as usize] |= STATUS_DMA_BUSY | STATUS_GCLK | STATUS_PIPE_BUSY;
 
         // TODO optim: pass the slice to decode (with pending data appended via iter)? only queue what couldn't be decoded?
 
@@ -275,7 +315,7 @@ impl Dp {
 
         s.dp.regs[CURRENT_REG as usize] = s.dp.regs[END_REG as usize]; // TODO latest addr? what if not "aligned"?
 
-        s.dp.regs[STATUS_REG as usize] &= !STATUS_END_PENDING;
+        s.dp.regs[STATUS_REG as usize] &= !(STATUS_END_PENDING | STATUS_DMA_BUSY);
     }
 
     // TODO don't pass system, return special cases
@@ -296,13 +336,14 @@ impl Dp {
 
         while let Some(first_byte) = s.dp.command_buffer.get(0).copied() {
             //log::warn!("DP:  {:?}", first_byte);
-            // TODO fullsync: END_PENDING 0, DP int
+            // TODO fullsync: END_PENDING 0
 
             let mut loggg = String::new();
 
             match first_byte & 0x3F {
                 0..=7 | 0x10..=0x23 | 0x31 => {
-                    //log::debug!("DP: NOP");
+                    loggg.push_str(&format!("DP: NOP"));
+
                     if_ready!(8, {});
                 }
                 0x08..=0x0F => {
@@ -333,10 +374,6 @@ impl Dp {
                     if_ready!(size, {});
                 }
                 0x24 | 0x25 => {
-                    if first_byte == 0x25 {
-                        log::warn!("TextureRectangleFlip");
-                    }
-
                     if_ready!(16, {
                         s.dp.decoded_commands.push(Command::TextureRectangle(
                             TextureRectangle::new_with_raw_value(u128::from_be_bytes([
@@ -361,27 +398,27 @@ impl Dp {
                     });
                 }
                 0x26 => {
-                    loggg.push_str(&"DP: Sync Load");
-
-                    if_ready!(8, {});
+                    if_ready!(8, {
+                        s.dp.decoded_commands.push(Command::SyncLoad);
+                    });
                 }
                 0x27 => {
-                    loggg.push_str(&"DP: Sync Pipe");
-
-                    if_ready!(8, {});
+                    if_ready!(8, {
+                        s.dp.decoded_commands.push(Command::SyncPipe);
+                    });
                 }
                 0x28 => {
-                    loggg.push_str(&"DP: Sync Tile");
-
-                    if_ready!(8, {});
+                    if_ready!(8, {
+                        s.dp.decoded_commands.push(Command::SyncTile);
+                    });
                 }
                 0x29 => {
-                    loggg.push_str(&"DP: Sync Full");
+                    // Sync full
 
                     if_ready!(8, {
-                        s.mi.set_pending_interrupt(Interrupt::Dp, &mut s.cop0); // TODO temp
-
                         Self::apply_command(s);
+
+                        s.mi.set_pending_interrupt(Interrupt::Dp, &mut s.cop0); // TODO temp
                     });
                 }
                 0x2A => {
@@ -400,9 +437,20 @@ impl Dp {
                     if_ready!(8, {});
                 }
                 0x2D => {
-                    loggg.push_str(&"DP: Set scissor");
-
-                    if_ready!(8, {});
+                    if_ready!(8, {
+                        s.dp.decoded_commands.push(Command::SetScissor(
+                            SetScissor::new_with_raw_value(u64::from_be_bytes([
+                                *s.dp.command_buffer.get(0).unwrap(),
+                                *s.dp.command_buffer.get(1).unwrap(),
+                                *s.dp.command_buffer.get(2).unwrap(),
+                                *s.dp.command_buffer.get(3).unwrap(),
+                                *s.dp.command_buffer.get(4).unwrap(),
+                                *s.dp.command_buffer.get(5).unwrap(),
+                                *s.dp.command_buffer.get(6).unwrap(),
+                                *s.dp.command_buffer.get(7).unwrap(),
+                            ])),
+                        ));
+                    });
                 }
                 0x2E => {
                     loggg.push_str(&"DP: Set prim depth");
@@ -415,8 +463,6 @@ impl Dp {
                     if_ready!(8, {});
                 }
                 0x30 => {
-                    loggg.push_str(&"DP: Load TLUT");
-
                     if_ready!(8, {
                         s.dp.decoded_commands.push(Command::LoadTLUT(
                             LoadTile::new_with_raw_value(u64::from_be_bytes([
@@ -449,8 +495,20 @@ impl Dp {
                     });
                 }
                 0x33 => {
-                    loggg.push_str(&"DP: Load block");
-                    if_ready!(8, {});
+                    if_ready!(8, {
+                        s.dp.decoded_commands.push(Command::LoadBlock(
+                            LoadBlock::new_with_raw_value(u64::from_be_bytes([
+                                *s.dp.command_buffer.get(0).unwrap(),
+                                *s.dp.command_buffer.get(1).unwrap(),
+                                *s.dp.command_buffer.get(2).unwrap(),
+                                *s.dp.command_buffer.get(3).unwrap(),
+                                *s.dp.command_buffer.get(4).unwrap(),
+                                *s.dp.command_buffer.get(5).unwrap(),
+                                *s.dp.command_buffer.get(6).unwrap(),
+                                *s.dp.command_buffer.get(7).unwrap(),
+                            ])),
+                        ));
+                    });
                 }
                 0x34 => {
                     if_ready!(8, {
@@ -502,7 +560,6 @@ impl Dp {
                     });
                 }
                 0x37 => {
-                    loggg.push_str(&"DP: set fill color");
                     if_ready!(8, {
                         s.dp.decoded_commands.push(Command::SetFillColor(
                             SetFillColor::new_with_raw_value(u64::from_be_bytes([
@@ -519,12 +576,36 @@ impl Dp {
                     });
                 }
                 0x38 => {
-                    loggg.push_str(&"DP: set fog color");
-                    if_ready!(8, {});
+                    if_ready!(8, {
+                        s.dp.decoded_commands.push(Command::SetFogColor(
+                            SetFogColor::new_with_raw_value(u64::from_be_bytes([
+                                *s.dp.command_buffer.get(0).unwrap(),
+                                *s.dp.command_buffer.get(1).unwrap(),
+                                *s.dp.command_buffer.get(2).unwrap(),
+                                *s.dp.command_buffer.get(3).unwrap(),
+                                *s.dp.command_buffer.get(4).unwrap(),
+                                *s.dp.command_buffer.get(5).unwrap(),
+                                *s.dp.command_buffer.get(6).unwrap(),
+                                *s.dp.command_buffer.get(7).unwrap(),
+                            ])),
+                        ));
+                    });
                 }
                 0x39 => {
-                    loggg.push_str(&"DP: set blend color");
-                    if_ready!(8, {});
+                    if_ready!(8, {
+                        s.dp.decoded_commands.push(Command::SetBlendColor(
+                            SetBlendColor::new_with_raw_value(u64::from_be_bytes([
+                                *s.dp.command_buffer.get(0).unwrap(),
+                                *s.dp.command_buffer.get(1).unwrap(),
+                                *s.dp.command_buffer.get(2).unwrap(),
+                                *s.dp.command_buffer.get(3).unwrap(),
+                                *s.dp.command_buffer.get(4).unwrap(),
+                                *s.dp.command_buffer.get(5).unwrap(),
+                                *s.dp.command_buffer.get(6).unwrap(),
+                                *s.dp.command_buffer.get(7).unwrap(),
+                            ])),
+                        ));
+                    });
                 }
                 0x3A => {
                     if_ready!(8, {
@@ -545,7 +626,20 @@ impl Dp {
                 0x3B => {
                     loggg.push_str(&"DP: set env color");
 
-                    if_ready!(8, {});
+                    if_ready!(8, {
+                        s.dp.decoded_commands.push(Command::SetEnvironmentColor(
+                            SetEnvironmentColor::new_with_raw_value(u64::from_be_bytes([
+                                *s.dp.command_buffer.get(0).unwrap(),
+                                *s.dp.command_buffer.get(1).unwrap(),
+                                *s.dp.command_buffer.get(2).unwrap(),
+                                *s.dp.command_buffer.get(3).unwrap(),
+                                *s.dp.command_buffer.get(4).unwrap(),
+                                *s.dp.command_buffer.get(5).unwrap(),
+                                *s.dp.command_buffer.get(6).unwrap(),
+                                *s.dp.command_buffer.get(7).unwrap(),
+                            ])),
+                        ));
+                    });
                 }
                 0x3C => {
                     loggg.push_str(&"DP: set combine");
@@ -582,6 +676,7 @@ impl Dp {
             }
 
             if false && loggg.len() > 0 {
+                log::debug!("LOGGG");
                 log::debug!("{}", loggg);
             }
         }
@@ -598,6 +693,26 @@ impl Dp {
             //log::debug!("Applying command: {:#?}", command);
 
             match command {
+                Command::SetScissor(data) => {
+                    //log::warn!("DP: set scissor: {:?}", data);
+                }
+
+                Command::SetPrimitiveColor(data) => {
+                    //log::warn!("DP: set primitive color: {:?}", data);
+                }
+
+                Command::SetEnvironmentColor(data) => {
+                    //log::warn!("DP: set environment color: {:?}", data);
+                }
+
+                Command::SetFogColor(data) => {
+                    //log::warn!("DP: set fog color: {:?}", data);
+                }
+
+                Command::SetBlendColor(data) => {
+                    //log::warn!("DP: set blend color: {:?}", data);
+                }
+
                 Command::SetFillColor(data) => {
                     s.dp.state.fill_color = convert_color(data.color());
                 }
@@ -635,6 +750,46 @@ impl Dp {
                     );
                 }
 
+                Command::LoadBlock(data) => {
+                    // Load a block from RAM to TMEM
+
+                    let slot = &s.dp.state.tile_slots[data.tile().value() as usize];
+
+                    // TODO probably all wrong!
+
+                    // TODO rename?
+                    let left = data.upper_left_x().value();
+                    let right = data.lower_right_x().value();
+                    let top = data.upper_left_y().value();
+                    let dxt = data.dxt().value();
+
+                    //log::warn!("RSP: load block: {}, {}, {}, {}", left, right, top, dxt);
+
+                    // assert_eq!(left, 0);
+                    // assert_eq!(top, 0);
+
+                    let texel_count = (right + 1) as usize;
+                    let texel_bits = slot.tile.texel_size().bits();
+                    let byte_count = (texel_count * texel_bits + 7) & !7; // Round up to byte alignment to not miss any 4-bit values
+
+                    // TODO offset by coords?
+                    let ram_address = s.dp.state.texture.ram_address().value();
+
+                    // TODO dxt stuff?
+
+                    let mut tmem_address = slot.tile.tmem_address_byte() as usize;
+
+                    s.ram.read_block(
+                        RamLocation::from_absolute(ram_address),
+                        byte_count as usize,
+                        |ram_data| {
+                            write_block(ram_data, &mut s.dp.tmem, tmem_address as usize);
+
+                            tmem_address += byte_count;
+                        },
+                    );
+                }
+
                 Command::LoadTile(data) => {
                     // Load a tile from RAM to TMEM
 
@@ -663,7 +818,7 @@ impl Dp {
                     // TODO simplify and just copy stride?
                     let tile_bytes_per_row = ((tile_width * texel_bits as u16 + 7) & !7) / 8; // Round up to byte alignment to not miss any 4-bit values
 
-                    let tile_stride = slot.tile.stride() as u32;
+                    let tile_stride = slot.tile.stride_byte() as u32;
 
                     let mut ram_address = s.dp.state.texture.ram_address().value()
                         + ((top as u32 * image_width) + left as u32) * texel_bits as u32 / 8; // TODO rounding
@@ -673,6 +828,7 @@ impl Dp {
 
                     let mut tmem_address = slot.tile.tmem_address_byte() as u32;
 
+                    //let start_address = tmem_address;
                     // log::error!(
                     //     "Loading tile: {}, {}, {}, {}, {}",
                     //     tile_width,
@@ -694,6 +850,8 @@ impl Dp {
                         ram_address += image_stride;
                         tmem_address += tile_stride;
                     }
+
+                    //log::error!("Loaded tile: {}", tmem_address - start_address);
                 }
 
                 Command::FillRectangle(data) => {
@@ -717,279 +875,125 @@ impl Dp {
                 }
 
                 Command::TextureRectangle(data) => {
-                    // Push the texture to the renderer
-
-                    let slot = &s.dp.state.tile_slots[data.tile().value() as usize];
-
-                    let left = slot.size.upper_left_x().value();
-                    let right = slot.size.lower_right_x().value();
-                    let top = slot.size.upper_left_y().value();
-                    let bottom = slot.size.lower_right_y().value();
-
-                    debug_assert!(left < right);
-                    debug_assert!(top < bottom);
-
-                    let tile_width = ((right >> 2).wrapping_sub(left >> 2) + 1) as usize;
-                    let tile_height = ((bottom >> 2).wrapping_sub(top >> 2) + 1) as usize;
-                    let tile_stride = slot.tile.stride();
-
-                    let mut rgba: Vec<u8> = Vec::with_capacity(tile_width * tile_height * 4); // TODO allocate once? stack?
-
-                    // We copy rows individually to account for the tile's stride which can be different from its width
-
-                    let mut row_address = slot.tile.tmem_address_byte();
-
-                    for _row in 0..tile_height {
-                        match (slot.tile.format(), slot.tile.texel_size()) {
-                            (ImageFormat::RGBA, TexelSize::B16) => {
-                                // 2 bytes per texel: 5 bits red, 5 bits green, 5 bits blue, 1 bit alpha
-
-                                let bytes_per_row = tile_width * 2;
-
-                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
-                                    rgba.extend(
-                                        tmem.chunks_exact(2)
-                                            .flat_map(|texel| rgba5551_to_8888(texel[0], texel[1])),
-                                    );
-                                });
-                            }
-
-                            (ImageFormat::RGBA, TexelSize::B32) => {
-                                // 4 bytes per texel: 8 bits red, 8 bits green, 8 bits blue, 8 bits alpha
-
-                                let bytes_per_row = tile_width * 4;
-
-                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
-                                    rgba.extend_from_slice(tmem);
-                                });
-                            }
-
-                            (ImageFormat::ColorIndexed, TexelSize::B4) => {
-                                // 4 bits per texel: 4-bit color index into one of the 16-bit palettes
-
-                                let bytes_per_row = tile_width.div_ceil(2);
-
-                                let palette_offset =
-                                    0x800 + (slot.tile.palette().value() as usize) * 16;
-
-                                // TODO optim: convert palettes on LoadTLUT? also when writing tex in case games do crazy hacks?
-
-                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
-                                    rgba.extend(
-                                        tmem.iter()
-                                            // Split each byte into two 4-bit texels
-                                            .flat_map(|byte| [byte & 0xF0 >> 4, byte & 0x0F])
-                                            // Convert each texel to RGBA
-                                            .flat_map(|color_index| {
-                                                let color_offset =
-                                                    palette_offset + (color_index as usize) * 2;
-
-                                                rgba5551_to_8888(
-                                                    s.dp.tmem[color_offset],
-                                                    s.dp.tmem[color_offset + 1],
-                                                )
-                                            }),
-                                    );
-                                });
-
-                                // If the tile width is odd, we pushed an extraneous 4-bit entry last, so remove it
-
-                                if tile_width & 1 != 0 {
-                                    for _ in 0..4 {
-                                        rgba.pop();
-                                    }
-                                }
-                            }
-
-                            (ImageFormat::ColorIndexed, TexelSize::B8) => {
-                                // 1 byte per texel: 8-bit color index into the full 16-bit palette
-
-                                let bytes_per_row = tile_width;
-
-                                let palette_offset = 0x800;
-
-                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
-                                    rgba.extend(tmem.iter().flat_map(|color_index| {
-                                        let color_offset =
-                                            palette_offset + (*color_index as usize) * 2;
-
-                                        rgba5551_to_8888(
-                                            s.dp.tmem[color_offset],
-                                            s.dp.tmem[color_offset + 1],
-                                        )
-                                    }));
-                                });
-                            }
-
-                            (ImageFormat::IntensityAlpha, TexelSize::B4) => {
-                                // 4 bits per texel: 3 bits intensity, 1 bit alpha
-
-                                let bytes_per_row = tile_width.div_ceil(2);
-
-                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
-                                    rgba.extend(
-                                        tmem.iter()
-                                            // Split each byte into two 4-bit texels
-                                            .flat_map(|byte| [byte & 0xF0 >> 4, byte & 0x0F])
-                                            // Convert each texel to RGBA
-                                            .flat_map(|texel| {
-                                                let intensity = ((texel >> 1) & 7) * 255 / 7; // TODO optim?
-                                                let alpha = (texel & 1) * 255; // TODO optim?
-
-                                                [intensity, intensity, intensity, alpha]
-                                            }),
-                                    );
-                                });
-
-                                // If the tile width is odd, we pushed an extraneous 4-bit entry last, so remove it
-
-                                if tile_width & 1 != 0 {
-                                    for _ in 0..4 {
-                                        rgba.pop();
-                                    }
-                                }
-                            }
-
-                            (ImageFormat::IntensityAlpha, TexelSize::B8) => {
-                                // 1 byte per texel: 4 bits intensity, 4 bits alpha
-
-                                let bytes_per_row = tile_width;
-
-                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
-                                    rgba.extend(tmem.iter().flat_map(|texel| {
-                                        let intensity = (*texel >> 4) * 255 / 15; // TODO optim?
-                                        let alpha = (*texel & 0x0F) * 255 / 15; // TODO optim?
-
-                                        [intensity, intensity, intensity, alpha]
-                                    }));
-                                });
-                            }
-
-                            (ImageFormat::IntensityAlpha, TexelSize::B16) => {
-                                // 2 bytes per texel: 8-bit intensity, 8-bit alpha
-
-                                let bytes_per_row = tile_width * 2;
-
-                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
-                                    rgba.extend(tmem.chunks_exact(2).flat_map(|texel| {
-                                        let intensity = texel[0];
-                                        let alpha = texel[1];
-
-                                        [intensity, intensity, intensity, alpha]
-                                    }));
-                                });
-                            }
-
-                            (ImageFormat::Intensity, TexelSize::B4)
-                            | (ImageFormat::Intensity2, TexelSize::B4)
-                            | (ImageFormat::Intensity3, TexelSize::B4)
-                            | (ImageFormat::Intensity4, TexelSize::B4) => {
-                                // 4 bits of intensity per texel
-
-                                let bytes_per_row = tile_width.div_ceil(2);
-
-                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
-                                    rgba.extend(
-                                        tmem.iter()
-                                            // Split each byte into two 4-bit texels
-                                            .flat_map(|byte| [byte & 0xF0 >> 4, byte & 0x0F])
-                                            // Convert each texel to RGBA
-                                            .flat_map(|texel| {
-                                                let intensity = (texel << 4) | texel;
-
-                                                [intensity, intensity, intensity, intensity]
-                                            }),
-                                    );
-                                });
-
-                                // If the tile width is odd, we pushed an extraneous 4-bit entry last, so remove it
-
-                                if tile_width & 1 != 0 {
-                                    for _ in 0..4 {
-                                        rgba.pop();
-                                    }
-                                }
-                            }
-
-                            (ImageFormat::Intensity, TexelSize::B8)
-                            | (ImageFormat::Intensity2, TexelSize::B8)
-                            | (ImageFormat::Intensity3, TexelSize::B8)
-                            | (ImageFormat::Intensity4, TexelSize::B8) => {
-                                // 1 byte per texel: 8-bit intensity
-
-                                let bytes_per_row = tile_width;
-
-                                read_block(&s.dp.tmem, row_address, bytes_per_row, |tmem| {
-                                    rgba.extend(tmem.iter().flat_map(|intensity| {
-                                        [*intensity, *intensity, *intensity, *intensity]
-                                    }));
-                                });
-                            }
-
-                            _ => panic!(
-                                "Unsupported {:?} / {:?} format",
-                                slot.tile.format(),
-                                slot.tile.texel_size()
-                            ),
-                        }
-
-                        row_address += tile_stride;
-                    }
-
-                    debug_assert_eq!(rgba.len(), tile_width * tile_height * 4);
-
-                    s.video_renderer.push_command(video::Command::PushTile {
-                        slot: slot.tile.tile().value(),
-                        rgba,
-                        width: tile_width as u32,
-                        height: tile_height as u32,
-                    });
-
-                    // Push the geometry to the renderer
-
-                    let tile_index = slot.tile.tile().value();
+                    // The lower coordinates should be greater than the upper coordinates.
+                    // If not, don't render anything.
+                    // TODO souce???
 
                     let rect_left = data.top_left_x();
                     let rect_top = data.top_left_y();
                     let rect_right = data.bottom_right_x();
                     let rect_bottom = data.bottom_right_y();
 
-                    assert!(rect_left < rect_right);
-                    assert!(rect_top < rect_bottom);
-
-                    let tile_s_start = data.top_left_s() as f32 / 32.0 / tile_width as f32;
-                    let tile_t_start = data.top_left_t() as f32 / 32.0 / tile_height as f32;
-
-                    let tile_dsdx = data.dsdx() as i16 as f32 / 1024.0;
-                    let tile_dtdy = data.dtdy() as i16 as f32 / 1024.0;
-
-                    let tile_s_end = tile_s_start + tile_dsdx;
-                    let tile_t_end = tile_t_start + tile_dtdy;
-
-                    let uvs = [
-                        [tile_s_start, tile_t_start],
-                        [tile_s_end, tile_t_start],
-                        [tile_s_end, tile_t_end],
-                        [tile_s_start, tile_t_end],
-                    ];
-
-                    // TODO flip?
-
-                    if data.flip() {
-                        panic!("Rectangle flip");
+                    if rect_right <= rect_left || rect_bottom <= rect_top {
+                        continue;
                     }
 
+                    if data.flip() {
+                        //log::warn!("Rectangle flip");
+                    }
+
+                    // Push the texture to the renderer
+                    // TODO only if never pushed before?
+
+                    let slot = &s.dp.state.tile_slots[data.tile().value() as usize];
+
+                    let (tile, tile_id) = s.dp.tile_cache.get(&s.dp.tmem, slot.tile, slot.size);
+
+                    // log::error!(
+                    //     "Using tile: {} = {}, {}, {}, {}, {}, {}, {} @ {}x{}",
+                    //     tile_id,
+                    //     tile.width,
+                    //     tile.height,
+                    //     slot.tile.stride_byte(),
+                    //     slot.tile.texel_size().bits(),
+                    //     slot.tile.line_size().value(),
+                    //     tile.width,
+                    //     tile.height,
+                    //     rect_left,
+                    //     rect_top,
+                    // );
+
+                    s.video_renderer.push_command(video::Command::PushTile {
+                        tile_id,
+                        tile: tile.clone(),
+                    });
+
+                    // Push the geometry to the renderer
+
+                    let vertices = [
+                        coord(rect_left, rect_top),
+                        coord(rect_right, rect_top),
+                        coord(rect_right, rect_bottom),
+                        coord(rect_left, rect_bottom),
+                    ];
+
+                    let s_start_texel = data.top_left_s() as i16 as f32 / 32.0;
+                    let t_start_texel = data.top_left_t() as i16 as f32 / 32.0;
+
+                    let dsdx = data.dsdx() as i16 as f32 / 1024.0;
+                    let dtdy = data.dtdy() as i16 as f32 / 1024.0;
+
+                    let rect_left = rect_left.value() as f32 / 4.0;
+                    let rect_right = rect_right.value() as f32 / 4.0;
+                    let rect_top = rect_top.value() as f32 / 4.0;
+                    let rect_bottom = rect_bottom.value() as f32 / 4.0;
+
+                    let rect_width = (rect_right - rect_left).abs();
+                    let rect_height = (rect_bottom - rect_top).abs();
+
+                    let s_end_texel = s_start_texel + dsdx * rect_width;
+                    let t_end_texel = t_start_texel + dtdy * rect_height;
+
+                    let s_start = s_start_texel / tile.width as f32;
+                    let t_start = t_start_texel / tile.height as f32;
+                    let s_end = s_end_texel / tile.width as f32;
+                    let t_end = t_end_texel / tile.height as f32;
+
+                    let uvs = [
+                        [s_start, t_start],
+                        [s_end, t_start],
+                        [s_end, t_end],
+                        [s_start, t_end],
+                    ];
+
+                    //let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+
+                    // if uvs[0][0] != 0.0 && uvs[0][0] != 1.0
+                    //     || uvs[0][1] != 0.0 && uvs[0][1] != 1.0
+                    //     || uvs[1][0] != 0.0 && uvs[1][0] != 1.0
+                    //     || uvs[1][1] != 0.0 && uvs[1][1] != 1.0
+                    //     || uvs[2][0] != 0.0 && uvs[2][0] != 1.0
+                    //     || uvs[2][1] != 0.0 && uvs[2][1] != 1.0
+                    //     || uvs[3][0] != 0.0 && uvs[3][0] != 1.0
+                    //     || uvs[3][1] != 0.0 && uvs[3][1] != 1.0
+                    // {
+                    //     log::warn!("Invalid UVs: {:#?}", uvs);
+                    //     log::warn!("Rect: {:#?}", data);
+                    //     log::warn!("Tile: {:#?}", slot.tile);
+                    // }
+                    //let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+
+                    // log::warn!(
+                    //     "#{} - {:?} , uv ({:?}, {:?}) ---rect dim {:?} x {:?}, s_start_texel {:?} / {:?} / {:?} / {:?} -> {:?}, dsdx {:?} tile w {} ",
+                    //     tile_index,
+                    //     vertices,
+                    //     uvs[0],
+                    //     uvs[2],
+                    //     //
+                    //     rect_width,
+                    //     rect_height,
+                    //     data.top_left_s(),
+                    //     data.top_left_s() as i16,
+                    //     data.top_left_s() as i16 as f32,
+                    //     data.top_left_s() as i16 as f32 / 32.0,
+                    //     s_start,
+                    //     data.dsdx(),
+                    //     tile_width
+                    // );
+
                     s.video_renderer.push_command(video::Command::PushQuad {
-                        vertices: [
-                            coord(rect_left, rect_top),
-                            coord(rect_right, rect_top),
-                            coord(rect_right, rect_bottom),
-                            coord(rect_left, rect_bottom),
-                        ],
-                        fill: QuadFill::Texture {
-                            tile_slot: tile_index,
-                            uvs,
-                        },
+                        vertices,
+                        fill: QuadFill::Texture { tile_id, uvs },
                     });
                 }
 
@@ -998,7 +1002,8 @@ impl Dp {
         }
 
         // Render a new frame
-        // (we should be here because we got a SYNC FULL command)
+        // (we're here because we got a SYNC FULL command)
+        // TODO handle SyncFull like the other commands, in the match
 
         if s.dp.decoded_commands.len() > 0 {
             s.video_renderer.push_command(video::Command::Render);
@@ -1048,214 +1053,265 @@ enum Command {
     SetKeyGB,
     SetKeyR,
     SetConvert,
-    SetScissor,
+    SetScissor(SetScissor),
     SetPrimitiveDepth,
     SetOtherModes,
     LoadTLUT(LoadTile),
     SetTileSize(SetTileSize),
-    LoadBlock,
+    LoadBlock(LoadBlock),
     LoadTile(LoadTile),
     SetTile(SetTile),
     FillRectangle(FillRectangle),
     SetFillColor(SetFillColor),
-    SetFogColor,
-    SetBlendColor,
+    SetFogColor(SetFogColor),
+    SetBlendColor(SetBlendColor),
     SetPrimitiveColor(SetPrimitiveColor),
-    SetEnvironmentColor,
+    SetEnvironmentColor(SetEnvironmentColor),
     SetCombineMode,
     SetTextureImage(SetTextureImage),
     SetDepthImage,
     SetColorImage,
 }
 
-#[bitenum(u3, exhaustive = true)]
-#[derive(Debug)]
-enum ImageFormat {
-    RGBA = 0,
-    YUV = 1,
-    ColorIndexed = 2,
-    IntensityAlpha = 3,
-    Intensity = 4,
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+pub struct Color {
+    #[bits(24..=31, rw)]
+    red: u8,
 
-    // 4+ values also mean Intensity
-    Intensity2 = 5,
-    Intensity3 = 6,
-    Intensity4 = 7,
+    #[bits(16..=23, rw)]
+    green: u8,
+
+    #[bits(8..=15, rw)]
+    blue: u8,
+
+    #[bits(0..=7, rw)]
+    alpha: u8,
 }
 
-#[bitenum(u2, exhaustive = true)]
-#[derive(Debug)]
-enum TexelSize {
-    B4 = 0,
-    B8 = 1,
-    B16 = 2,
-    B32 = 3,
+#[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
+pub struct SetEnvironmentColor {
+    #[bits(0..=31, rw)]
+    color: Color,
 }
 
-impl TexelSize {
-    pub fn bits(&self) -> usize {
-        match self {
-            TexelSize::B4 => 4,
-            TexelSize::B8 => 8,
-            TexelSize::B16 => 16,
-            TexelSize::B32 => 32,
-        }
-    }
+#[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
+pub struct SetFogColor {
+    #[bits(0..=31, rw)]
+    color: Color,
+}
+
+#[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
+pub struct SetBlendColor {
+    #[bits(0..=31, rw)]
+    color: Color,
+}
+
+#[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
+pub struct SetScissor {
+    #[bits(44..=55, rw)]
+    upper_left_x: u12,
+
+    #[bits(32..=43, rw)]
+    upper_left_y: u12,
+
+    #[bit(25, rw)]
+    field: bool,
+
+    #[bit(24, rw)]
+    odd: bool,
+
+    #[bits(12..=23, rw)]
+    lower_right_x: u12,
+
+    #[bits(0..=11, rw)]
+    lower_right_y: u12,
 }
 
 #[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct LoadTLUT {
-    #[bits(44..=55, r)]
+    #[bits(44..=55, rw)]
     low_index: u12,
 
-    #[bits(24..=26, r)]
+    #[bits(24..=26, rw)]
     tile_index: u3,
 
-    #[bits(12..=23, r)]
+    #[bits(12..=23, rw)]
     high_index: u12,
 }
 
 #[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct SetTextureImage {
-    #[bits(53..=55, r)]
+    #[bits(53..=55, rw)]
     format: ImageFormat,
 
-    #[bits(51..=52, r)]
+    #[bits(51..=52, rw)]
     texel_size: TexelSize,
 
     /// Width in pixels of the texture in RAM, minus one.
-    #[bits(32..=41, r)]
+    #[bits(32..=41, rw)]
     width: u10,
 
-    #[bits(0..=25, r)]
+    #[bits(0..=25, rw)]
     ram_address: u26,
 }
 
 #[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct FillRectangle {
-    #[bits(44..=55, r)]
+    #[bits(44..=55, rw)]
     lower_right_x: u12,
 
-    #[bits(32..=43, r)]
+    #[bits(32..=43, rw)]
     lower_right_y: u12,
 
-    #[bits(24..=26, r)]
+    #[bits(24..=26, rw)]
     tile: u3,
 
-    #[bits(12..=23, r)]
+    #[bits(12..=23, rw)]
     upper_left_x: u12,
 
-    #[bits(0..=11, r)]
+    #[bits(0..=11, rw)]
     upper_left_y: u12,
 }
+
+// todo signed/unsigned 10.2, 10.5, 5.10 structs?
 
 #[bitfield(u128, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct TextureRectangle {
     /// Flip the texture vertically. TODO vertically?
     ///
-    /// TextureRectangle = 0x24
-    /// TextureRectangleFlip = 0x25
+    /// Commands:
+    /// - TextureRectangle = 0x24
+    /// - TextureRectangleFlip = 0x25
     ///
     /// So the flip attribute is the LSB of the command.
-    #[bit(120, r)]
+    #[bit(120, rw)]
     flip: bool,
 
-    // NOTE: the official RDP manual seems to be wrong, the bottom coordinates come first
-    #[bits(108..=119, r)]
+    /// Bottom right x screen coordinate, 10.2 format
+    ///
+    /// NOTE: the official RDP manual seems to be wrong, the bottom coordinates come first!
+    #[bits(108..=119, rw)]
     bottom_right_x: u12,
 
-    #[bits(96..=107, r)]
+    /// Bottom right y screen coordinate, 10.2 format
+    #[bits(96..=107, rw)]
     bottom_right_y: u12,
 
-    #[bits(88..=90, r)]
+    /// Tile index
+    #[bits(88..=90, rw)]
     tile: u3,
 
-    #[bits(76..=87, r)]
+    /// Top left x screen coordinate, 10.2 format
+    #[bits(76..=87, rw)]
     top_left_x: u12,
 
-    #[bits(64..=75, r)]
+    /// Top left y screen coordinate, 10.2 format
+    #[bits(64..=75, rw)]
     top_left_y: u12,
 
-    #[bits(48..=63, r)]
+    /// Top left s, 10.5 format
+    #[bits(48..=63, rw)]
     top_left_s: u16,
 
-    #[bits(32..=47, r)]
+    /// Top left t, 10.5 format
+    #[bits(32..=47, rw)]
     top_left_t: u16,
 
-    #[bits(16..=31, r)]
+    /// Change in s per x, 5.10 format
+    #[bits(16..=31, rw)]
     dsdx: u16,
 
-    #[bits(0..=15, r)]
+    /// Change in t per y, 5.10 format
+    #[bits(0..=15, rw)]
     dtdy: u16,
 }
 
 #[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
-pub struct LoadTile {
-    #[bits(44..=55, r)]
+pub struct LoadBlock {
+    #[bits(44..=55, rw)]
     upper_left_x: u12,
 
-    #[bits(32..=43, r)]
+    #[bits(32..=43, rw)]
     upper_left_y: u12,
 
-    #[bits(24..=26, r)]
+    #[bits(24..=26, rw)]
     tile: u3,
 
-    #[bits(12..=23, r)]
+    #[bits(12..=23, rw)]
     lower_right_x: u12,
 
-    #[bits(0..=11, r)]
+    /// TODO ?
+    #[bits(0..=11, rw)]
+    dxt: u12,
+}
+
+#[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
+pub struct LoadTile {
+    #[bits(44..=55, rw)]
+    upper_left_x: u12,
+
+    #[bits(32..=43, rw)]
+    upper_left_y: u12,
+
+    #[bits(24..=26, rw)]
+    tile: u3,
+
+    #[bits(12..=23, rw)]
+    lower_right_x: u12,
+
+    #[bits(0..=11, rw)]
     lower_right_y: u12,
 }
 
 #[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct SetTile {
-    #[bits(53..=55, r)]
+    #[bits(53..=55, rw)]
     format: ImageFormat,
 
-    #[bits(51..=52, r)]
+    #[bits(51..=52, rw)]
     texel_size: TexelSize,
 
     /// Tile stride in 64-bit words
-    #[bits(41..=49, r)]
+    #[bits(41..=49, rw)]
     line_size: u9,
 
-    #[bits(32..=40, r)]
+    #[bits(32..=40, rw)]
     tmem_address: u9,
 
-    #[bits(24..=26, r)]
+    #[bits(24..=26, rw)]
     tile: u3,
 
-    #[bits(20..=23, r)]
+    #[bits(20..=23, rw)]
     palette: u4,
 
-    #[bit(19, r)]
+    #[bit(19, rw)]
     clamp_y: bool,
 
-    #[bit(18, r)]
+    #[bit(18, rw)]
     mirror_y: bool,
 
-    #[bits(14..=17, r)]
+    #[bits(14..=17, rw)]
     mask_y: u4,
 
-    #[bits(10..=13, r)]
+    #[bits(10..=13, rw)]
     shift_y: u4,
 
-    #[bit(9, r)]
+    #[bit(9, rw)]
     clamp_x: bool,
 
-    #[bit(8, r)]
+    #[bit(8, rw)]
     mirror_x: bool,
 
-    #[bits(4..=7, r)]
+    #[bits(4..=7, rw)]
     mask_x: u4,
 
-    #[bits(0..=3, r)]
+    #[bits(0..=3, rw)]
     shift_x: u4,
 }
 
 impl SetTile {
     /// Returns the tile width in bytes, as it's defined in 64-bit words in the command.
-    pub fn stride(&self) -> usize {
+    pub fn stride_byte(&self) -> usize {
         (self.line_size().value() as usize) << 3
     }
 }
@@ -1269,62 +1325,53 @@ impl SetTile {
 
 #[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct SetTileSize {
-    #[bits(44..=55, r)]
+    #[bits(44..=55, rw)]
     upper_left_x: u12,
 
-    #[bits(32..=43, r)]
+    #[bits(32..=43, rw)]
     upper_left_y: u12,
 
-    #[bits(24..=26, r)]
+    #[bits(24..=26, rw)]
     tile: u3,
 
-    #[bits(12..=23, r)]
+    #[bits(12..=23, rw)]
     lower_right_x: u12,
 
-    #[bits(0..=11, r)]
+    #[bits(0..=11, rw)]
     lower_right_y: u12,
 }
 
 #[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct SetPrimitiveColor {
-    #[bits(40..=44, r)]
+    #[bits(40..=44, rw)]
     min_level: u5,
 
-    #[bits(32..=39, r)]
+    #[bits(32..=39, rw)]
     level_fraction: u8,
 
-    #[bits(24..=31, r)]
-    red: u8,
-
-    #[bits(16..=23, r)]
-    green: u8,
-
-    #[bits(8..=15, r)]
-    blue: u8,
-
-    #[bits(0..=7, r)]
-    alpha: u8,
+    #[bits(0..=31, rw)]
+    color: Color,
 }
 
 #[bitfield(u64, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct SetFillColor {
-    #[bits(0..=31, r)]
+    #[bits(0..=31, rw)]
     color: RGBA,
     // TODO other formats overlapped?
 }
 
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct RGBA {
-    #[bits(24..=31, r)]
+    #[bits(24..=31, rw)]
     red: u8,
 
-    #[bits(16..=23, r)]
+    #[bits(16..=23, rw)]
     green: u8,
 
-    #[bits(8..=15, r)]
+    #[bits(8..=15, rw)]
     blue: u8,
 
-    #[bits(0..=7, r)]
+    #[bits(0..=7, rw)]
     alpha: u8,
 }
 
@@ -1338,6 +1385,6 @@ pub fn rgba5551_to_8888(hi: u8, lo: u8) -> [u8; 4] {
         b5_to_b8(hi >> 3),
         b5_to_b8(((hi & 7) << 2) | (lo >> 6)),
         b5_to_b8((lo >> 1) & 0x1F),
-        0xFF, // TODO
+        (lo & 1) * 255,
     ]
 }

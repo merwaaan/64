@@ -15,6 +15,7 @@ use crate::{
     mi::Interrupt,
     sp::{self, Register, Sp, SpRegsLocation},
     system::System,
+    value::Value,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -173,7 +174,7 @@ pub fn decode(opcode: Opcode) -> DecodedInstruction {
                 0x07 => inst!(suv),
                 0x08 => inst!(shv),
                 0x09 => inst!(sfv),
-                0x0A => inst!(swv), // TODO ? sme as suv in rsp manual
+                0x0A => inst!(swv),
                 0x0B => inst!(stv),
                 _ => RESERVED_INSTRUCTION,
             },
@@ -242,6 +243,14 @@ fn broadcast(e: u8, v: i16x8) -> i16x8 {
     }
 }
 
+const ZEROS: i16x8 = i16x8::splat(0);
+const ZEROS32: i32x8 = i32x8::splat(0);
+
+const ONES: i16x8 = i16x8::splat(1);
+const ONES32: i32x8 = i32x8::splat(1);
+
+const ACC_LO_MASK: i64x8 = i64x8::splat(!0xFFFF);
+
 // TODO u4?
 fn velement_offset(op: Opcode) -> u8 {
     ((op.0 >> 7) & 0xF) as u8
@@ -257,7 +266,7 @@ macro_rules! placeholder {
     ($name:ident) => {
         paste::paste! {
             fn [< $name _execute >](_s: &mut System, _op: Opcode) -> Option<InstructionEffect> {
-                log::warn!("SP: unimplemented {}", stringify!($name));
+                //panic!("SP: unimplemented {}", stringify!($name));
 
                 None
             }
@@ -761,6 +770,21 @@ fn ori_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
 
 reuse_cpu_disassembly!(ori);
 
+// TODO unused code for SB into SPMEM - (main CPU SB, not the RSP's!!!)
+// // Hardware tests (n64-systemtest) show that SB is broken and clobbers the whole target 32-bit word:
+// // - stores high bits to the left of the target address
+// // - fills the right bits with zeros
+//
+// let word = s.sp.regs2.read(op.rt());
+//
+// let addr = u32::from(offset_addr(s, op));
+// let addr_aligned = addr & !3;
+//
+// let shift = (3 - addr_aligned) * 8;
+// let shifted = word << shift;
+//
+// shifted.write_mem(&mut s.sp.mem, addr_aligned);
+
 fn sb_execute(s: &mut System, op: Opcode) -> InstructionResult {
     let addr = u32::from(offset_addr(s, op));
     let byte = s.sp.regs2.read(op.rt()) as u8;
@@ -920,8 +944,12 @@ fn slti_execute(s: &mut System, op: Opcode) -> InstructionResult {
 reuse_cpu_disassembly!(slti);
 
 fn sltiu_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
-    // Same as SLTI since there is no overflow exceptions
-    slti_execute(s, op)
+    let rs = s.sp.regs2.read(op.rs());
+    let imm = op.imm16() as i16 as u32; // sign-extends and then compare unsigned
+
+    s.sp.regs2.write(op.rt(), (rs < imm) as u32);
+
+    None
 }
 
 reuse_cpu_disassembly!(sltiu);
@@ -1118,10 +1146,73 @@ fn lrv_disassemble(_s: &System, op: Opcode) -> Disassembly {
     ))
 }
 
+fn srv_execute(s: &mut System, op: Opcode) -> InstructionResult {
+    panic!("SRV not implemented");
+}
+
+fn srv_disassemble(_s: &System, op: Opcode) -> Disassembly {
+    Disassembly::new(format!(
+        "SRV v{}[{}], {:X}({})",
+        vt(op),
+        velement_offset(op),
+        voffset(op, 4),
+        vbase(op)
+    ))
+}
+
+placeholder!(ltv);
+placeholder!(stv);
+
+// fn ltv_execute(s: &mut System, op: Opcode) -> InstructionResult {
+//     // TODO
+
+//     None
+// }
+
+// fn ltv_disassemble(_s: &System, op: Opcode) -> Disassembly {
+//     Disassembly::new(format!(
+//         "LTV v{}[{}], {:X}({})",
+//         vt(op),
+//         velement_offset(op),
+//         voffset(op, 4),
+//         vbase(op)
+//     ))
+// }
+
+// fn stv_execute(s: &mut System, op: Opcode) -> InstructionResult {
+//     let addr = s.sp.regs2.0[vbase(op) as usize].wrapping_add(voffset(op, 4) as u32); // TODO mask? or use correct type?
+
+//     let e = velement_offset(op) as usize;
+
+//     for i in 0..8 {
+//         let vt_index = e + i;
+//         let vt_lane = vt[vt_index & 7];
+
+//         let vt_shift = if (vt_index & 8) == 0 {
+//             EVEN_SHIFT
+//         } else {
+//             ODD_SHIFT
+//         };
+
+//         s.sp.mem[(addr as usize + i) & 0x0FFF] = (vt_lane >> vt_shift) as u8;
+//     }
+
+//     None
+// }
+
+// fn stv_disassemble(_s: &System, op: Opcode) -> Disassembly {
+//     Disassembly::new(format!(
+//         "STV v{}[{}], {:X}({})",
+//         vt(op),
+//         velement_offset(op),
+//         voffset(op, 4),
+//         vbase(op)
+//     ))
+// }
+
 placeholder!(lfv);
 
 placeholder!(lhv);
-placeholder!(ltv);
 placeholder!(lwv);
 
 fn sqv_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1175,7 +1266,7 @@ fn lxv_execute<const SHIFT: usize>(s: &mut System, op: Opcode) -> InstructionRes
 
     let e = velement_offset(op) as usize;
 
-    let mut reg = i16x8::splat(0);
+    let mut reg = ZEROS;
 
     for i in 0..8usize {
         let byte_addr =
@@ -1278,9 +1369,7 @@ fn suv_disassemble(_s: &System, op: Opcode) -> Disassembly {
 }
 
 placeholder!(sfv);
-placeholder!(srv);
 placeholder!(shv);
-placeholder!(stv);
 placeholder!(swv);
 
 fn cfc2_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1404,7 +1493,7 @@ fn vsar_execute(s: &mut System, op: Opcode) -> InstructionResult {
         _ => {
             log::info!("vsar: e={}", velement(op));
 
-            s.sp.vregs[vd] = i16x8::splat(0);
+            s.sp.vregs[vd] = ZEROS;
 
             // TODO write to acc?
         }
@@ -1435,7 +1524,7 @@ fn vmov_execute(s: &mut System, op: Opcode) -> InstructionResult {
     let de = vs(op) & 7;
     s.sp.vregs[vd(op)][de] = vt[de];
 
-    s.sp.vacc &= i64x8::splat(!0xFFFF);
+    s.sp.vacc &= ACC_LO_MASK;
     s.sp.vacc |= vt.cast::<u16>().cast::<i64>();
 
     None
@@ -1464,7 +1553,7 @@ fn vand_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
     let result = vs & vt;
 
     s.sp.vregs[vd(op)] = vs & vt;
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u16>().cast::<i64>();
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u16>().cast::<i64>();
 
     None
 }
@@ -1480,7 +1569,7 @@ fn vnand_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
     let result = !(vs & vt);
 
     s.sp.vregs[vd(op)] = result;
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u16>().cast::<i64>();
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u16>().cast::<i64>();
 
     None
 }
@@ -1496,7 +1585,7 @@ fn vor_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
     let result = vs | vt;
 
     s.sp.vregs[vd(op)] = vs | vt;
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u16>().cast::<i64>();
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u16>().cast::<i64>();
 
     None
 }
@@ -1512,7 +1601,7 @@ fn vnor_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
     let result = !(vs | vt);
 
     s.sp.vregs[vd(op)] = !(vs | vt);
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u16>().cast::<i64>();
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u16>().cast::<i64>();
 
     None
 }
@@ -1528,7 +1617,7 @@ fn vxor_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
     let result = vs ^ vt;
 
     s.sp.vregs[vd(op)] = vs ^ vt;
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u16>().cast::<i64>();
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u16>().cast::<i64>();
 
     None
 }
@@ -1544,7 +1633,7 @@ fn vnxor_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
     let result = !(vs ^ vt);
 
     s.sp.vregs[vd(op)] = result;
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u16>().cast::<i64>();
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u16>().cast::<i64>();
 
     None
 }
@@ -1553,9 +1642,9 @@ fn vnxor_disassemble(_s: &System, op: Opcode) -> Disassembly {
     Disassembly::new(format!("VNXOR {}, {}, {}", op.rd(), op.rs(), op.rt()))
 }
 
-/*
- * Arithmetic
- */
+// ----------
+// Arithmetic
+// ----------
 
 fn vabs_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
     // Negate vt's lanes depending on the sign of vs.
@@ -1564,17 +1653,17 @@ fn vabs_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
     let vs = s.sp.vregs[vs(op)];
     let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
 
-    let zero = i16x8::splat(0);
+    let zeroed = vs.simd_eq(ZEROS).select(ZEROS, vt);
 
-    let zeroed = vs.simd_eq(zero).select(zero, vt);
+    // The wrapped negated result goes into the accumulator.
+    // The saturated negated result goes into the destination register.
+    // This matter for 0x8000 which negates to 0x8000 (wrapped) / 0x7FFF (saturated).
 
-    let negated = vs.simd_lt(zero).select(zeroed.saturating_neg(), zeroed);
+    let negated_wrap = vs.simd_lt(ZEROS).select(-zeroed, zeroed);
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | negated_wrap.cast::<u16>().cast::<i64>();
 
-    s.sp.vregs[vd(op)] = negated;
-
-    // TODO special case: 0x8000 negates to 0x7FFF in result but 0x8000 in acc???
-
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | negated.cast::<u16>().cast::<i64>();
+    let negated_sat = vs.simd_lt(ZEROS).select(zeroed.saturating_neg(), zeroed);
+    s.sp.vregs[vd(op)] = negated_sat;
 
     None
 }
@@ -1584,21 +1673,19 @@ fn vabs_disassemble(_s: &System, op: Opcode) -> Disassembly {
 }
 
 fn vadd_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
-    let vs = s.sp.vregs[vs(op)];
-    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
+    // Add vt to vs with carry in, store in acc (wrapped) and vd (clamped), clear the carry
 
-    let vs32 = vs.cast::<i32>();
-    let vt32 = vt.cast::<i32>();
+    let vs_i32 = s.sp.vregs[vs(op)].cast::<i32>();
+    let vt_i32 = broadcast(velement(op), s.sp.vregs[vt(op)]).cast::<i32>();
 
     let vco = Mask::<i32, 8>::from_bitmask((s.sp.vco & 0xFF) as u64)
         .select(i32x8::splat(1), i32x8::splat(0));
 
-    let sum = vs32 + vt32 + vco;
+    let wrapped_i32 = vs_i32 + vt_i32 + vco;
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | wrapped_i32.cast::<u16>().cast::<i64>();
 
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | sum.cast::<u16>().cast::<i64>();
-
-    let clamped = sum.simd_clamp(i32x8::splat(-32768), i32x8::splat(32767));
-    s.sp.vregs[vd(op)] = clamped.cast::<i16>();
+    let clamped_i32 = wrapped_i32.simd_clamp(i32x8::splat(-32768), i32x8::splat(32767));
+    s.sp.vregs[vd(op)] = clamped_i32.cast::<i16>();
 
     s.sp.vco = 0;
 
@@ -1608,20 +1695,15 @@ fn vadd_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
 disassembly_vd_vs_vte!(vadd);
 
 fn vaddc_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
-    let vs = s.sp.vregs[vs(op)];
-    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
-
-    let vs_u16 = vs.cast::<u16>();
-    let vt_u16 = vt.cast::<u16>();
+    let vs_u16 = s.sp.vregs[vs(op)].cast::<u16>();
+    let vt_u16 = broadcast(velement(op), s.sp.vregs[vt(op)]).cast::<u16>();
 
     let result_u16 = vs_u16 + vt_u16;
-    let result = result_u16.cast::<i16>();
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result_u16.cast::<i64>();
+    s.sp.vregs[vd(op)] = result_u16.cast::<i16>();
 
     let carry_out = result_u16.simd_lt(vs_u16);
-
-    s.sp.vregs[vd(op)] = result;
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u16>().cast::<i64>();
-    s.sp.vco = carry_out.to_bitmask() as u16; // TODO lo/hi?
+    s.sp.vco = carry_out.to_bitmask() as u16;
 
     None
 }
@@ -1637,11 +1719,10 @@ fn clamp_acc_signed<const MIN: i16, const MAX: i16, const MID_OR_LO: bool>(acc: 
 
     // TODO optim?
 
-    let underflow = hi.simd_lt(i16x8::splat(0))
-        & (hi.simd_ne(i16x8::splat(0xFFFFu16 as i16)) | mid.simd_ge(i16x8::splat(0)));
+    let underflow =
+        hi.simd_lt(ZEROS) & (hi.simd_ne(i16x8::splat(0xFFFFu16 as i16)) | mid.simd_ge(ZEROS));
 
-    let overflow =
-        hi.simd_ge(i16x8::splat(0)) & (hi.simd_ne(i16x8::splat(0)) | mid.simd_lt(i16x8::splat(0)));
+    let overflow = hi.simd_ge(ZEROS) & (hi.simd_ne(ZEROS) | mid.simd_lt(ZEROS));
 
     let portion = if MID_OR_LO { mid } else { acc.cast::<i16>() };
 
@@ -1763,19 +1844,19 @@ fn clamp_acc_unsigned(acc: &i64x8) -> i16x8 {
 // }
 
 fn vsub_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
-    // Subtract vt from vs with borrow in (saturating), store in vd and acc, clear the carry
+    // Subtract vt from vs with borrow in, store in acc (wrapped) and vd (clamped), clear the carry
 
-    let vs = s.sp.vregs[vs(op)];
-    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
+    let vs_i32 = s.sp.vregs[vs(op)].cast::<i32>();
+    let vt_i32 = broadcast(velement(op), s.sp.vregs[vt(op)]).cast::<i32>();
 
-    let vco =
-        Mask::<i16, 8>::from_bitmask(s.sp.vco as u64).select(i16x8::splat(1), i16x8::splat(0));
+    let vco_i32 = Mask::<i32, 8>::from_bitmask(s.sp.vco as u64).select(ONES32, ZEROS32);
 
-    let clamped = vs.saturating_sub(vt).saturating_sub(vco);
-    let wrapped = vs - vt - vco;
+    let wrapped_i32 = vs_i32 - vt_i32 - vco_i32;
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | wrapped_i32.cast::<u16>().cast::<i64>();
 
-    s.sp.vregs[vd(op)] = clamped; // TODO clamped?
-    s.sp.vacc = s.sp.vacc & i64x8::splat(0xFFFF_FFFF0000) | wrapped.cast::<u16>().cast::<i64>();
+    let clamped_i32 = wrapped_i32.simd_clamp(i32x8::splat(-32768), i32x8::splat(32767));
+    s.sp.vregs[vd(op)] = clamped_i32.cast::<i16>();
+
     s.sp.vco = 0;
 
     None
@@ -1784,22 +1865,18 @@ fn vsub_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
 disassembly_vd_vs_vte!(vsub);
 
 fn vsubc_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
-    // Subtract vt from vs (wrapping, no carry in), store in vd and acc, store the carry out in low VCO
+    // Subtract vt from vs, store in acc and vd (both wrapped), update VCO
 
-    let vs = s.sp.vregs[vs(op)];
-    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
-
-    let vs_u16 = vs.cast::<u16>();
-    let vt_u16 = vt.cast::<u16>();
+    let vs_u16 = s.sp.vregs[vs(op)].cast::<u16>();
+    let vt_u16 = broadcast(velement(op), s.sp.vregs[vt(op)]).cast::<u16>();
 
     let result_u16 = vs_u16 - vt_u16;
-    let result = result_u16.cast::<i16>();
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result_u16.cast::<i64>();
+    s.sp.vregs[vd(op)] = result_u16.cast::<i16>();
 
-    let borrow_out = result_u16.simd_gt(vs_u16);
-
-    s.sp.vregs[vd(op)] = result; // TODO clamped?
-    s.sp.vacc = s.sp.vacc & i64x8::splat(0xFFFF_FFFF0000) | result.cast::<u16>().cast::<i64>();
-    s.sp.vco = borrow_out.to_bitmask() as u16;
+    let not_equal = result_u16.simd_ne(u16x8::splat(0)).to_bitmask() as u8;
+    let carry_out = vt_u16.simd_gt(vs_u16).to_bitmask() as u8; // unsigned comparison!
+    s.sp.vco = ((not_equal as u16) << 8) | (carry_out as u16);
 
     None
 }
@@ -1997,93 +2074,6 @@ disassembly_vd_vs_vte!(vmadh);
 placeholder!(vmacq);
 placeholder!(vmulq);
 
-// TODO note about manual being super inaccurate
-fn veq_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
-    let vs = s.sp.vregs[vs(op)];
-    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
-
-    let eq = vs.simd_eq(vt) & !Mask::<i16, 8>::from_bitmask((s.sp.vco >> 8) as u64);
-
-    let result = eq.select(vs, vt);
-
-    s.sp.vacc = s.sp.vacc & i64x8::splat(0xFFFF_FFFF0000) | result.cast::<u16>().cast::<i64>();
-    s.sp.vregs[vd(op)] = result;
-
-    s.sp.vcc = eq.to_bitmask() as u16;
-    s.sp.vco = 0;
-    //s.sp.vce = 0;
-
-    None
-}
-
-disassembly_vd_vs_vte!(veq);
-
-fn vne_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
-    let vs = s.sp.vregs[vs(op)];
-    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
-
-    let mask = vs.simd_ne(vt) | Mask::<i16, 8>::from_bitmask((s.sp.vco >> 8) as u64);
-
-    let result = mask.select(vs, vt);
-
-    s.sp.vacc = s.sp.vacc & i64x8::splat(0xFFFF_FFFF0000) | result.cast::<u16>().cast::<i64>();
-    s.sp.vregs[vd(op)] = result;
-
-    s.sp.vcc = mask.to_bitmask() as u16;
-    s.sp.vco = 0;
-    //s.sp.vce = 0;
-
-    None
-}
-
-disassembly_vd_vs_vte!(vne);
-
-fn vge_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
-    let vs = s.sp.vregs[vs(op)];
-    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
-
-    let mask = vs.simd_gt(vt)
-        | vs.simd_eq(vt)
-            & !(Mask::<i16, 8>::from_bitmask((s.sp.vco >> 8) as u64)
-                & Mask::<i16, 8>::from_bitmask(s.sp.vco as u64));
-
-    let result = mask.select(vs, vt);
-
-    s.sp.vacc = s.sp.vacc & i64x8::splat(0xFFFF_FFFF0000) | result.cast::<u16>().cast::<i64>();
-    s.sp.vregs[vd(op)] = result;
-
-    s.sp.vcc = mask.to_bitmask() as u16;
-    s.sp.vco = 0;
-    //s.sp.vce = 0;
-
-    None
-}
-
-disassembly_vd_vs_vte!(vge);
-
-fn vlt_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
-    let vs = s.sp.vregs[vs(op)];
-    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
-
-    let vco_mask = Mask::<i16, 8>::from_bitmask(s.sp.vco as u64);
-    let vce_mask = Mask::<i16, 8>::from_bitmask(s.sp.vce as u64);
-
-    let mask = vs.simd_lt(vt) | vs.simd_eq(vt) & vco_mask & !vce_mask;
-
-    let result = mask.select(vs, vt);
-
-    s.sp.vacc = s.sp.vacc & i64x8::splat(0xFFFF_FFFF0000) | result.cast::<u16>().cast::<i64>();
-    s.sp.vregs[vd(op)] = result;
-
-    s.sp.vcc = mask.to_bitmask() as u16;
-    s.sp.vco = 0;
-    s.sp.vce = 0;
-
-    None
-}
-
-disassembly_vd_vs_vte!(vlt);
-
 /// First part of a clipping test for clamping a vector to a range, ie. -VT <= VS <= VT.
 /// Sets VCO, VCC, VCE depending on various comparisons for VCL to continue with.
 ///
@@ -2103,16 +2093,15 @@ fn vch_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
     let vs = s.sp.vregs[vs(op)];
     let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
 
-    const ZERO: i16x8 = i16x8::splat(0);
     const MINUS_ONE: i16x8 = i16x8::splat(-1);
 
-    let diff_sign = (vs ^ vt).simd_lt(ZERO);
+    let diff_sign = (vs ^ vt).simd_lt(ZEROS);
     let sum = vs + vt;
     let diff = vs - vt;
 
-    let ge = diff_sign.select(vt.simd_lt(ZERO), diff.simd_ge(ZERO));
-    let le = diff_sign.select(sum.simd_le(ZERO), vt.simd_lt(ZERO));
-    let ne = diff_sign.select(sum.simd_ne(ZERO) & vs.simd_ne(!vt), diff.simd_ne(ZERO)); // TODO not sure here? !vt? more complex on the right?
+    let ge = diff_sign.select(vt.simd_lt(ZEROS), diff.simd_ge(ZEROS));
+    let le = diff_sign.select(sum.simd_le(ZEROS), vt.simd_lt(ZEROS));
+    let ne = diff_sign.select(sum.simd_ne(ZEROS) & vs.simd_ne(!vt), diff.simd_ne(ZEROS)); // TODO not sure here? !vt? more complex on the right?
     let vce = diff_sign.select(sum.simd_eq(MINUS_ONE), Mask::from_bitmask(0));
 
     s.sp.vcc = ((ge.to_bitmask() as u8 as u16) << 8) | (le.to_bitmask() as u8 as u16);
@@ -2120,12 +2109,12 @@ fn vch_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
     s.sp.vce = vce.to_bitmask() as u8;
 
     let result = diff_sign.select(
-        sum.simd_le(ZERO).select(-vt, vs),
-        diff.simd_ge(ZERO).select(vt, vs),
+        sum.simd_le(ZEROS).select(-vt, vs),
+        diff.simd_ge(ZEROS).select(vt, vs),
     );
 
     s.sp.vregs[vd(op)] = result;
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u16>().cast::<i64>();
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u16>().cast::<i64>();
 
     None
 }
@@ -2206,7 +2195,7 @@ fn vcl_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
         s.sp.vcc |= (vcc_high as u16) << (i + 8);
     }
 
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u64>().cast::<i64>();
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u64>().cast::<i64>();
     s.sp.vco = 0;
     s.sp.vce = 0;
 
@@ -2286,7 +2275,7 @@ fn vmrg_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
 
     let result = mask.select(vs, vt);
 
-    s.sp.vacc = s.sp.vacc & i64x8::splat(!0xFFFF) | result.cast::<u16>().cast::<i64>();
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u16>().cast::<i64>();
     s.sp.vregs[vd(op)] = result;
 
     s.sp.vco = 0; // Manual error: VCO is actuallycleared
@@ -2305,3 +2294,99 @@ placeholder!(vrsql);
 placeholder!(vrsqh);
 placeholder!(vrndn);
 placeholder!(vrndp);
+
+// -----------
+// Comparisons
+// -----------
+
+// TODO note about manual being super inaccurate
+fn veq_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
+    // Compare vs and vt taking VCO into account, store the result in acc and vd, clear VCO.
+    // The manual states that "VCO and VCE are used as input" but the bit about VCE looks like an error.
+
+    let vs = s.sp.vregs[vs(op)];
+    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
+
+    let equal = vs.simd_eq(vt) & !Mask::<i16, 8>::from_bitmask((s.sp.vco >> 8) as u64);
+
+    let result = equal.select(vs, vt);
+
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u16>().cast::<i64>();
+    s.sp.vregs[vd(op)] = result;
+
+    s.sp.vcc = equal.to_bitmask() as u16;
+    s.sp.vco = 0;
+
+    None
+}
+
+disassembly_vd_vs_vte!(veq);
+
+fn vne_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
+    // Similar to VEQ, VCE seems unused
+
+    let vs = s.sp.vregs[vs(op)];
+    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
+
+    let not_equal = vs.simd_ne(vt) | Mask::<i16, 8>::from_bitmask((s.sp.vco >> 8) as u64);
+
+    let result = not_equal.select(vs, vt);
+
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u16>().cast::<i64>();
+    s.sp.vregs[vd(op)] = result;
+
+    s.sp.vcc = not_equal.to_bitmask() as u16;
+    s.sp.vco = 0;
+
+    None
+}
+
+disassembly_vd_vs_vte!(vne);
+
+fn vge_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
+    // Similar to VEQ and VNE, still no VCE in sight, the condition takes both halves of VCO into account
+
+    let vs = s.sp.vregs[vs(op)];
+    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
+
+    let vco_mask = Mask::<i16, 8>::from_bitmask((s.sp.vco >> 8) as u64)
+        & Mask::<i16, 8>::from_bitmask(s.sp.vco as u64);
+
+    let ge = vs.simd_gt(vt) | vs.simd_eq(vt) & !vco_mask;
+
+    let result = ge.select(vs, vt);
+
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u16>().cast::<i64>();
+    s.sp.vregs[vd(op)] = result;
+
+    s.sp.vcc = ge.to_bitmask() as u16;
+    s.sp.vco = 0;
+
+    None
+}
+
+disassembly_vd_vs_vte!(vge);
+
+fn vlt_execute(s: &mut System, op: Opcode) -> Option<InstructionEffect> {
+    // Similar to VGE
+
+    let vs = s.sp.vregs[vs(op)];
+    let vt = broadcast(velement(op), s.sp.vregs[vt(op)]);
+
+    let vco_mask = Mask::<i16, 8>::from_bitmask((s.sp.vco >> 8) as u64)
+        & Mask::<i16, 8>::from_bitmask(s.sp.vco as u64);
+
+    let lt = vs.simd_lt(vt) | vs.simd_eq(vt) & vco_mask;
+
+    let result = lt.select(vs, vt);
+
+    s.sp.vacc = s.sp.vacc & ACC_LO_MASK | result.cast::<u16>().cast::<i64>();
+    s.sp.vregs[vd(op)] = result;
+
+    s.sp.vcc = lt.to_bitmask() as u16;
+    s.sp.vco = 0;
+
+    None
+}
+
+disassembly_vd_vs_vte!(vlt);

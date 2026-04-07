@@ -6,9 +6,8 @@ use crate::{
     bits::BitTest, cop0::Cop0, location::Location, register_overlaps, system::System, value::Value,
 };
 
-/// MIPS interface
+/// MIPS interface, primarily deals with interrupts.
 ///
-/// TODO doc
 /// https://n64brew.dev/wiki/MIPS_Interface
 
 #[derive(Debug, Clone, Copy, Display, EnumIter)]
@@ -27,15 +26,19 @@ pub type MiLocation = Location<0x0430_0000, 0x0440_0000>;
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
 #[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Mode {
+    /// Bytes to write in repeat mode, minus 1
     #[bits(0..=6, rw)]
     repeat_count: u7,
 
+    /// Repeat mode enabled
     #[bit(7, rw)]
     repeat: bool,
 
+    /// EBus mode enabled
     #[bit(8, rw)]
     ebus: bool,
 
+    /// Upper mode enabled
     #[bit(9, rw)]
     upper: bool,
 }
@@ -123,18 +126,23 @@ impl Registers {
         // Mode
 
         if register_overlaps!(offset, offset + T::BYTES as u32, Registers::mode) {
+            // TODO what if set/clear both set? samel logic as DP (= does nothing)?
+
             let mode_command = fake_regs[0];
+
             let mut mode = self.mode;
 
             if mode_command.bit_is_set::<7>() {
                 mode.set_repeat(false);
             } else if mode_command.bit_is_set::<8>() {
+                log::warn!("MI: repeat enabled");
                 mode.set_repeat(true);
             }
 
             if mode_command.bit_is_set::<9>() {
                 mode.set_ebus(false);
             } else if mode_command.bit_is_set::<10>() {
+                log::warn!("MI: EBus enabled");
                 mode.set_ebus(true);
             }
 
@@ -145,10 +153,11 @@ impl Registers {
             if mode_command.bit_is_set::<12>() {
                 mode.set_upper(false);
             } else if mode_command.bit_is_set::<13>() {
+                log::warn!("MI: upper enabled");
                 mode.set_upper(true);
             }
 
-            // TODO repeat count
+            mode.set_repeat_count(u7::from_u32(mode_command & 0x7F));
 
             self.mode = mode;
         }
@@ -157,6 +166,7 @@ impl Registers {
 
         if register_overlaps!(offset, offset + T::BYTES as u32, Registers::mask) {
             let mask_command = fake_regs[3];
+
             let mut mask = self.mask;
 
             if mask_command.bit_is_set::<0>() {

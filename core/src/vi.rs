@@ -8,6 +8,7 @@ use crate::{
     location::Location,
     mi::Interrupt,
     register_overlaps,
+    rendering::video::Frame,
     system::{Address, System},
     value::Value,
 };
@@ -301,7 +302,7 @@ impl Vi {
         Events::push(s, EventType::ViScanlineComplete, SCANLINE_CPU_CYCLES);
     }
 
-    pub fn extract_framebuffer(s: &mut System) -> (Vec<u8>, usize, usize) {
+    pub fn extract_framebuffer(s: &mut System) -> Frame {
         let base_addr = s.vi.framebuffer_address();
         let width = s.vi.framebuffer_width();
         let height = s.vi.framebuffer_height();
@@ -339,7 +340,12 @@ impl Vi {
             }
         }
 
-        (data, width, height)
+        Frame {
+            index: 0,
+            rgba: data,
+            width,
+            height,
+        }
     }
 
     // TODO move out, used elsewhere

@@ -316,8 +316,8 @@ impl System {
             Some(MapLocation::Pif(addr)) => self.pif.read(&self.controllers, addr),
             Some(MapLocation::OpenBus(addr)) => openbus::read(addr),
             None => {
-                log::warn!("Invalid read address: {}", addr);
-                T::default()
+                panic!("Invalid read address: {}", addr);
+                //T::default()
             }
         })
     }

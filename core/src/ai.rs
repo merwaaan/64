@@ -186,6 +186,8 @@ impl Ai {
     }
 
     fn push_dma(s: &mut System) {
+        // TODO clean up, pass slot as arg, like for SP
+
         if s.ai.pending_dma.is_some() {
             log::warn!("AI: DMA transfer already pending");
         }

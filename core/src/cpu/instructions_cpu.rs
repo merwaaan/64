@@ -1457,7 +1457,7 @@ fn sdl_execute(s: &mut System, op: Opcode) -> InstructionResult {
     let dword = if offset == 0 {
         op.rtv64(s)
     } else {
-        let mut dword = s.peek(Address::v(base)).expect("Invalid address");
+        let mut dword = s.read(Address::v(base))?;
         dword &= 0xFFFFFFFF_FFFFFFFF << (64 - 8 * offset);
         dword |= op.rtv64(s) >> (8 * offset);
         dword
@@ -1485,7 +1485,7 @@ fn sdr_execute(s: &mut System, op: Opcode) -> InstructionResult {
     let data = if offset == 7 {
         op.rtv64(s)
     } else {
-        let mut dword = s.peek(Address::v(base)).expect("Invalid address");
+        let mut dword = s.read(Address::v(base))?;
         dword &= 0xFFFFFFFF_FFFFFFFF >> (8 * (offset + 1));
         dword |= op.rtv64(s) << (56 - 8 * offset);
         dword
@@ -1725,7 +1725,7 @@ fn swl_execute(s: &mut System, op: Opcode) -> InstructionResult {
     let word = if addr_offset == 0 {
         op.rtv(s)
     } else {
-        let mut word = s.peek(Address::v(addr_base)).expect("Invalid address"); // TODO dangerous to read because of side effects?? (exceptions)
+        let mut word = s.read(Address::v(addr_base))?;
         word &= 0xFFFF_FFFF << (32 - 8 * addr_offset);
         word |= op.rtv(s) >> (8 * addr_offset);
         word
@@ -1754,7 +1754,7 @@ fn swr_execute(s: &mut System, op: Opcode) -> InstructionResult {
     let word = if offset == 3 {
         op.rtv(s)
     } else {
-        let mut word = s.peek(Address::v(base)).expect("Invalid address"); // TODO dangerous to read because of side effects?? (exceptions)
+        let mut word = s.read(Address::v(base))?;
         word &= 0xFFFF_FFFF >> (8 * (offset + 1));
         word |= op.rtv(s) << (24 - 8 * offset);
         word

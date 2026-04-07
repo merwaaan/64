@@ -20,7 +20,7 @@ pub enum Register {
     Compare,
     Status,
     Cause,
-    EPC, // TODO rename Expect(ion)PC?
+    EPC, // TODO rename Except(ion)PC?
     PRId,
     Config,
     LLAddr,
@@ -51,16 +51,16 @@ const REG_WRITE_MASK: [u64; 32] = [
     0xFFFFFFFF_FF800000, // Context
     0xFFFFFFFF_01FFE000, // PageMask
     0x00000000_0000003F, // Wired
-    WRITABLE,            // Rsv7TODO?
+    WRITABLE,            // Rsv7
     READ_ONLY,           // BadVAddr
     WRITABLE,            // Count
     0xC00000FF_FFFFE0FF, // EntryHi
     WRITABLE,            // Compare
-    0xFFFFFFFF_FFF7FFFF, // Status: bit 19 is read-only TODO really?
+    0x00000000_FFF7FFFF, // Status
     0x00000000_00000300, // Cause
     WRITABLE,            // EPC
     READ_ONLY,           // PrId
-    0x00000000_00000003, // Config
+    0x00000000_0F00800F, // Config
     0x00000000_FFFFFFFF, // LLAddr
     WRITABLE,            // WatchLo
     WRITABLE,            // WatchHi
@@ -94,9 +94,9 @@ impl Default for Cop0 {
         // Real-world startup values
         // https://n64.readthedocs.io/index.html#simulating-the-pif-rom
 
-        regs[Register::Random as usize].set(0x1F);
+        regs[Register::Random as usize].set(0x0000_001F);
         regs[Register::Status as usize].set(0x3400_0000);
-        regs[Register::PRId as usize].set(0xB22);
+        regs[Register::PRId as usize].set(0x0000_0B22);
         regs[Register::Config as usize].set(0x7006_E463);
 
         Self {
@@ -111,44 +111,53 @@ impl Cop0 {
         self.regs[reg]
     }
 
-    // WARNING: those writes are masked!
-
     pub fn write(&mut self, reg: usize, value: u32) {
-        let mask = REG_WRITE_MASK[reg] as u32;
+        // Masking seems to apply AFTER sign extension (matters for registers with a read-only low word like XContext)
 
-        self.regs[reg].set((self.regs[reg].get() & !mask) | (value & mask));
+        let value_sign_extended = value as i32 as u64;
 
-        match reg {
-            // Count
-            9 => {
-                self.update_cause_register();
-            }
-            // Compare
-            11 => {
-                self.set_ip7_interrupt(false);
-                self.update_cause_register();
-            }
-            _ => {}
-        }
+        let mask = REG_WRITE_MASK[reg];
+
+        self.regs[reg].set64((self.regs[reg].get64() & !mask) | (value_sign_extended & mask));
+
+        self.apply_write_effect(reg);
     }
 
-    // TODO use a single implem with <T: Value>?
     pub fn write64(&mut self, reg: usize, value: u64) {
         let mask = REG_WRITE_MASK[reg];
 
         self.regs[reg].set64((self.regs[reg].get64() & !mask) | (value & mask));
 
+        self.apply_write_effect(reg);
+    }
+
+    fn apply_write_effect(&mut self, reg: usize) {
         match reg {
             // Count
             9 => {
                 self.update_cause_register();
             }
+
             // Compare
             11 => {
                 self.set_ip7_interrupt(false);
                 self.update_cause_register();
             }
+
             _ => {}
+        }
+
+        // Reserved registers
+        //
+        // Hardware tests show that writing to any COP0 registers causes the reserved ones to read back the same value.
+        // So we just copy any written value to all the reserved registers to reproduce that behavior.
+
+        let value = self.regs[reg].get64();
+
+        const RESERVED: [usize; 7] = [7, 21, 22, 23, 24, 25, 31];
+
+        for reserved in RESERVED {
+            self.regs[reserved].set64(value);
         }
     }
 
@@ -171,6 +180,14 @@ impl Cop0 {
 
     pub fn set_bad_virtual_address(&mut self, value: u32) {
         self.regs[Register::BadVAddr as usize].set(value);
+    }
+
+    pub fn set_context(&mut self, value: u32) {
+        self.regs[Register::Context as usize].set(value);
+    }
+
+    pub fn set_xcontext(&mut self, value: u32) {
+        self.regs[Register::XContext as usize].set(value);
     }
 
     // STATUS register

@@ -13,22 +13,25 @@ use egui::{
     Color32, ColorImage, Context, Rect, Scene, ScrollArea, TextureFilter, TextureHandle,
     TextureOptions, vec2,
 };
-use n64_core::{dp::rgba5551_to_8888, rendering::video::Frame};
+use n64_core::{
+    dp::rgba5551_to_8888,
+    rendering::{tile_cache::Tile, video::Frame},
+};
 
 #[derive(Clone, Debug)]
 pub struct DpUpdate {
     pub regs: [u32; 8],
     pub tmem: [u8; 0x1000],
-
     // TODO move out
-    pub atlas_texture: Arc<Frame>,
+    pub tiles: Vec<(u64, Tile)>,
 }
 
 pub struct DpWidget {
     id: WidgetId,
     last_update: Option<DpUpdate>,
-    texture: Option<TextureHandle>,
-    atlas_rect: Rect,
+
+    tile_textures: Vec<(u64, TextureHandle)>,
+    //atlas_rect: Rect,
 }
 
 impl Default for DpWidget {
@@ -36,8 +39,7 @@ impl Default for DpWidget {
         Self {
             id: WidgetId::default(),
             last_update: None,
-            texture: None,
-            atlas_rect: Rect::ZERO,
+            tile_textures: Vec::new(),
         }
     }
 }
@@ -55,25 +57,37 @@ impl Widget for DpWidget {
         if let Event::Dp(update) = event {
             self.last_update = Some(update.clone());
 
-            let image = ColorImage::from_rgba_unmultiplied(
-                [update.atlas_texture.width, update.atlas_texture.height],
-                &update.atlas_texture.rgba,
-            );
+            // TODO only new tiles?
 
-            let options = TextureOptions {
-                magnification: TextureFilter::Nearest,
-                minification: TextureFilter::Nearest,
-                mipmap_mode: None,
-                ..Default::default()
-            };
+            for tile_index in self.tile_textures.len()..update.tiles.len() {
+                let tile = &update.tiles[tile_index];
 
-            match &mut self.texture {
-                Some(texture) => {
-                    texture.set(image, options);
-                }
-                None => {
-                    self.texture = Some(ctx.load_texture("atlas", image, options));
-                }
+                let image = ColorImage::from_rgba_unmultiplied(
+                    [tile.1.width as usize, tile.1.height as usize],
+                    &tile.1.rgba,
+                );
+
+                let options = TextureOptions {
+                    magnification: TextureFilter::Nearest,
+                    minification: TextureFilter::Nearest,
+                    mipmap_mode: None,
+                    ..Default::default()
+                };
+
+                self.tile_textures.push((
+                    tile.0,
+                    ctx.load_texture(format!("tile_{}", tile_index), image, options),
+                ));
+
+                // match self.tile_textures.get_mut(tile_index) {
+                //     Some(texture) => {
+                //         texture.set(image, options);
+                //     }
+                //     None => {
+                //         self.tile_textures[tile_index] =
+                //             ctx.load_texture(format!("tile_{}", tile_index), image, options);
+                //     }
+                // }
             }
         }
     }
@@ -86,13 +100,20 @@ impl ChildWidget for DpWidget {
         // Registers
 
         if let Some(update) = &self.last_update {
-            let mut show_reg = |i| {
-                reg32(ui, format!("{:>10}", i), update.regs[i]);
-            };
+            const REG_NAMES: [&str; 8] = [
+                "Start",
+                "End",
+                "Current",
+                "Status",
+                "Clock",
+                "Buf busy",
+                "Pipe busy",
+                "Tmem busy",
+            ];
 
-            update.regs.iter().enumerate().for_each(|(i, _)| {
-                show_reg(i);
-            });
+            for (i, name) in REG_NAMES.iter().enumerate() {
+                reg32(ui, format!("{:>9}", name), update.regs[i]);
+            }
 
             // TMEM
 
@@ -141,14 +162,13 @@ impl ChildWidget for DpWidget {
 
         // Tile atlas TODO move to separate widget
 
-        if let Some(texture) = &self.texture {
-            // Scene::new().zoom_range(0.0..=10.0).show(
-            //     ui,
-            //     &mut self.atlas_rect,
-            //     |ui: &mut egui::Ui| {
-            ui.image((texture.id(), texture.size_vec2()));
-            //     },
-            // );
+        Text::new(format!("{} tiles", self.tile_textures.len())).show(ui);
+
+        for (tile_index, tile_texture) in self.tile_textures.iter().enumerate() {
+            ui.horizontal(|ui| {
+                Text::new(format!("#{} {}", tile_index, tile_texture.0)).show(ui);
+                ui.image((tile_texture.1.id(), tile_texture.1.size_vec2()));
+            });
         }
 
         vec![]

@@ -56,12 +56,13 @@ pub fn is_supported_file(path: &Path) -> bool {
 }
 
 // TODO bugs:
-// - Indy Racing 2000 + Army Men Air Combat: out of bounds (open bus?)
 // - Monaco Grand Prix: read invalid address 840C0000 (unmapped)
 // - Quake: access invalid reg #13 (si or pi?)
-// - Chopper Attack: PIF out of range
 
 // TODO next steps:
-// - DMA double-buffering (AI ok, others now)
-// - exception on reserved/unknown instructions?
-// - DMA: directly access physical addresses, no translation
+// - SP DMA: direct access, no translation
+// - Lemmy's tests:
+//   - unaligned exceptions
+//   - cart DMA
+//   - SP jumps
+//   - FP instructions

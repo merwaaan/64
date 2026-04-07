@@ -4,14 +4,14 @@ use arbitrary_int::prelude::*;
 use strum::{Display, EnumIter};
 
 use crate::{
-    blocks::read_block,
+    blocks::{read_block, write_block},
     cpu::opcode::Opcode,
     events::{EventType, Events},
     location::Location,
     mi::Interrupt,
     ram::RamLocation,
     sp::instructions::InstructionEffect,
-    system::{Address, System},
+    system::System,
     value::Value,
 };
 
@@ -19,19 +19,16 @@ pub mod instructions;
 
 // TODO split interface and proc?
 // TODO timing = 2/3 CPU
-// TODO startup STATUS bit 0 = 1 (halted)
-// TODO DMA FULL in status bit AND own reg
-// TODO DMA BUSY in status bit AND own reg
 // TODO increment clock regs
 
 ///! Reality Signal Processor
 ///!
 ///! This is a slimmed down version of the main MIPS processor:
 ///! - Registers are strictly 32-bit
+///! - Cannot access RAM directly, transfers it to/from DMEM using DMA instead
 ///! - The PC is 12-bit and wraps around IMEM
 ///! - No exceptions or traps
 ///! - Less arithmetic instructions (no mult/div, no 64-bit instructions like DADD/DSUB)
-///! - Cannot access RAM directly, transfers it to/from DMEM using DMA instead
 ///!
 ///! TODO COP 0 = SP + DP registers
 ///!
@@ -118,12 +115,12 @@ const STATUS_HALTED: u32 = 1;
 const STATUS_BROKE: u32 = 1 << 1;
 const STATUS_DMA_BUSY: u32 = 1 << 2;
 const STATUS_DMA_FULL: u32 = 1 << 3;
-//const STATUS_IO_BUSY: u32 = 1 << 4;
-//const STATUS_SINGLE_STEP_MODE: u32 = 1 << 5;
-//const STATUS_INTERRUPT_ON_BREAK: u32 = 1 << 6;
+const STATUS_IO_BUSY: u32 = 1 << 4;
+const STATUS_SINGLE_STEP_MODE: u32 = 1 << 5;
+const STATUS_INTERRUPT_ON_BREAK: u32 = 1 << 6;
 // TODO others?
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum DmaDirection {
     RamToSp,
     SpToRam,
@@ -144,6 +141,14 @@ impl Registers {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct DmaSlot {
+    direction: DmaDirection,
+    ram_address: u32,
+    sp_address: u32,
+    length: u32,
+}
+
 #[derive(Clone)]
 pub struct Sp {
     // DMEM: 0x0000 - 0x0FFF
@@ -161,13 +166,16 @@ pub struct Sp {
 
     pub pc: u12, // TODO vis
     delayed_branching: Option<u12>,
+
+    active_dma: Option<DmaSlot>,
+    pending_dma: Option<DmaSlot>,
 }
 
 impl Default for Sp {
     fn default() -> Self {
         let mut regs = [0; 8];
 
-        regs[Register::Status as usize] = 0x0000_0001; // TODO for lemmy
+        regs[Register::Status as usize] = 0x0000_0001; // starts halted
 
         Self {
             mem: vec![0; 0x2000],
@@ -180,6 +188,8 @@ impl Default for Sp {
             vce: 0,
             pc: u12::ZERO,
             delayed_branching: None,
+            active_dma: None,
+            pending_dma: None,
         }
     }
 }
@@ -239,8 +249,6 @@ impl Sp {
         read_block(&bank, offset_in_bank, length, callback);
     }
 
-    // TODO read/write PC while running = garbage?
-
     pub fn read_reg<T: Value>(&mut self, addr: SpRegsLocation) -> T {
         //log::warn!("read SP reg @ {:08X}", addr.relative());
 
@@ -298,20 +306,42 @@ impl Sp {
                     s.sp.regs[Register::DmaRamAddr as usize] &= 0x00FF_FFF8;
                 }
                 2 => {
+                    // TODO only write on completion if pending? (should read back the ongoing or last DMA)
                     data.write_reg(&mut s.sp.regs, addr.relative() & REG_MASK);
 
-                    Self::start_dma(s, DmaDirection::RamToSp);
+                    Self::push_dma(
+                        s,
+                        DmaSlot {
+                            direction: DmaDirection::RamToSp,
+                            ram_address: s.sp.regs[Register::DmaRamAddr as usize],
+                            sp_address: s.sp.regs[Register::DmaSpAddr as usize],
+                            length: s.sp.regs[Register::DmaRdLen as usize],
+                        },
+                    );
                 }
                 3 => {
+                    // TODO only write on completion if pending? (should read back the ongoing or last DMA)
                     data.write_reg(&mut s.sp.regs, addr.relative() & REG_MASK);
 
-                    Self::start_dma(s, DmaDirection::SpToRam);
+                    Self::push_dma(
+                        s,
+                        DmaSlot {
+                            direction: DmaDirection::SpToRam,
+                            ram_address: s.sp.regs[Register::DmaRamAddr as usize],
+                            sp_address: s.sp.regs[Register::DmaSpAddr as usize],
+                            length: s.sp.regs[Register::DmaWrLen as usize],
+                        },
+                    );
                 }
                 4 => {
                     let mut status = s.sp.regs[Register::Status as usize];
 
                     let mut trigger_bits = [0u32];
                     data.write_reg(&mut trigger_bits, addr.relative() & 3);
+
+                    // Helper to clear/set status bits
+                    //
+                    // Hardware tests show that setting both clear and set bits causes nothing to happen (n64-systemtest)
 
                     macro_rules! clear_set {
                         ($clear_mask:expr, $set_mask:expr, $status_mask:expr) => {
@@ -327,6 +357,7 @@ impl Sp {
                     }
 
                     // HALTED
+
                     clear_set!(1, 1 << 1, 1);
 
                     // BROKE
@@ -384,7 +415,7 @@ impl Sp {
             }
 
             let mut pc = [u32::from(s.sp.pc)];
-            data.write_reg(&mut pc, addr.relative() & 0x0000_0003);
+            data.write_reg(&mut pc, addr.relative() & 3);
             s.sp.pc = u12::from_u32(pc[0] & 0x0FFC);
 
             // Reset any delayed branching
@@ -394,254 +425,82 @@ impl Sp {
         }
     }
 
-    // pub fn halt(s: &mut System) {
-    //     // BROKE | HALT
-    //     s.sp.regs[Register::Status as usize] |= 3;
-
-    //     if s.sp.regs[Register::Status as usize] & 0x40 != 0 {
-    //         log::warn!("SP INT");
-    //         s.mi.set_pending_interrupt(Interrupt::Sp, &mut s.cop0);
-
-    //         // TODO hack, clear sigs
-    //         s.sp.regs[Register::Status as usize] &= !0x7F80;
-
-    //         Events::push(s, EventType::DpHalt, 10000);
-    //     }
-
-    //     // TODO temp
-
-    //     // https://hack64.net/wiki/doku.php?id=super_mario_64:fast3d_display_list_commands
-    //     // https://wiki.cloudmodding.com/oot/F3DZEX2/Opcode_Details#0x00_.E2.80.94_G_NOOP
-
-    //     //let task_header_addr = 0x0FC0usize;
-
-    //     // 1 = graphics command?
-    //     // if s.sp.mem[task_header_addr + 3] == 1 {
-    //     //     log::warn!("SP: gfx?");
-
-    //     //     let ptr = u32::read_mem(&s.sp.mem, (task_header_addr as u32) + 0x30);
-    //     //     log::warn!("SP: ptr {:08X}", ptr);
-
-    //     //     let mut pc = ptr;
-    //     //     let mut stack = Vec::new(); // For subroutines (gSPDisplayList)
-
-    //     //     for _ in 0..100 {
-    //     //         let w0 = s.read::<u32>(Address::p(pc)).unwrap();
-    //     //         let w1 = s.read::<u32>(Address::p(pc + 4)).unwrap();
-
-    //     //         let opcode = (w0 >> 24) as u8;
-
-    //     //         match opcode {
-    //     //             G_SPNOOP => log::warn!("SP: G_SPNOOP @ {:08X}", pc),
-    //     //             G_MTX => log::warn!("SP: G_MTX @ {:08X}", pc),
-    //     //             G_MOVEMEM => log::warn!("SP: G_MOVEMEM @ {:08X}", pc),
-    //     //             G_VTX => log::warn!("SP: G_VTX @ {:08X}", pc),
-    //     //             G_DL => {
-    //     //                 log::warn!("SP: G_DL @ {:08X}", pc);
-    //     //                 stack.push(pc + 8);
-    //     //                 pc = s.read::<u32>(Address::p(pc + 4)).unwrap();
-    //     //                 continue;
-    //     //             }
-    //     //             G_RDPHALF_CONT => log::warn!("SP: G_RDPHALF_CONT @ {:08X}", pc),
-    //     //             G_RDPHALF_2 => log::warn!("SP: G_RDPHALF_2 @ {:08X}", pc),
-    //     //             G_RDPHALF_1 => log::warn!("SP: G_RDPHALF_1 @ {:08X}", pc),
-    //     //             G_CLEARGEOMETRYMODE => log::warn!("SP: G_CLEARGEOMETRYMODE @ {:08X}", pc),
-    //     //             G_SETGEOMETRYMODE => log::warn!("SP: G_SETGEOMETRYMODE @ {:08X}", pc),
-    //     //             G_ENDDL => {
-    //     //                 log::warn!("SP: G_ENDDL @ {:08X}", pc);
-    //     //                 if let Some(return_addr) = stack.pop() {
-    //     //                     pc = return_addr;
-    //     //                     continue;
-    //     //                 } else {
-    //     //                     break; // Task complete
-    //     //                 }
-    //     //             }
-    //     //             0xDF => {
-    //     //                 log::warn!("SP: gSPEndDisplayList @ {:08X}", pc);
-    //     //             }
-    //     //             G_SETOTHERMODE_L => log::warn!("SP: G_SetOtherMode_L @ {:08X}", pc),
-    //     //             G_SETOTHERMODE_H => log::warn!("SP: G_SetOtherMode_H @ {:08X}", pc),
-    //     //             G_TEXTURE => log::warn!("SP: G_TEXTURE @ {:08X}", pc),
-    //     //             G_MOVEWORD => {
-    //     //                 let index = (w0 & 0x00FF_0000) >> 16;
-    //     //                 let offset = w0 & 0x0000_FFFF;
-    //     //                 let data = w1;
-
-    //     //                 log::warn!(
-    //     //                     "SP: G_MOVEWORD @ {:08X} {}, {:X}, {:X}",
-    //     //                     pc,
-    //     //                     index,
-    //     //                     offset,
-    //     //                     data
-    //     //                 );
-    //     //             }
-    //     //             G_POPMTX => log::warn!("SP: G_POPMTX @ {:08X}", pc),
-    //     //             G_CULLDL => log::warn!("SP: G_CULLDL @ {:08X}", pc),
-    //     //             G_TRI1 => log::warn!("SP: G_TRI1 @ {:08X}", pc),
-    //     //             G_NOOP => log::warn!("SP: G_NOOP @ {:08X}", pc),
-    //     //             G_TEXRECT => log::warn!("SP: G_TEXRECT @ {:08X}", pc),
-    //     //             G_TEXRECTFLIP => log::warn!("SP: G_TEXRECTFLIP @ {:08X}", pc),
-    //     //             G_RDPLOADSYNC => log::warn!("SP: G_RDPLOADSYNC @ {:08X}", pc),
-    //     //             G_RDPPIPESYNC => log::warn!("SP: G_RDPPIPESYNC @ {:08X}", pc),
-    //     //             G_RDPTILESYNC => log::warn!("SP: G_RDPTILESYNC @ {:08X}", pc),
-    //     //             G_RDPFULLSYNC => log::warn!("SP: G_RDPFULLSYNC @ {:08X}", pc),
-    //     //             G_SETKEYGB => log::warn!("SP: G_SETKEYGB @ {:08X}", pc),
-    //     //             G_SETKEYR => log::warn!("SP: G_SETKEYR @ {:08X}", pc),
-    //     //             G_SETCONVERT => log::warn!("SP: G_SETCONVERT @ {:08X}", pc),
-    //     //             G_SETSCISSOR => {
-    //     //                 let ulx = (w0 & 0x00FF_F000) >> 12;
-    //     //                 let uly = w0 & 0x0000_0FFF;
-    //     //                 let lrx = (w1 & 0x00FF_F000) >> 12;
-    //     //                 let lry = w1 & 0x0000_0FFF;
-
-    //     //                 log::warn!(
-    //     //                     "SP: G_SETSCISSOR @ {:08X} ({}, {}) ({}, {})",
-    //     //                     pc,
-    //     //                     ulx,
-    //     //                     uly,
-    //     //                     lrx,
-    //     //                     lry
-    //     //                 );
-    //     //             }
-    //     //             G_SETPRIMDEPTH => log::warn!("SP: G_SETPRIMDEPTH @ {:08X}", pc),
-    //     //             G_RDPSETOTHERMODE => log::warn!("SP: G_RDPSetOtherMode @ {:08X}", pc),
-    //     //             G_LOADTLUT => log::warn!("SP: G_LOADTLUT @ {:08X}", pc),
-    //     //             G_SETTILESIZE => {
-    //     //                 let uls = w0.get_bits(12..=24);
-    //     //                 let ult = w0.get_bits(0..=11);
-    //     //                 let t = w1.get_bits(24..=27);
-    //     //                 let lrs = w1.get_bits(12..=24);
-    //     //                 let lrt = w1.get_bits(0..=11);
-
-    //     //                 log::warn!(
-    //     //                     "SP: G_SETTILESIZE @ {:08X} ({}, {}) ({}, {}) {:X}",
-    //     //                     pc,
-    //     //                     uls,
-    //     //                     ult,
-    //     //                     lrs,
-    //     //                     lrt,
-    //     //                     t
-    //     //                 );
-    //     //             }
-    //     //             G_LOADBLOCK => log::warn!("SP: G_LOADBLOCK @ {:08X}", pc),
-    //     //             G_LOADTILE => log::warn!("SP: G_LOADTILE @ {:08X}", pc),
-    //     //             G_SETTILE => {
-    //     //                 let format = w0.get_bits(21..=23);
-    //     //                 let pixel_bits = w0.get_bits(19..=20);
-    //     //                 //TODOlet line = w0.get_bits(19..=17);
-    //     //                 let tile = w1.get_bits(24..=26);
-    //     //                 let palette = w1.get_bits(20..=23);
-    //     //                 let clamp_mirror_t = w1.get_bits(18..=19);
-    //     //                 let mask_t = w1.get_bits(14..=17);
-    //     //                 let shift_t = w1.get_bits(10..=13);
-    //     //                 let clamp_mirror_s = w1.get_bits(8..=9);
-    //     //                 let mask_s = w1.get_bits(4..=7);
-    //     //                 let shift_s = w1.get_bits(0..=3);
-
-    //     //                 log::warn!("SP: G_SETTILE @ {:08X}", pc,);
-    //     //             }
-    //     //             G_FILLRECT => {
-    //     //                 let lrx = w0.get_bits(12..=24);
-    //     //                 let lry = w0.get_bits(0..=11);
-    //     //                 let ulx = w1.get_bits(12..=24);
-    //     //                 let uly = w1.get_bits(0..=11);
-
-    //     //                 log::warn!(
-    //     //                     "SP: G_FILLRECT @ {:08X} ({}, {}) ({}, {})",
-    //     //                     pc,
-    //     //                     lrx,
-    //     //                     lry,
-    //     //                     ulx,
-    //     //                     uly,
-    //     //                 );
-    //     //             }
-    //     //             G_SETFILLCOLOR => {
-    //     //                 let color = w1;
-    //     //                 log::warn!("SP: G_SETFILLCOLOR @ {:08X} {:X}", pc, color);
-    //     //             }
-    //     //             G_SETFOGCOLOR => {
-    //     //                 let color = w1;
-    //     //                 log::warn!("SP: G_SETFOGCOLOR @ {:08X} {:X}", pc, color);
-    //     //             }
-    //     //             G_SETBLENDCOLOR => {
-    //     //                 let color = w1;
-    //     //                 log::warn!("SP: G_SETBLENDCOLOR @ {:08X} {:X}", pc, color);
-    //     //             }
-    //     //             G_SETPRIMCOLOR => {
-    //     //                 let color = w1;
-    //     //                 log::warn!("SP: G_SETPRIMCOLOR @ {:08X} {:X}", pc, color);
-    //     //             }
-    //     //             G_SETENVCOLOR => {
-    //     //                 let color = w1;
-    //     //                 log::warn!("SP: G_SETENVCOLOR @ {:08X} {:X}", pc, color);
-    //     //             }
-    //     //             G_SETCOMBINE => log::warn!("SP: G_SETCOMBINE @ {:08X}", pc),
-    //     //             G_SETTIMG => {
-    //     //                 let width = (w0 & 0x0FFF) + 1;
-    //     //                 let addr = w1;
-    //     //                 log::warn!("SP: G_SETTIMG @ {:08X} {}, {:X}", pc, width, addr);
-    //     //             }
-    //     //             G_SETZIMG => {
-    //     //                 let addr = w1;
-    //     //                 log::warn!("SP: G_SETZIMG @ {:08X}  {:X}", pc, addr);
-    //     //             }
-    //     //             G_SETCIMG => {
-    //     //                 let width = (w0 & 0x0FFF) + 1;
-    //     //                 let addr = w1;
-    //     //                 log::warn!("SP: G_SETCIMG @ {:08X} {}, {:X}", pc, width, addr);
-    //     //             }
-    //     //             _ => log::warn!("SP: Unknown opcode: {:02x} @ {:08X}", opcode, pc),
-    //     //         }
-    //     //         pc += 8;
-    //     //     }
-    //     // } else {
-    //     //     log::warn!(
-    //     //         "SP:  TASK other {:X} {:X} {:X} {:X}",
-    //     //         s.sp.mem[task_header_addr],
-    //     //         s.sp.mem[task_header_addr + 1],
-    //     //         s.sp.mem[task_header_addr + 2],
-    //     //         s.sp.mem[task_header_addr + 3]
-    //     //     );
-    //     // }
-    // }
-
     // pub fn dp_halt(s: &mut System) {
     //     s.mi.set_pending_interrupt(Interrupt::Dp, &mut s.cop0);
     // }
 
-    // TODO double buffering!
-
     // TODO Bakuretsu Muteki Bangaioh: huge fishy DMAs that overwrite the SP memory many times
 
-    fn start_dma(s: &mut System, direction: DmaDirection) {
-        // TODO cast to usize at the start to simplify the rest of the code
+    fn push_dma(s: &mut System, slot: DmaSlot) {
+        if s.sp.pending_dma.is_some() {
+            // TODO or replace pending?
+            log::warn!("SP: DMA transfer already pending");
+        }
+        // Active DMA transfer: queue
+        else if s.sp.active_dma.is_some() {
+            s.sp.pending_dma = Some(slot);
 
-        let length_reg = match direction {
-            DmaDirection::RamToSp => s.sp.regs[Register::DmaRdLen as usize],
-            DmaDirection::SpToRam => s.sp.regs[Register::DmaWrLen as usize],
-        };
+            s.sp.set_dma_full();
+        }
+        // No active DMA transfer: execute
+        else {
+            s.sp.active_dma = Some(slot);
 
+            // TODO ENABLED?
+
+            Self::start_dma(s, slot);
+        }
+    }
+
+    fn set_dma_busy(&mut self) {
+        self.regs[Register::Status as usize] |= STATUS_DMA_BUSY;
+        self.regs[Register::DmaBusy as usize] = 1;
+    }
+
+    fn clear_dma_busy(&mut self) {
+        self.regs[Register::Status as usize] &= !STATUS_DMA_BUSY;
+        self.regs[Register::DmaBusy as usize] = 0;
+    }
+
+    fn set_dma_full(&mut self) {
+        self.regs[Register::Status as usize] |= STATUS_DMA_FULL;
+        self.regs[Register::DmaFull as usize] = 1;
+    }
+
+    fn clear_dma_full(&mut self) {
+        self.regs[Register::Status as usize] &= !STATUS_DMA_FULL;
+        self.regs[Register::DmaFull as usize] = 0;
+    }
+
+    fn start_dma(s: &mut System, slot: DmaSlot) {
         // Number of bytes to copy per "row"
         //
         // Manual: "the lower three bits of the length are ignored and assumed to be all 1's"
 
-        let bytes_per_row = ((length_reg & 0x0FFF) | 7) + 1;
+        let length = slot.length as usize;
+
+        let bytes_per_row = ((length & 0x0FFF) | 7) + 1;
 
         // Number of rows to copy
 
-        let rows = ((length_reg >> 12) & 0x00FF) + 1;
+        let rows = ((length >> 12) & 0x00FF) + 1;
 
         // Number of bytes to skip after each row
         // (only applies to the RAM side!)
 
-        let skips = (length_reg >> 20) & !7;
+        let skips = (length >> 20) & !7;
 
-        let mut ram_addr = s.sp.regs[Register::DmaRamAddr as usize] & 0x007F_FFFF;
-        let mut sp_addr = s.sp.regs[Register::DmaSpAddr as usize];
+        let mut ram_addr = (slot.ram_address & 0x007F_FFFF) as usize;
+        let mut sp_addr = slot.sp_address as usize;
+
+        // On the SP side, reads/writes wrap around either IMEM or DMEM
 
         let sp_bank_offset = sp_addr & 0x1000;
+        let sp_bank = &mut s.sp.mem[sp_bank_offset..sp_bank_offset + 0x1000];
 
-        match direction {
+        // Transfer
+
+        match slot.direction {
             DmaDirection::RamToSp => {
                 // log::info!(
                 //     "SP DMA: {:X} bytes * {:X} rows + {:X} skips from RAM {:08X} to SP {:08X}",
@@ -652,34 +511,16 @@ impl Sp {
                 //     sp_addr
                 // );
 
-                // for _ in 0..rows {
-                //     // TODO possible to read beyond the end of the RAM?
-                //     debug_assert!(ram_addr + bytes_per_row as u32 <= 0x007F_FFFF);
-
-                //     let ram_data = s
-                //         .ram
-                //         .read_block(RamLocation::from_relative(ram_addr), bytes_per_row as usize);
-
-                //     s.sp.write_block(SpMemLocation::from_relative(sp_addr), ram_data);
-
-                //     ram_addr = ram_addr.wrapping_add(bytes_per_row).wrapping_add(skips);
-                //     sp_addr = sp_addr.wrapping_add(bytes_per_row);
-                // }
-
                 for _ in 0..rows {
-                    for byte in 0..bytes_per_row {
-                        let data = s
-                            .read::<u8>(Address::p(ram_addr + byte))
-                            .expect("SP DMA RAM to SP read failed");
+                    s.ram.read_block(
+                        RamLocation::from_relative(ram_addr as u32),
+                        bytes_per_row,
+                        |ram_data| {
+                            write_block(ram_data, sp_bank, sp_addr);
 
-                        // The transfer wraps around the current bank
-                        // TODO use u12?
-                        let wrapping_sp_addr = ((sp_addr + byte) & 0x0FFF) | sp_bank_offset;
-
-                        s.sp.mem[wrapping_sp_addr as usize] = data;
-                    }
-
-                    sp_addr = sp_addr.wrapping_add(bytes_per_row);
+                            sp_addr = sp_addr.wrapping_add(bytes_per_row);
+                        },
+                    );
 
                     ram_addr = ram_addr.wrapping_add(bytes_per_row).wrapping_add(skips);
                 }
@@ -694,88 +535,43 @@ impl Sp {
                 //     ram_addr
                 // );
 
-                let sp_length = bytes_per_row as usize * rows as usize;
-
-                // let mut row_bytes_written = 0;
-
-                // s.sp.read_block(
-                //     SpMemLocation::from_relative(sp_addr),
-                //     sp_length,
-                //     |sp_data| {
-                //         let mut sp_offset = 0;
-
-                //         while sp_offset < sp_data.len() {
-                //             let remaining_row_bytes = bytes_per_row as usize - row_bytes_written;
-
-                //             let data_to_write =
-                //                 &sp_data[sp_offset..sp_data.len().min(remaining_row_bytes)];
-
-                //             s.ram
-                //                 .write_block(RamLocation::from_relative(ram_addr), data_to_write);
-
-                //             sp_offset = sp_offset.wrapping_add(data_to_write.len());
-
-                //             row_bytes_written += data_to_write.len();
-                //             ram_addr += data_to_write.len() as u32;
-
-                //             if row_bytes_written == bytes_per_row as usize {
-                //                 row_bytes_written = 0;
-                //                 ram_addr = ram_addr.wrapping_add(skips);
-                //             }
-                //         }
-                //     },
-                // );
-
                 for _ in 0..rows {
-                    for byte in 0..bytes_per_row {
-                        let wrapping_sp_addr = ((sp_addr + byte) & 0x0FFF) | sp_bank_offset;
+                    read_block(sp_bank, sp_addr, bytes_per_row, |sp_data| {
+                        s.ram
+                            .write_block(RamLocation::from_relative(ram_addr as u32), sp_data);
 
-                        let data = s.sp.mem[wrapping_sp_addr as usize];
-
-                        s.write::<u8>(Address::p(ram_addr + byte), data)
-                            .expect("SP DMA SP to RAM write failed");
-                    }
+                        ram_addr = ram_addr.wrapping_add(sp_data.len());
+                    });
 
                     sp_addr = sp_addr.wrapping_add(bytes_per_row);
-
-                    ram_addr = ram_addr.wrapping_add(bytes_per_row).wrapping_add(skips);
                 }
-
-                // for _ in 0..rows {
-                //     for byte in 0..bytes_per_row {
-                //         let wrapping_sp_addr = ((sp_addr + byte) & 0x0FFF) | sp_bank_offset;
-
-                //         let data = s.sp.mem[wrapping_sp_addr as usize];
-
-                //         s.write::<u8>(Address::p(ram_addr + byte), data)
-                //             .expect("SP DMA SP to RAM write failed");
-                //     }
-
-                //     sp_addr = sp_addr.wrapping_add(bytes_per_row);
-                //     ram_addr = ram_addr.wrapping_add(bytes_per_row).wrapping_add(skips);
-                // }
             }
         }
 
         // Increment the DMA registers for the next transfer
+        // TODO do it on completion?
 
         s.sp.regs[Register::DmaSpAddr as usize] =
-            s.sp.regs[Register::DmaSpAddr as usize].wrapping_add(bytes_per_row * rows) & 0xFFF
-                | sp_bank_offset;
+            slot.sp_address.wrapping_add((bytes_per_row * rows) as u32) & 0xFFF
+                | sp_bank_offset as u32;
 
-        s.sp.regs[Register::DmaRamAddr as usize] =
-            s.sp.regs[Register::DmaRamAddr as usize].wrapping_add((bytes_per_row + skips) * rows);
+        s.sp.regs[Register::DmaRamAddr as usize] = slot
+            .ram_address
+            .wrapping_add(((bytes_per_row + skips) * rows) as u32);
 
-        // TODO LENGTHs???
+        // The length registers always end up being 0xFF8 after a DMA transfer
+        // TODO do it on completion?
 
-        // Update the status register
+        s.sp.regs[Register::DmaRdLen as usize] = 0xFF8;
+        s.sp.regs[Register::DmaWrLen as usize] = 0xFF8;
 
-        s.sp.regs[Register::Status as usize] |= STATUS_DMA_BUSY;
-        s.sp.regs[Register::Status as usize] &= !STATUS_DMA_FULL; // TODO set it somewhere???
+        // Update the status
+
+        s.sp.set_dma_busy();
 
         // TODO reset count to 0!
         // TODO IO busy?
-        // TODO DMA error? if already busy? queue?
+        // TODO DMA error?
 
         // Schedule the DMA completion
         //
@@ -792,13 +588,233 @@ impl Sp {
     }
 
     pub fn dma_completed(s: &mut System) {
+        debug_assert!(s.sp.active_dma.is_some(), "SP DMA transfer not in progress");
+
         // Update the status register
 
-        s.sp.regs[Register::Status as usize] &= !STATUS_DMA_BUSY;
+        s.sp.clear_dma_busy();
+        s.sp.clear_dma_full();
         // TODO IO busy?
 
-        // Raise the interrupt
+        // Start the pending DMA, if any
 
-        s.mi.set_pending_interrupt(Interrupt::Sp, &mut s.cop0);
+        s.sp.active_dma = s.sp.pending_dma.take();
+
+        if let Some(slot) = s.sp.active_dma {
+            Self::start_dma(s, slot);
+        }
+
+        // No SP interrupt! They are only triggered by the BREAK instruction
     }
 }
+
+// pub fn halt(s: &mut System) {
+//     // BROKE | HALT
+//     s.sp.regs[Register::Status as usize] |= 3;
+
+//     if s.sp.regs[Register::Status as usize] & 0x40 != 0 {
+//         log::warn!("SP INT");
+//         s.mi.set_pending_interrupt(Interrupt::Sp, &mut s.cop0);
+
+//         // TODO hack, clear sigs
+//         s.sp.regs[Register::Status as usize] &= !0x7F80;
+
+//         Events::push(s, EventType::DpHalt, 10000);
+//     }
+
+//     // TODO temp
+
+//     // https://hack64.net/wiki/doku.php?id=super_mario_64:fast3d_display_list_commands
+//     // https://wiki.cloudmodding.com/oot/F3DZEX2/Opcode_Details#0x00_.E2.80.94_G_NOOP
+
+//     //let task_header_addr = 0x0FC0usize;
+
+//     // 1 = graphics command?
+//     // if s.sp.mem[task_header_addr + 3] == 1 {
+//     //     log::warn!("SP: gfx?");
+
+//     //     let ptr = u32::read_mem(&s.sp.mem, (task_header_addr as u32) + 0x30);
+//     //     log::warn!("SP: ptr {:08X}", ptr);
+
+//     //     let mut pc = ptr;
+//     //     let mut stack = Vec::new(); // For subroutines (gSPDisplayList)
+
+//     //     for _ in 0..100 {
+//     //         let w0 = s.read::<u32>(Address::p(pc)).unwrap();
+//     //         let w1 = s.read::<u32>(Address::p(pc + 4)).unwrap();
+
+//     //         let opcode = (w0 >> 24) as u8;
+
+//     //         match opcode {
+//     //             G_SPNOOP => log::warn!("SP: G_SPNOOP @ {:08X}", pc),
+//     //             G_MTX => log::warn!("SP: G_MTX @ {:08X}", pc),
+//     //             G_MOVEMEM => log::warn!("SP: G_MOVEMEM @ {:08X}", pc),
+//     //             G_VTX => log::warn!("SP: G_VTX @ {:08X}", pc),
+//     //             G_DL => {
+//     //                 log::warn!("SP: G_DL @ {:08X}", pc);
+//     //                 stack.push(pc + 8);
+//     //                 pc = s.read::<u32>(Address::p(pc + 4)).unwrap();
+//     //                 continue;
+//     //             }
+//     //             G_RDPHALF_CONT => log::warn!("SP: G_RDPHALF_CONT @ {:08X}", pc),
+//     //             G_RDPHALF_2 => log::warn!("SP: G_RDPHALF_2 @ {:08X}", pc),
+//     //             G_RDPHALF_1 => log::warn!("SP: G_RDPHALF_1 @ {:08X}", pc),
+//     //             G_CLEARGEOMETRYMODE => log::warn!("SP: G_CLEARGEOMETRYMODE @ {:08X}", pc),
+//     //             G_SETGEOMETRYMODE => log::warn!("SP: G_SETGEOMETRYMODE @ {:08X}", pc),
+//     //             G_ENDDL => {
+//     //                 log::warn!("SP: G_ENDDL @ {:08X}", pc);
+//     //                 if let Some(return_addr) = stack.pop() {
+//     //                     pc = return_addr;
+//     //                     continue;
+//     //                 } else {
+//     //                     break; // Task complete
+//     //                 }
+//     //             }
+//     //             0xDF => {
+//     //                 log::warn!("SP: gSPEndDisplayList @ {:08X}", pc);
+//     //             }
+//     //             G_SETOTHERMODE_L => log::warn!("SP: G_SetOtherMode_L @ {:08X}", pc),
+//     //             G_SETOTHERMODE_H => log::warn!("SP: G_SetOtherMode_H @ {:08X}", pc),
+//     //             G_TEXTURE => log::warn!("SP: G_TEXTURE @ {:08X}", pc),
+//     //             G_MOVEWORD => {
+//     //                 let index = (w0 & 0x00FF_0000) >> 16;
+//     //                 let offset = w0 & 0x0000_FFFF;
+//     //                 let data = w1;
+
+//     //                 log::warn!(
+//     //                     "SP: G_MOVEWORD @ {:08X} {}, {:X}, {:X}",
+//     //                     pc,
+//     //                     index,
+//     //                     offset,
+//     //                     data
+//     //                 );
+//     //             }
+//     //             G_POPMTX => log::warn!("SP: G_POPMTX @ {:08X}", pc),
+//     //             G_CULLDL => log::warn!("SP: G_CULLDL @ {:08X}", pc),
+//     //             G_TRI1 => log::warn!("SP: G_TRI1 @ {:08X}", pc),
+//     //             G_NOOP => log::warn!("SP: G_NOOP @ {:08X}", pc),
+//     //             G_TEXRECT => log::warn!("SP: G_TEXRECT @ {:08X}", pc),
+//     //             G_TEXRECTFLIP => log::warn!("SP: G_TEXRECTFLIP @ {:08X}", pc),
+//     //             G_RDPLOADSYNC => log::warn!("SP: G_RDPLOADSYNC @ {:08X}", pc),
+//     //             G_RDPPIPESYNC => log::warn!("SP: G_RDPPIPESYNC @ {:08X}", pc),
+//     //             G_RDPTILESYNC => log::warn!("SP: G_RDPTILESYNC @ {:08X}", pc),
+//     //             G_RDPFULLSYNC => log::warn!("SP: G_RDPFULLSYNC @ {:08X}", pc),
+//     //             G_SETKEYGB => log::warn!("SP: G_SETKEYGB @ {:08X}", pc),
+//     //             G_SETKEYR => log::warn!("SP: G_SETKEYR @ {:08X}", pc),
+//     //             G_SETCONVERT => log::warn!("SP: G_SETCONVERT @ {:08X}", pc),
+//     //             G_SETSCISSOR => {
+//     //                 let ulx = (w0 & 0x00FF_F000) >> 12;
+//     //                 let uly = w0 & 0x0000_0FFF;
+//     //                 let lrx = (w1 & 0x00FF_F000) >> 12;
+//     //                 let lry = w1 & 0x0000_0FFF;
+
+//     //                 log::warn!(
+//     //                     "SP: G_SETSCISSOR @ {:08X} ({}, {}) ({}, {})",
+//     //                     pc,
+//     //                     ulx,
+//     //                     uly,
+//     //                     lrx,
+//     //                     lry
+//     //                 );
+//     //             }
+//     //             G_SETPRIMDEPTH => log::warn!("SP: G_SETPRIMDEPTH @ {:08X}", pc),
+//     //             G_RDPSETOTHERMODE => log::warn!("SP: G_RDPSetOtherMode @ {:08X}", pc),
+//     //             G_LOADTLUT => log::warn!("SP: G_LOADTLUT @ {:08X}", pc),
+//     //             G_SETTILESIZE => {
+//     //                 let uls = w0.get_bits(12..=24);
+//     //                 let ult = w0.get_bits(0..=11);
+//     //                 let t = w1.get_bits(24..=27);
+//     //                 let lrs = w1.get_bits(12..=24);
+//     //                 let lrt = w1.get_bits(0..=11);
+
+//     //                 log::warn!(
+//     //                     "SP: G_SETTILESIZE @ {:08X} ({}, {}) ({}, {}) {:X}",
+//     //                     pc,
+//     //                     uls,
+//     //                     ult,
+//     //                     lrs,
+//     //                     lrt,
+//     //                     t
+//     //                 );
+//     //             }
+//     //             G_LOADBLOCK => log::warn!("SP: G_LOADBLOCK @ {:08X}", pc),
+//     //             G_LOADTILE => log::warn!("SP: G_LOADTILE @ {:08X}", pc),
+//     //             G_SETTILE => {
+//     //                 let format = w0.get_bits(21..=23);
+//     //                 let pixel_bits = w0.get_bits(19..=20);
+//     //                 //TODOlet line = w0.get_bits(19..=17);
+//     //                 let tile = w1.get_bits(24..=26);
+//     //                 let palette = w1.get_bits(20..=23);
+//     //                 let clamp_mirror_t = w1.get_bits(18..=19);
+//     //                 let mask_t = w1.get_bits(14..=17);
+//     //                 let shift_t = w1.get_bits(10..=13);
+//     //                 let clamp_mirror_s = w1.get_bits(8..=9);
+//     //                 let mask_s = w1.get_bits(4..=7);
+//     //                 let shift_s = w1.get_bits(0..=3);
+
+//     //                 log::warn!("SP: G_SETTILE @ {:08X}", pc,);
+//     //             }
+//     //             G_FILLRECT => {
+//     //                 let lrx = w0.get_bits(12..=24);
+//     //                 let lry = w0.get_bits(0..=11);
+//     //                 let ulx = w1.get_bits(12..=24);
+//     //                 let uly = w1.get_bits(0..=11);
+
+//     //                 log::warn!(
+//     //                     "SP: G_FILLRECT @ {:08X} ({}, {}) ({}, {})",
+//     //                     pc,
+//     //                     lrx,
+//     //                     lry,
+//     //                     ulx,
+//     //                     uly,
+//     //                 );
+//     //             }
+//     //             G_SETFILLCOLOR => {
+//     //                 let color = w1;
+//     //                 log::warn!("SP: G_SETFILLCOLOR @ {:08X} {:X}", pc, color);
+//     //             }
+//     //             G_SETFOGCOLOR => {
+//     //                 let color = w1;
+//     //                 log::warn!("SP: G_SETFOGCOLOR @ {:08X} {:X}", pc, color);
+//     //             }
+//     //             G_SETBLENDCOLOR => {
+//     //                 let color = w1;
+//     //                 log::warn!("SP: G_SETBLENDCOLOR @ {:08X} {:X}", pc, color);
+//     //             }
+//     //             G_SETPRIMCOLOR => {
+//     //                 let color = w1;
+//     //                 log::warn!("SP: G_SETPRIMCOLOR @ {:08X} {:X}", pc, color);
+//     //             }
+//     //             G_SETENVCOLOR => {
+//     //                 let color = w1;
+//     //                 log::warn!("SP: G_SETENVCOLOR @ {:08X} {:X}", pc, color);
+//     //             }
+//     //             G_SETCOMBINE => log::warn!("SP: G_SETCOMBINE @ {:08X}", pc),
+//     //             G_SETTIMG => {
+//     //                 let width = (w0 & 0x0FFF) + 1;
+//     //                 let addr = w1;
+//     //                 log::warn!("SP: G_SETTIMG @ {:08X} {}, {:X}", pc, width, addr);
+//     //             }
+//     //             G_SETZIMG => {
+//     //                 let addr = w1;
+//     //                 log::warn!("SP: G_SETZIMG @ {:08X}  {:X}", pc, addr);
+//     //             }
+//     //             G_SETCIMG => {
+//     //                 let width = (w0 & 0x0FFF) + 1;
+//     //                 let addr = w1;
+//     //                 log::warn!("SP: G_SETCIMG @ {:08X} {}, {:X}", pc, width, addr);
+//     //             }
+//     //             _ => log::warn!("SP: Unknown opcode: {:02x} @ {:08X}", opcode, pc),
+//     //         }
+//     //         pc += 8;
+//     //     }
+//     // } else {
+//     //     log::warn!(
+//     //         "SP:  TASK other {:X} {:X} {:X} {:X}",
+//     //         s.sp.mem[task_header_addr],
+//     //         s.sp.mem[task_header_addr + 1],
+//     //         s.sp.mem[task_header_addr + 2],
+//     //         s.sp.mem[task_header_addr + 3]
+//     //     );
+//     // }
+// }

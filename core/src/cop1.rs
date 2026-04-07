@@ -63,11 +63,11 @@ pub enum Comparison {
     #[strum(to_string = "SF")]
     SignalingFalse = 0x8,
     #[strum(to_string = "NGLE")]
-    NotGreatherOrLessOrEqual = 0x9,
+    NotGreaterOrLessOrEqual = 0x9,
     #[strum(to_string = "SEQ")]
     SignalingEqual = 0xA,
     #[strum(to_string = "NGL")]
-    NotGreatherOrLess = 0xB,
+    NotGreaterOrLess = 0xB,
     #[strum(to_string = "LT")]
     Less = 0xC,
     #[strum(to_string = "NGE")]
@@ -160,7 +160,7 @@ pub enum RoundingMode {
 #[bitfield(u32, forbid_overlaps, introspect, default = 0, debug)]
 pub struct Fcr31 {
     #[bit(24, rw)]
-    fs: bool,
+    flush_to_zero: bool,
 
     /// Result of the most recent C instruction.
     /// Will be sampled by BCT/BCF instructions.
