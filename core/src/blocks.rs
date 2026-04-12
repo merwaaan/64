@@ -1,11 +1,15 @@
-/// Reads a block of data from some memory, wrapping around if the length is larger than the memory.
-/// The provided callback is invoked with the available data at each wraparound.
+/// Reads a block of data from some memory, wrapping around if the length is larger than the source.
+/// The provided callback is invoked with the available data at each wrap-around.
 /// The idea is to expose a wrapped memory view to the caller, without copying the data.
 pub fn read_block(src: &[u8], src_offset: usize, length: usize, mut callback: impl FnMut(&[u8])) {
-    if src.len() == 0 || length == 0 {
+    // No source data or zero length: just invoke the callback with no data
+
+    if src.is_empty() || length == 0 {
         callback(&[]);
         return;
     }
+
+    // Read the request length, invoke the callback at each wrap-around
 
     let mut src_offset = src_offset % src.len();
     let mut remaining = length;
@@ -23,9 +27,13 @@ pub fn read_block(src: &[u8], src_offset: usize, length: usize, mut callback: im
 
 /// Writes a block of data to some memory, wrapping around if the length is larger than the memory.
 pub fn write_block(src: &[u8], dst: &mut [u8], dst_offset: usize) {
-    if src.len() == 0 || dst.len() == 0 {
+    // No source or destination data: do nothing
+
+    if src.is_empty() || dst.is_empty() {
         return;
     }
+
+    // Write the request length, wrapping around if the length is larger than the destination
 
     let mut src_offset = 0;
     let mut dst_offset = dst_offset % dst.len();
@@ -45,16 +53,6 @@ pub fn write_block(src: &[u8], dst: &mut [u8], dst_offset: usize) {
     }
 }
 
-// TODO remove?
-// trait ReadBlock {
-//     fn read_block(&self, addr: u32, length: usize) -> &[u8];
-// }
-
-// trait WriteBlock {
-//     fn write_block(&mut self, src: &[u8], dst_offset: u32);
-// }
-
-// TODO rm wrapped from test names
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,7 +73,7 @@ mod tests {
     const EMPTY: &[u8] = &[];
 
     #[test]
-    fn read_wrapped_empty() {
+    fn read_block_empty() {
         let src = [];
 
         read(&src, 0, 0, &[EMPTY]);
@@ -88,7 +86,7 @@ mod tests {
     }
 
     #[test]
-    fn read_wrapped_all() {
+    fn read_block_all() {
         let src = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
         read(&src, 0, 0, &[EMPTY]);
@@ -122,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn read_wrapped_slice() {
+    fn read_block_slice() {
         let src = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         let src_slice = &src[4..8]; // [5, 6, 7, 8]
 
@@ -140,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn write_wrapped_empty_src() {
+    fn write_block_empty_src() {
         let src = [];
         let mut dst = [0; 10];
 
@@ -155,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn write_wrapped_empty_dst() {
+    fn write_block_empty_dst() {
         let src = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         let mut dst = [0; 0];
 
@@ -170,7 +168,7 @@ mod tests {
     }
 
     #[test]
-    fn write_wrapped_larger_dst() {
+    fn write_block_larger_dst() {
         let src = [1, 2, 3];
         let mut dst = [0; 10];
 
@@ -185,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn write_wrapped_larger_src() {
+    fn write_block_larger_src() {
         let src = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         let mut dst = [0; 3];
 

@@ -1,3 +1,7 @@
+//! TODO doc
+//!
+//! https://n64brew.dev/wiki/Joybus_Protocol
+
 use crate::{
     blocks::{read_block, write_block},
     controller::{Button, Controller},
@@ -9,8 +13,6 @@ const START: u32 = 0x1FC0_07C0;
 const END: u32 = 0x1FC0_0800;
 
 pub type PifRamLocation = Location<START, END>;
-
-/// https://n64brew.dev/wiki/Joybus_Protocol
 
 pub struct Pif {
     ram: [u8; 0x40],
@@ -34,7 +36,6 @@ impl Pif {
         T::read_mem(&self.ram, addr.relative())
     }
 
-    // TODO method?
     pub fn write<T: Value>(&mut self, addr: PifRamLocation, data: T) {
         data.write_mem(&mut self.ram, addr.relative());
 

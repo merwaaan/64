@@ -9,7 +9,7 @@ use thiserror::Error;
 use zip::ZipArchive;
 
 use crate::{
-    blocks::{read_block, write_block},
+    blocks::read_block,
     is_supported_rom_file,
     isviewer::{IsViewer, IsViewerBufferLocation, IsViewerControlLocation},
     location::Location,
@@ -42,7 +42,6 @@ pub struct Cart {
 }
 
 impl Cart {
-    #[must_use]
     pub fn load(path: &Path) -> Result<Self, CartError> {
         let mut data = load_file(path)?;
 

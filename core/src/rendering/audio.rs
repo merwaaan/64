@@ -10,8 +10,8 @@ pub struct AudioRenderer {
     resampler: Arc<Mutex<Resampler>>,
 }
 
-impl AudioRenderer {
-    pub fn new() -> Self {
+impl Default for AudioRenderer {
+    fn default() -> Self {
         // TODO better error handling, don't panic, output nothing
 
         log::debug!("Initializing audio renderer...");
@@ -42,7 +42,7 @@ impl AudioRenderer {
                     && cfg.min_sample_rate() <= rate
                     && cfg.max_sample_rate() >= rate
                 {
-                    chosen = Some(cfg.clone().with_sample_rate(rate));
+                    chosen = Some(cfg.with_sample_rate(rate));
                     break 'outer;
                 }
             }
@@ -83,7 +83,9 @@ impl AudioRenderer {
             resampler,
         }
     }
+}
 
+impl AudioRenderer {
     fn lock_resampler(&'_ self) -> MutexGuard<'_, Resampler> {
         self.resampler.lock().expect("Failed to lock audio buffer")
     }

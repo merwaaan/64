@@ -1,16 +1,12 @@
 use arbitrary_int::prelude::*;
-use rustc_apfloat::{
-    Float, FloatConvert, Status, StatusAnd,
-    ieee::{Double, Single},
-};
+use rustc_apfloat::{Float, FloatConvert, Status, StatusAnd, ieee::Single};
 
 use crate::{
     check_cop_usable,
     cop1::{self, Cause, Format, Interrupt, RoundingMode},
     cpu::{
         instructions::{
-            DecodedInstruction, Disassembly, InstructionEffect, InstructionResult,
-            RESERVED_INSTRUCTION,
+            DecodedInstruction, InstructionEffect, InstructionResult, RESERVED_INSTRUCTION,
         },
         opcode::Opcode,
     },
@@ -138,12 +134,8 @@ fn cfc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn cfc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "CFC1 {}, {}",
-        op.rtn(),
-        Registers::fpr_name(op.fs())
-    ))
+fn cfc1_disassemble(_s: &System, op: Opcode) -> String {
+    format!("CFC1 {}, {}", op.rtn(), Registers::fpr_name(op.fs()))
 }
 
 fn ctc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -160,8 +152,8 @@ fn ctc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn ctc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("CTC1 {}, FCR{}", op.rtn(), op.fs()))
+fn ctc1_disassemble(_s: &System, op: Opcode) -> String {
+    format!("CTC1 {}, FCR{}", op.rtn(), op.fs())
 }
 
 fn dmfc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -174,8 +166,8 @@ fn dmfc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn dmfc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DMFC1 {}, {}", op.rtn(), op.fsn()))
+fn dmfc1_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DMFC1 {}, {}", op.rtn(), op.fsn())
 }
 
 fn dmtc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -186,8 +178,8 @@ fn dmtc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn dmtc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DMTC1 {}, {}", op.rtn(), op.fsn()))
+fn dmtc1_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DMTC1 {}, {}", op.rtn(), op.fsn())
 }
 
 fn mfc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -200,8 +192,8 @@ fn mfc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn mfc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("MFC1 {}, {}", op.rtn(), op.fsn()))
+fn mfc1_disassemble(_s: &System, op: Opcode) -> String {
+    format!("MFC1 {}, {}", op.rtn(), op.fsn())
 }
 
 fn mov_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -216,13 +208,13 @@ fn mov_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn mov_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
+fn mov_disassemble(_s: &System, op: Opcode) -> String {
+    format!(
         "MOV.{} {},{}",
         op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn()
-    ))
+    )
 }
 
 fn mtc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -233,8 +225,8 @@ fn mtc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn mtc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("MTC1 {}, {}", op.rtn(), op.fsn()))
+fn mtc1_disassemble(_s: &System, op: Opcode) -> String {
+    format!("MTC1 {}, {}", op.rtn(), op.fsn())
 }
 
 // --------
@@ -358,28 +350,28 @@ fn generic_rounding_execute<ROUNDING: Rounding>(s: &mut System, op: Opcode) -> I
     Ok(None)
 }
 
-fn generic_rounding_disassemble<ROUNDING: Rounding>(_s: &System, op: Opcode) -> Disassembly {
+fn generic_rounding_disassemble<ROUNDING: Rounding>(_s: &System, op: Opcode) -> String {
     let output_format = if (op.0 & ROUNDING::L_MASK) == ROUNDING::L_MASK {
         Format::Int64
     } else {
         Format::Int32
     };
 
-    Disassembly::new(format!(
+    format!(
         "{}.{}.{} {},{}",
         ROUNDING::NAME,
         output_format,
         op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn()
-    ))
+    )
 }
 
 fn ceil_execute(s: &mut System, op: Opcode) -> InstructionResult {
     generic_rounding_execute::<Ceil>(s, op)
 }
 
-fn ceil_disassemble(s: &System, op: Opcode) -> Disassembly {
+fn ceil_disassemble(s: &System, op: Opcode) -> String {
     generic_rounding_disassemble::<Ceil>(s, op)
 }
 
@@ -387,7 +379,7 @@ fn floor_execute(s: &mut System, op: Opcode) -> InstructionResult {
     generic_rounding_execute::<Floor>(s, op)
 }
 
-fn floor_disassemble(s: &System, op: Opcode) -> Disassembly {
+fn floor_disassemble(s: &System, op: Opcode) -> String {
     generic_rounding_disassemble::<Floor>(s, op)
 }
 
@@ -395,7 +387,7 @@ fn round_execute(s: &mut System, op: Opcode) -> InstructionResult {
     generic_rounding_execute::<Round>(s, op)
 }
 
-fn round_disassemble(s: &System, op: Opcode) -> Disassembly {
+fn round_disassemble(s: &System, op: Opcode) -> String {
     generic_rounding_disassemble::<Round>(s, op)
 }
 
@@ -403,7 +395,7 @@ fn trunc_execute(s: &mut System, op: Opcode) -> InstructionResult {
     generic_rounding_execute::<Trunc>(s, op)
 }
 
-fn trunc_disassemble(s: &System, op: Opcode) -> Disassembly {
+fn trunc_disassemble(s: &System, op: Opcode) -> String {
     generic_rounding_disassemble::<Trunc>(s, op)
 }
 
@@ -448,12 +440,8 @@ fn c_execute<T: SoftFloat>(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn c_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "C.{}.{}",
-        op.cop1_comparison(),
-        op.cop1_format().unwrap(),
-    ))
+fn c_disassemble(_s: &System, op: Opcode) -> String {
+    format!("C.{}.{}", op.cop1_comparison(), op.cop1_format().unwrap(),)
 }
 
 fn bc1f_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -468,8 +456,8 @@ fn bc1f_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-fn bc1f_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BC1F {:#06X}", op.branch_offset()))
+fn bc1f_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BC1F {:#06X}", op.branch_offset())
 }
 
 fn bc1fl_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -487,8 +475,8 @@ fn bc1fl_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-fn bc1fl_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BC1FL {:#06X}", op.branch_offset()))
+fn bc1fl_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BC1FL {:#06X}", op.branch_offset())
 }
 
 fn bc1t_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -503,8 +491,8 @@ fn bc1t_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-fn bc1t_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BC1T {:#06X}", op.branch_offset()))
+fn bc1t_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BC1T {:#06X}", op.branch_offset())
 }
 
 fn bc1tl_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -522,8 +510,8 @@ fn bc1tl_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-fn bc1tl_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BC1TL {:#06X}", op.branch_offset()))
+fn bc1tl_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BC1TL {:#06X}", op.branch_offset())
 }
 
 // ---------------------
@@ -778,56 +766,56 @@ fn add_execute<T: SoftFloat>(s: &mut System, op: Opcode) -> InstructionResult {
     base_arithmetic_op::<T, _>(s, op, |_s, fs, ft, rounding| fs.add_r(ft, rounding))
 }
 
-fn add_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
+fn add_disassemble(_s: &System, op: Opcode) -> String {
+    format!(
         "ADD.{} {}, {}, {}",
         op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn(),
         op.ftn()
-    ))
+    )
 }
 
 fn sub_execute<T: SoftFloat>(s: &mut System, op: Opcode) -> InstructionResult {
     base_arithmetic_op::<T, _>(s, op, |_s, fs, ft, rounding| fs.sub_r(ft, rounding))
 }
 
-fn sub_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
+fn sub_disassemble(_s: &System, op: Opcode) -> String {
+    format!(
         "SUB.{} {}, {}, {}",
         op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn(),
         op.ftn()
-    ))
+    )
 }
 
 fn mul_execute<T: SoftFloat>(s: &mut System, op: Opcode) -> InstructionResult {
     base_arithmetic_op::<T, _>(s, op, |_s, fs, ft, rounding| fs.mul_r(ft, rounding))
 }
 
-fn mul_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
+fn mul_disassemble(_s: &System, op: Opcode) -> String {
+    format!(
         "MUL.{} {}, {}, {}",
         op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn(),
         op.ftn()
-    ))
+    )
 }
 
 fn div_execute<T: SoftFloat>(s: &mut System, op: Opcode) -> InstructionResult {
     base_arithmetic_op::<T, _>(s, op, |_s, fs, ft, rounding| fs.div_r(ft, rounding))
 }
 
-fn div_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
+fn div_disassemble(_s: &System, op: Opcode) -> String {
+    format!(
         "DIV.{} {}, {}, {}",
         op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn(),
         op.ftn()
-    ))
+    )
 }
 
 fn sqrt_execute<T: SoftFloat>(s: &mut System, op: Opcode) -> InstructionResult {
@@ -861,13 +849,13 @@ fn sqrt_execute<T: SoftFloat>(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn sqrt_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
+fn sqrt_disassemble(_s: &System, op: Opcode) -> String {
+    format!(
         "SQRT.{} {}, {}",
         op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn()
-    ))
+    )
 }
 
 fn abs_execute<T: SoftFloat>(s: &mut System, op: Opcode) -> InstructionResult {
@@ -890,13 +878,13 @@ fn abs_execute<T: SoftFloat>(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn abs_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
+fn abs_disassemble(_s: &System, op: Opcode) -> String {
+    format!(
         "ABS.{} {},{}",
         op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn()
-    ))
+    )
 }
 
 fn neg_execute<T: SoftFloat>(s: &mut System, op: Opcode) -> InstructionResult {
@@ -919,13 +907,13 @@ fn neg_execute<T: SoftFloat>(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn neg_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
+fn neg_disassemble(_s: &System, op: Opcode) -> String {
+    format!(
         "NEG.{} {},{}",
         op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn()
-    ))
+    )
 }
 
 // -----------
@@ -1144,11 +1132,11 @@ fn cvt_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn cvt_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
+fn cvt_disassemble(_s: &System, op: Opcode) -> String {
+    format!(
         "CVT.{} {}, {}",
         op.cop1_format().unwrap(),
         op.fdn(),
         op.fsn()
-    ))
+    )
 }

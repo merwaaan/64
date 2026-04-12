@@ -1,11 +1,7 @@
 use std::collections::HashSet;
 
 use egui::CursorIcon;
-use n64_core::{
-    breakpoints::Breakpoints,
-    cpu::{Cpu, instructions::Disassembly},
-    registers::Registers,
-};
+use n64_core::{breakpoints::Breakpoints, cpu::Cpu, registers::Registers};
 
 use crate::{
     command::Command,
@@ -20,7 +16,7 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct CpuUpdate {
     pub cpu: Cpu,
-    pub instructions: Vec<(u32, Disassembly)>,
+    pub instructions: Vec<(u32, String)>,
 }
 
 #[derive(Default)]
@@ -56,7 +52,7 @@ impl Widget for CpuWidget {
 
 impl ChildWidget for CpuWidget {
     fn show(&mut self, ui: &mut egui::Ui) -> Vec<Command> {
-        let mut commands = Vec::new();
+        let commands = Vec::new();
 
         if let Some(last_update) = &self.last_update {
             ui.columns(2, |ui| {
@@ -123,7 +119,7 @@ impl ChildWidget for CpuWidget {
                             //     }
                             // });
 
-                            Text::new(format!(" {}", disassembly.mnemonics)).show(ui);
+                            Text::new(disassembly).show(ui);
                         });
                     }
                 });

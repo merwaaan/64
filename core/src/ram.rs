@@ -53,11 +53,7 @@ impl Ram {
     pub fn write<T: Value>(s: &mut System, addr: RamLocation, data: T) {
         match addr.relative() {
             0..DATA_MAPPED_SIZE => data.write_mem(&mut s.ram.data, addr.relative()),
-            _ => {} // _ => log::warn!(
-                    //     "Invalid RAM data write: {:08X} {:X}",
-                    //     addr.relative(),
-                    //     data
-                    // ), TODO
+            _ => log::warn!("Invalid RAM data write: {:08X} {:X}", addr.relative(), data),
         }
     }
 

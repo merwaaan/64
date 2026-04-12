@@ -1,3 +1,7 @@
+//! Peripheral interface
+//!
+//! Handles DMA transfers between RAM and Cartridge.
+
 use strum::{Display, EnumIter};
 
 use crate::{
@@ -9,10 +13,6 @@ use crate::{
     system::System,
     value::Value,
 };
-
-/// Peripheral interface
-///
-/// Handles DMA transfers between RAM and Cartridge.
 
 const START: u32 = 0x0460_0000;
 const END: u32 = 0x0470_0000;

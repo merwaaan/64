@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
 
 use crate::{
     command::Command,
@@ -10,13 +10,9 @@ use crate::{
     },
 };
 use egui::{
-    Color32, ColorImage, Context, Rect, Scene, ScrollArea, TextureFilter, TextureHandle,
-    TextureOptions, vec2,
+    Color32, ColorImage, Context, ScrollArea, TextureFilter, TextureHandle, TextureOptions, vec2,
 };
-use n64_core::{
-    dp::rgba5551_to_8888,
-    rendering::{tile_cache::Tile, video::Frame},
-};
+use n64_core::{dp::rgba5551_to_8888, rendering::tile_cache::Tile};
 
 #[derive(Clone, Debug)]
 pub struct DpUpdate {
@@ -159,8 +155,6 @@ impl ChildWidget for DpWidget {
                 }
             });
         }
-
-        // Tile atlas TODO move to separate widget
 
         Text::new(format!("{} tiles", self.tile_textures.len())).show(ui);
 

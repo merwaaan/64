@@ -6,9 +6,7 @@ const RAM_END: u32 = 0x0600_0800;
 pub type DdLocation = Location<RAM_START, RAM_END>;
 
 #[derive(Default)]
-pub struct Dd {
-    // TODO ram
-}
+pub struct Dd;
 
 impl Dd {
     pub fn read<T: Value>(&self, addr: DdLocation) -> T {

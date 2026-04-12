@@ -8,12 +8,10 @@ arbitrary-int = "2.1"
 arc-swap = "1.9"
 bit_field = "0.10"
 bitbybit = "2.0"
-bitfield-struct = "0.12.1"
 bytemuck = { version = "1.25", features = ["derive"] }
 cgmath = "0.18"
 cpal = "0.17"
 crossbeam = "0.8.4"
-escargot = "0.5.15"
 ieee-apsqrt = "0.1.1"
 libc = "0.2.184"
 log = "0.4"
@@ -39,10 +37,3 @@ rstest = "0.26"
 [[bench]]
 name = "endianness"
 harness = false
-
-[profile.release]
-debug = true
-opt-level = 3
-lto = false
-codegen-units = 1
-panic = "abort"

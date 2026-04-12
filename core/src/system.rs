@@ -133,7 +133,7 @@ impl System {
             ai: Ai::default(),
             pi: Pi::default(),
             si: Si::default(),
-            dd: Dd::default(),
+            dd: Dd,
             pif: Pif::default(),
             cart,
 
@@ -143,8 +143,8 @@ impl System {
 
             controllers: [Controller::default(); 4],
 
-            audio_renderer: AudioRenderer::new(),
-            video_renderer: VideoRenderer::new(),
+            audio_renderer: AudioRenderer::default(),
+            video_renderer: VideoRenderer::default(),
         };
 
         // Load the breakpoints
@@ -231,7 +231,7 @@ impl System {
     }
 
     // TODO or Option<Result<Loc, Exc>>?
-    #[must_use]
+
     fn decode(&self, addr: Address, write: bool) -> Result<Option<MapLocation>, Exception> {
         let physical_addr = match addr {
             Address::Virtual(addr) => match addr.0 {
@@ -297,7 +297,6 @@ impl System {
         })
     }
 
-    #[must_use]
     pub fn read<T: Value>(&mut self, addr: Address) -> Result<T, Exception> {
         self.decode(addr, false).map(|location| match location {
             Some(MapLocation::Ram(addr)) => Ram::read(self, addr),
@@ -328,7 +327,7 @@ impl System {
     }
 
     // TODO what if address crosses a boundary?
-    #[must_use]
+
     pub fn write<T: Value>(&mut self, addr: Address, data: T) -> Result<(), Exception> {
         let location = self.decode(addr, true)?;
 
@@ -400,14 +399,12 @@ impl System {
 
     // TODO move saving to client code? just serialize in core
 
-    #[must_use]
     fn save(&self) -> Result<(), LoadError> {
         let breakpoints_json = serde_json::to_string(&self.breakpoints)?;
         std::fs::write("breakpoints.json", breakpoints_json)?;
         Ok(())
     }
 
-    #[must_use]
     fn load(&mut self) -> Result<(), LoadError> {
         let path = std::path::Path::new("breakpoints.json");
 

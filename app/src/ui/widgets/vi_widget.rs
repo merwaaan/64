@@ -1,8 +1,7 @@
 use std::collections::HashSet;
 
 use egui::Context;
-use n64_core::vi::{Register, Vi};
-use strum::IntoEnumIterator;
+use n64_core::vi::Vi;
 
 use crate::{
     command::Command,

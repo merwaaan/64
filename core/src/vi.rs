@@ -207,9 +207,9 @@ impl Registers {
     }
 
     pub fn write<T: Value>(&mut self, offset: u32, data: T) {
-        let mut words = bytemuck::cast_slice_mut(bytemuck::bytes_of_mut(self));
+        let words = bytemuck::cast_slice_mut(bytemuck::bytes_of_mut(self));
 
-        data.write_reg(&mut words, offset);
+        data.write_reg(words, offset);
     }
 }
 
@@ -224,17 +224,9 @@ const TOTAL_SCANLINES: usize = 525; // TODO depends????
 const FRAME_CPU_CYCLES: usize = (cpu::FREQUENCY / NTSC_FREQUENCY) as usize;
 pub const SCANLINE_CPU_CYCLES: usize = FRAME_CPU_CYCLES / TOTAL_SCANLINES; // TODO fractional part?
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct Vi {
     regs: Registers,
-}
-
-impl Default for Vi {
-    fn default() -> Self {
-        Self {
-            regs: Registers::default(),
-        }
-    }
 }
 
 impl Vi {

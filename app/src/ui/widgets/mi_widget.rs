@@ -20,7 +20,7 @@ pub struct MiWidget {
     last_update: Option<Mi>,
 
     // Last time each interrupt was active, to fade them out progressively
-    // TODO not really working, we miss most interrupts! collect them in the core thread?
+    // TODO not really working, we miss most interrupts! collect them in the core thread with a proper debugger?
     last_interrupt_time: [f64; 6],
 }
 

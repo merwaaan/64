@@ -66,7 +66,7 @@ impl Widget for MemoryWidget {
     fn requested_data(&mut self, _only_if_changed: bool) -> Option<HashSet<Data>> {
         if self.settings_changed {
             self.settings_changed = false;
-            Some(HashSet::from([Data::Memory(self.settings.clone())]))
+            Some(HashSet::from([Data::Memory(self.settings)]))
         } else {
             None
         }
@@ -81,7 +81,7 @@ impl Widget for MemoryWidget {
 
 impl ChildWidget for MemoryWidget {
     fn show(&mut self, ui: &mut egui::Ui) -> Vec<Command> {
-        let mut commands = Vec::new();
+        let commands = Vec::new();
 
         ui.horizontal(|ui| {
             // TODO virtual/physical checkbox?

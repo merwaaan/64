@@ -2,8 +2,6 @@ use egui::{Color32, Response, RichText};
 
 use crate::ui::colors;
 
-// TODO color enum?
-
 pub struct Text {
     text: String,
     bold: bool,

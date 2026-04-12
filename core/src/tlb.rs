@@ -148,7 +148,6 @@ impl Tlb {
         self.entries[(index & 0x1F) as usize] = entry;
     }
 
-    #[must_use]
     pub fn translate(
         &self,
         addr: VirtualAddress,
@@ -199,7 +198,7 @@ impl Tlb {
                     return Err(Exception::TlbModification);
                 }
 
-                let offset = addr.0 & (page_size as u32 - 1);
+                let offset = addr.0 & (page_size - 1);
 
                 let translated = (page.p << 12) | offset;
 

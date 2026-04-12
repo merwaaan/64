@@ -1,18 +1,17 @@
-use std::collections::{HashMap, HashSet};
-use std::panic::{self, AssertUnwindSafe};
-use std::sync::Arc;
-use std::thread::{self, JoinHandle};
+use std::{
+    collections::{HashMap, HashSet},
+    panic::{self, AssertUnwindSafe},
+    thread::{self, JoinHandle},
+};
 
 use crossbeam::channel::{Receiver, Sender, TryRecvError, unbounded};
 
 use n64_core::{
     cpu,
-    cpu::instructions::Disassembly,
     cpu::opcode::Opcode,
     sp,
     system::{Address, System},
     value::Value,
-    vi::Vi,
 };
 
 use crate::ui::widgets::ai_widget::AiUpdate;
@@ -224,7 +223,7 @@ impl CoreThread {
         let mut events = Vec::new();
 
         if let Some(system) = &mut state.system {
-            for (_id, data) in requested_data {
+            for data in requested_data.values() {
                 for data in data {
                     match data {
                         Data::Memory(settings) => {
@@ -253,10 +252,7 @@ impl CoreThread {
 
                                             (addr, disassemble(system, opcode))
                                         })
-                                        .unwrap_or((
-                                            addr,
-                                            Disassembly::new("<CANNOT DECODE>".to_string()),
-                                        ))
+                                        .unwrap_or((addr, "<CANNOT DECODE>".to_string()))
                                 })
                                 .collect();
 
@@ -282,7 +278,8 @@ impl CoreThread {
                                     let addr = (base_imem_addr + offset * 4) & 0x0FFF;
 
                                     let instruction = u32::read_mem(&system.sp.mem, 0x1000 + addr);
-                                    let opcode = Opcode(instruction);
+                                    let opcode =
+                                        sp::opcode::Opcode::new_with_raw_value(instruction);
 
                                     let (_execute, disassemble) = sp::instructions::decode(opcode);
 
@@ -293,8 +290,8 @@ impl CoreThread {
                             events.push(Event::Sp(SpUpdate {
                                 pc: system.sp.pc,
                                 instructions,
-                                regs: system.sp.regs,
-                                regs2: system.sp.regs2,
+                                regs: system.sp.cregs,
+                                regs2: system.sp.sregs,
                                 vregs: system.sp.vregs,
                                 vacc: system.sp.vacc,
                                 vco: system.sp.vco,

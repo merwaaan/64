@@ -1,7 +1,7 @@
 use crate::{
     cop0,
     cpu::{
-        instructions::{DecodedInstruction, Disassembly, InstructionResult, RESERVED_INSTRUCTION},
+        instructions::{DecodedInstruction, InstructionResult, RESERVED_INSTRUCTION},
         opcode::Opcode,
     },
     inst,
@@ -35,8 +35,8 @@ fn dmfc0_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn dmfc0_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DMFC0 {}, {}", op.rtn(), op.rd0n()))
+fn dmfc0_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DMFC0 {}, {}", op.rtn(), op.rd0n())
 }
 
 fn dmtc0_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -45,8 +45,8 @@ fn dmtc0_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn dmtc0_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DMTC0 {}, {}", op.rtn(), op.rd0n()))
+fn dmtc0_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DMTC0 {}, {}", op.rtn(), op.rd0n())
 }
 
 fn eret_execute(s: &mut System, _op: Opcode) -> InstructionResult {
@@ -63,8 +63,8 @@ fn eret_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn eret_disassemble(_s: &System, _op: Opcode) -> Disassembly {
-    Disassembly::new("ERET".to_string())
+fn eret_disassemble(_s: &System, _op: Opcode) -> String {
+    "ERET".to_string()
 }
 fn mfc0_execute(s: &mut System, op: Opcode) -> InstructionResult {
     s.cpu.regs.gpr[op.rt()].set(s.cop0.read(op.rd()).get());
@@ -72,8 +72,8 @@ fn mfc0_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn mfc0_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("MFC0 {}, {}", op.rtn(), op.rd0n()))
+fn mfc0_disassemble(_s: &System, op: Opcode) -> String {
+    format!("MFC0 {}, {}", op.rtn(), op.rd0n())
 }
 
 fn mtc0_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -82,8 +82,8 @@ fn mtc0_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn mtc0_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("MTC0 {}, {}", op.rtn(), op.rd0n()))
+fn mtc0_disassemble(_s: &System, op: Opcode) -> String {
+    format!("MTC0 {}, {}", op.rtn(), op.rd0n())
 }
 
 fn tlbp_execute(s: &mut System, _op: Opcode) -> InstructionResult {
@@ -96,8 +96,8 @@ fn tlbp_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn tlbp_disassemble(_s: &System, _op: Opcode) -> Disassembly {
-    Disassembly::new("TLBP".to_string())
+fn tlbp_disassemble(_s: &System, _op: Opcode) -> String {
+    "TLBP".to_string()
 }
 
 fn tlbr_execute(s: &mut System, _op: Opcode) -> InstructionResult {
@@ -109,8 +109,8 @@ fn tlbr_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn tlbr_disassemble(_s: &System, _op: Opcode) -> Disassembly {
-    Disassembly::new("TLBR".to_string())
+fn tlbr_disassemble(_s: &System, _op: Opcode) -> String {
+    "TLBR".to_string()
 }
 
 fn tlbwi_execute(s: &mut System, _op: Opcode) -> InstructionResult {
@@ -122,8 +122,8 @@ fn tlbwi_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn tlbwi_disassemble(_s: &System, _op: Opcode) -> Disassembly {
-    Disassembly::new("TLBWI".to_string())
+fn tlbwi_disassemble(_s: &System, _op: Opcode) -> String {
+    "TLBWI".to_string()
 }
 
 fn tlbwr_execute(s: &mut System, _op: Opcode) -> InstructionResult {
@@ -143,6 +143,6 @@ fn tlbwr_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn tlbwr_disassemble(_s: &System, _op: Opcode) -> Disassembly {
-    Disassembly::new("TLBWR".to_string())
+fn tlbwr_disassemble(_s: &System, _op: Opcode) -> String {
+    "TLBWR".to_string()
 }

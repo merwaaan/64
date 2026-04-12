@@ -66,10 +66,7 @@ pub trait Value: Sized + Copy + Default + LowerHex + UpperHex + std::fmt::Debug 
 /// Converts a little-endian address to a big-endian address in a u32 slice.
 #[inline(always)]
 fn le_to_be_address_32(address: u32) -> usize {
-    let word_start = address & !3;
-    let byte_offset = address & 3;
-
-    (word_start + (3 - byte_offset)) as usize
+    (address ^ 3) as usize
 }
 
 impl Value for u8 {
@@ -90,7 +87,7 @@ impl Value for u8 {
     fn write_reg(self, regs: &mut [u32], address: u32) {
         let bytes: &mut [u8] = bytemuck::cast_slice_mut(regs);
 
-        bytes[le_to_be_address_32(address)] = self as u8;
+        bytes[le_to_be_address_32(address)] = self;
     }
 }
 

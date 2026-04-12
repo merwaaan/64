@@ -163,7 +163,7 @@ pub struct Fcr31 {
     flush_to_zero: bool,
 
     /// Result of the most recent C instruction.
-    /// Will be sampled by BCT/BCF instructions.
+    /// Checked by BCT/BCF instructions.
     #[bit(23, rw)]
     comparison_result: bool,
 
@@ -177,28 +177,26 @@ pub struct Fcr31 {
     exception_enabled: Interrupt,
 
     /// Exceptions that were raised.
-    /// Set in case of masked exception.
-    /// "Sticky", so stays set until cleared by software using CTC1.
+    /// "Sticky", so bits stay set until cleared by software using CTC1.
     #[bits(2..=6, rw)]
     exception_flags: Interrupt,
 
+    /// Global rounding mode applied to all floating-point operations.
     #[bits(0..=1, rw)]
     rounding_mode: RoundingMode,
 }
 
 impl Fcr31 {
     pub fn read(&self) -> u32 {
-        self.raw_value()
+        self.raw_value
     }
 
     pub fn write(&mut self, value: u32) {
-        const MASK: u32 = 0x0183_FFFF;
-
-        *self = Fcr31::new_with_raw_value(value & MASK);
+        *self = Fcr31::new_with_raw_value(value & 0x0183_FFFF);
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct Cop1 {
     // Floating-point registers
     //
@@ -211,45 +209,11 @@ pub struct Cop1 {
     pub fcr31: Fcr31,
 }
 
-impl Default for Cop1 {
-    fn default() -> Self {
-        Self {
-            fpr: [Reg64::default(); 32],
-            fcr31: Fcr31::default(),
-        }
-    }
-}
-
 impl Cop1 {
     /// FCR0: read-only implementation/revision register
     pub fn fcr0(&self) -> u32 {
-        const FCR0_DEFAULT: u32 = 0x0000_0A00;
-
-        FCR0_DEFAULT
+        0x0000_0A00
     }
-
-    // pub(crate) fn check_exceptions(&mut self) -> Option<Exception> {
-    //     let cause = self.fcr31.exception_cause().raw_value;
-    //     let enabled = self.fcr31.exception_enabled().raw_value | 0x20; // "unimplemented operation" is always enabled
-    //     let flags = self.fcr31.exception_flags().raw_value;
-
-    //     // Update the flags with the masked exceptions
-
-    //     let masked = cause & !enabled;
-
-    //     self.fcr31
-    //         .set_exception_flags(Interrupt::new_with_raw_value(u5::new(flags | masked)));
-
-    //     // Raise an exception if there are any enabled exception
-
-    //     let unmasked = cause & enabled;
-
-    //     if unmasked != 0 {
-    //         return Some(Exception::FloatingPoint);
-    //     } else {
-    //         None
-    //     }
-    // }
 
     /// Converts a 64-bits/32-bits mode register index to the "physical" register index that actually contains the data.
     ///
@@ -274,7 +238,6 @@ impl Cop1 {
     /// - DMFC1 1 -> gives 0x12345678_AABBCCDD
     /// - MFC1 0 -> gives 0xAABBCCDD
     /// - MFC1 1 -> gives 0x12345678
-
     pub fn get32(&self, index: usize, f64_mode: bool) -> u32 {
         if f64_mode {
             self.get32_64mode(index)

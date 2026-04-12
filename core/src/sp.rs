@@ -1,3 +1,20 @@
+//! Reality Signal Processor
+//!
+//! This is a slimmed down version of the main MIPS processor:
+//! - Registers are strictly 32-bit
+//! - Cannot access RAM directly, transfers it to/from DMEM using DMA instead
+//! - The PC is 12-bit and wraps around IMEM
+//! - No exceptions or traps
+//! - Less arithmetic instructions (no mult/div, no 64-bit instructions like DADD/DSUB)
+//!
+//! TODO COP 0 = SP + DP registers
+//!
+//! TODO vector! = COP 2
+//!
+//! Resources:
+//! - Nintendo Ultra64 RSP Programmer’s Guide https://ultra64.ca/files/documentation/silicon-graphics/SGI_Nintendo_64_RSP_Programmers_Guide.pdf
+//! - N64brew / Reality Signal Processor https://n64brew.dev/wiki/Reality_Signal_Processor
+
 use std::simd::*;
 
 use arbitrary_int::prelude::*;
@@ -5,37 +22,21 @@ use strum::{Display, EnumIter};
 
 use crate::{
     blocks::{read_block, write_block},
-    cpu::opcode::Opcode,
     events::{EventType, Events},
     location::Location,
     mi::Interrupt,
     ram::RamLocation,
-    sp::instructions::InstructionEffect,
+    sp::{instructions::InstructionEffect, opcode::Opcode},
     system::System,
     value::Value,
 };
 
 pub mod instructions;
+pub mod opcode;
 
 // TODO split interface and proc?
 // TODO timing = 2/3 CPU
 // TODO increment clock regs
-
-///! Reality Signal Processor
-///!
-///! This is a slimmed down version of the main MIPS processor:
-///! - Registers are strictly 32-bit
-///! - Cannot access RAM directly, transfers it to/from DMEM using DMA instead
-///! - The PC is 12-bit and wraps around IMEM
-///! - No exceptions or traps
-///! - Less arithmetic instructions (no mult/div, no 64-bit instructions like DADD/DSUB)
-///!
-///! TODO COP 0 = SP + DP registers
-///!
-///! TODO vector! = COP 2
-///!
-///! https://n64brew.dev/wiki/Reality_Signal_Processor/CPU_Core
-///! https://ultra64.ca/files/documentation/silicon-graphics/SGI_Nintendo_64_RSP_Programmers_Guide.pdf
 
 const MEM_START: u32 = 0x0400_0000;
 const MEM_END: u32 = 0x0404_0000;
@@ -135,6 +136,7 @@ impl Registers {
     }
 
     pub fn write(&mut self, offset: usize, data: u32) {
+        // R0 is read-only
         if offset != 0 {
             self.0[offset] = data;
         }
@@ -151,20 +153,38 @@ struct DmaSlot {
 
 #[derive(Clone)]
 pub struct Sp {
-    // DMEM: 0x0000 - 0x0FFF
-    // IMEM: 0x1000 - 0x1FFF
+    /// Memory, split into:
+    /// - DMEM: 0x0000 - 0x0FFF
+    /// - IMEM: 0x1000 - 0x1FFF
     pub mem: Vec<u8>, // TODO vis
 
-    pub regs: [u32; 8],   // TODO vis
-    pub regs2: Registers, // TODO names? or move to SP interface? // TODO vis
+    /// Control registers
+    pub cregs: [u32; 8], // TODO vis
 
-    pub vregs: [i16x8; 32],
-    pub vacc: i64x8, // hi, mid, lo
-    pub vco: u16,    // carry out
-    pub vcc: u16,    // compare code
-    pub vce: u8,     // compare extension
+    /// Scalar registers
+    pub sregs: Registers, //TODO vis
+
+    /// Vector registers
+    pub vregs: [i16x8; 32], // TODO vis
+
+    /// 48-bit vector accumulator
+    pub vacc: i64x8, // TODO vis
+
+    /// Vector carry-out TODO other half?
+    pub vco: u16, // TODO vis
+
+    /// Vector compare code TODO doc
+    pub vcc: u16, // TODO vis
+
+    /// Vector compare extension TODO doc
+    pub vce: u8, // TODO vis
+
+    /// Partial results for VRCP and similar instructions
+    div_in: i32,
+    div_out: i32,
 
     pub pc: u12, // TODO vis
+
     delayed_branching: Option<u12>,
 
     active_dma: Option<DmaSlot>,
@@ -179,13 +199,15 @@ impl Default for Sp {
 
         Self {
             mem: vec![0; 0x2000],
-            regs,
-            regs2: Registers([0; 32]),
+            cregs: regs,
+            sregs: Registers([0; 32]),
             vregs: [i16x8::splat(0); 32],
             vacc: i64x8::splat(0),
             vcc: 0,
             vco: 0,
             vce: 0,
+            div_in: 0,
+            div_out: 0,
             pc: u12::ZERO,
             delayed_branching: None,
             active_dma: None,
@@ -204,7 +226,7 @@ impl Sp {
 
         let instruction = u32::read_mem(&s.sp.mem, 0x1000u32 + u32::from(s.sp.pc));
 
-        let opcode = Opcode(instruction);
+        let opcode = Opcode::new_with_raw_value(instruction);
 
         let (execute, _disassemble) = instructions::decode(opcode);
 
@@ -226,11 +248,11 @@ impl Sp {
     }
 
     pub fn halted(&self) -> bool {
-        self.regs[Register::Status as usize] & 1 != 0
+        self.cregs[Register::Status as usize] & 1 != 0
     }
 
     pub fn interrupt_on_break(&self) -> bool {
-        self.regs[Register::Status as usize] & 0x40 != 0
+        self.cregs[Register::Status as usize] & 0x40 != 0
     }
 
     pub fn read_mem<T: Value>(&self, addr: SpMemLocation) -> T {
@@ -246,7 +268,7 @@ impl Sp {
         let bank = &self.mem[bank_offset..bank_offset + 0x1000];
 
         let offset_in_bank = (addr.relative() & 0x0FFF) as usize;
-        read_block(&bank, offset_in_bank, length, callback);
+        read_block(bank, offset_in_bank, length, callback);
     }
 
     pub fn read_reg<T: Value>(&mut self, addr: SpRegsLocation) -> T {
@@ -258,12 +280,12 @@ impl Sp {
         // TODO clean up mess
 
         if addr.relative() < 0x4_0000 {
-            let data = T::read_reg(&self.regs, addr.relative() & REG_MASK);
+            let data = T::read_reg(&self.cregs, addr.relative() & REG_MASK);
 
             // Reading the semaphore returns the current value and set it to 1
 
             if addr.relative() == ((Register::Semaphore as u32) << 2) {
-                self.regs[Register::Semaphore as usize] = 1;
+                self.cregs[Register::Semaphore as usize] = 1;
             }
 
             data
@@ -291,9 +313,9 @@ impl Sp {
                     // Bits 0-2 cannot be written to so the address is always aligned to 8 bytes.
                     // Bit 12 is the "bank" (O = DMEM, 1 = IMEM).
 
-                    data.write_reg(&mut s.sp.regs, addr.relative() & REG_MASK);
+                    data.write_reg(&mut s.sp.cregs, addr.relative() & REG_MASK);
 
-                    s.sp.regs[Register::DmaSpAddr as usize] &= 0x0000_1FF8;
+                    s.sp.cregs[Register::DmaSpAddr as usize] &= 0x0000_1FF8;
                 }
                 1 => {
                     // 24-bit RAM address.
@@ -301,40 +323,40 @@ impl Sp {
 
                     // TODO reads should return the previous value until DMA starts?
 
-                    data.write_reg(&mut s.sp.regs, addr.relative() & REG_MASK);
+                    data.write_reg(&mut s.sp.cregs, addr.relative() & REG_MASK);
 
-                    s.sp.regs[Register::DmaRamAddr as usize] &= 0x00FF_FFF8;
+                    s.sp.cregs[Register::DmaRamAddr as usize] &= 0x00FF_FFF8;
                 }
                 2 => {
                     // TODO only write on completion if pending? (should read back the ongoing or last DMA)
-                    data.write_reg(&mut s.sp.regs, addr.relative() & REG_MASK);
+                    data.write_reg(&mut s.sp.cregs, addr.relative() & REG_MASK);
 
                     Self::push_dma(
                         s,
                         DmaSlot {
                             direction: DmaDirection::RamToSp,
-                            ram_address: s.sp.regs[Register::DmaRamAddr as usize],
-                            sp_address: s.sp.regs[Register::DmaSpAddr as usize],
-                            length: s.sp.regs[Register::DmaRdLen as usize],
+                            ram_address: s.sp.cregs[Register::DmaRamAddr as usize],
+                            sp_address: s.sp.cregs[Register::DmaSpAddr as usize],
+                            length: s.sp.cregs[Register::DmaRdLen as usize],
                         },
                     );
                 }
                 3 => {
                     // TODO only write on completion if pending? (should read back the ongoing or last DMA)
-                    data.write_reg(&mut s.sp.regs, addr.relative() & REG_MASK);
+                    data.write_reg(&mut s.sp.cregs, addr.relative() & REG_MASK);
 
                     Self::push_dma(
                         s,
                         DmaSlot {
                             direction: DmaDirection::SpToRam,
-                            ram_address: s.sp.regs[Register::DmaRamAddr as usize],
-                            sp_address: s.sp.regs[Register::DmaSpAddr as usize],
-                            length: s.sp.regs[Register::DmaWrLen as usize],
+                            ram_address: s.sp.cregs[Register::DmaRamAddr as usize],
+                            sp_address: s.sp.cregs[Register::DmaSpAddr as usize],
+                            length: s.sp.cregs[Register::DmaWrLen as usize],
                         },
                     );
                 }
                 4 => {
-                    let mut status = s.sp.regs[Register::Status as usize];
+                    let mut status = s.sp.cregs[Register::Status as usize];
 
                     let mut trigger_bits = [0u32];
                     data.write_reg(&mut trigger_bits, addr.relative() & 3);
@@ -395,7 +417,7 @@ impl Sp {
                     clear_set!(1 << 21, 1 << 22, 1 << 13); // 6
                     clear_set!(1 << 23, 1 << 24, 1 << 14); // 7
 
-                    s.sp.regs[Register::Status as usize] = status;
+                    s.sp.cregs[Register::Status as usize] = status;
                 }
                 5 => {
                     log::warn!("write SP_DMA_FULL {:X}", data);
@@ -405,7 +427,7 @@ impl Sp {
                 }
                 7 => {
                     // Writes clear the semaphore
-                    s.sp.regs[Register::Semaphore as usize] = 0;
+                    s.sp.cregs[Register::Semaphore as usize] = 0;
                 }
                 _ => panic!("Invalid SP register: {:08X}", reg),
             }
@@ -453,23 +475,23 @@ impl Sp {
     }
 
     fn set_dma_busy(&mut self) {
-        self.regs[Register::Status as usize] |= STATUS_DMA_BUSY;
-        self.regs[Register::DmaBusy as usize] = 1;
+        self.cregs[Register::Status as usize] |= STATUS_DMA_BUSY;
+        self.cregs[Register::DmaBusy as usize] = 1;
     }
 
     fn clear_dma_busy(&mut self) {
-        self.regs[Register::Status as usize] &= !STATUS_DMA_BUSY;
-        self.regs[Register::DmaBusy as usize] = 0;
+        self.cregs[Register::Status as usize] &= !STATUS_DMA_BUSY;
+        self.cregs[Register::DmaBusy as usize] = 0;
     }
 
     fn set_dma_full(&mut self) {
-        self.regs[Register::Status as usize] |= STATUS_DMA_FULL;
-        self.regs[Register::DmaFull as usize] = 1;
+        self.cregs[Register::Status as usize] |= STATUS_DMA_FULL;
+        self.cregs[Register::DmaFull as usize] = 1;
     }
 
     fn clear_dma_full(&mut self) {
-        self.regs[Register::Status as usize] &= !STATUS_DMA_FULL;
-        self.regs[Register::DmaFull as usize] = 0;
+        self.cregs[Register::Status as usize] &= !STATUS_DMA_FULL;
+        self.cregs[Register::DmaFull as usize] = 0;
     }
 
     fn start_dma(s: &mut System, slot: DmaSlot) {
@@ -551,19 +573,19 @@ impl Sp {
         // Increment the DMA registers for the next transfer
         // TODO do it on completion?
 
-        s.sp.regs[Register::DmaSpAddr as usize] =
+        s.sp.cregs[Register::DmaSpAddr as usize] =
             slot.sp_address.wrapping_add((bytes_per_row * rows) as u32) & 0xFFF
                 | sp_bank_offset as u32;
 
-        s.sp.regs[Register::DmaRamAddr as usize] = slot
+        s.sp.cregs[Register::DmaRamAddr as usize] = slot
             .ram_address
             .wrapping_add(((bytes_per_row + skips) * rows) as u32);
 
         // The length registers always end up being 0xFF8 after a DMA transfer
         // TODO do it on completion?
 
-        s.sp.regs[Register::DmaRdLen as usize] = 0xFF8;
-        s.sp.regs[Register::DmaWrLen as usize] = 0xFF8;
+        s.sp.cregs[Register::DmaRdLen as usize] = 0xFF8;
+        s.sp.cregs[Register::DmaWrLen as usize] = 0xFF8;
 
         // Update the status
 

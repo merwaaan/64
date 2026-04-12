@@ -1,9 +1,8 @@
-///! "n64-systemtest"
-///! https://github.com/lemmy-64/n64-systemtest/tree/main
-///!
-///! A huge test ROM that tests a variety of components, from basic instructions to weird behaviors.
-///! Display the outcome on the screen but also writes it as text to the IS-Viewer port.
-struct Todo {}
+//! "n64-systemtest"
+//! https://github.com/lemmy-64/n64-systemtest/tree/main
+//!
+//! A huge test ROM that tests a variety of components, from basic instructions to weird behaviors.
+//! Displays the outcome on the screen but also writes it as text to the IS-Viewer port.
 
 // #[test]
 // fn lemmy() {

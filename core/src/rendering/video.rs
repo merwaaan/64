@@ -6,7 +6,7 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
-use crossbeam::channel::{Receiver, RecvError, Sender, unbounded};
+use crossbeam::channel::{Receiver, Sender, unbounded};
 
 use crate::rendering::tile_cache::Tile;
 
@@ -73,13 +73,13 @@ pub struct VideoRenderer {
     /// Last frame received from the rendering thread
     last_frame: Arc<ArcSwap<Frame>>,
 
-    ///
+    /// TODO temp
     debug_tiles: Vec<(u64, Tile)>,
     debug_tile_ids: HashSet<u64>,
 }
 
-impl VideoRenderer {
-    pub fn new() -> Self {
+impl Default for VideoRenderer {
+    fn default() -> Self {
         let (command_tx, command_rx) = unbounded::<Command>();
 
         let last_frame = Arc::new(ArcSwap::new(Arc::new(Frame {
@@ -108,7 +108,9 @@ impl VideoRenderer {
             debug_tile_ids: HashSet::new(),
         }
     }
+}
 
+impl VideoRenderer {
     pub fn push_command(&mut self, command: Command) {
         if let Command::PushTile { tile_id, tile } = &command
             && !self.debug_tile_ids.contains(tile_id)
@@ -154,6 +156,8 @@ fn render_thread(command_rx: Receiver<Command>, last_frame: Arc<ArcSwap<Frame>>)
                 }
             },
             Err(e) => {
+                log::error!("Render thread: failed to receive command, {}", e);
+
                 return;
             }
         }
@@ -537,7 +541,7 @@ impl WgpuRenderer {
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&texture_view),
+                                resource: wgpu::BindingResource::TextureView(texture_view),
                             },
                             wgpu::BindGroupEntry {
                                 binding: 1,

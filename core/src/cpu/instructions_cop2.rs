@@ -1,7 +1,7 @@
 use crate::{
     check_cop_usable,
     cpu::{
-        instructions::{DecodedInstruction, Disassembly, InstructionResult, RESERVED_INSTRUCTION},
+        instructions::{DecodedInstruction, InstructionResult, RESERVED_INSTRUCTION},
         opcode::Opcode,
     },
     exception::Exception,
@@ -37,12 +37,8 @@ fn cfc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn cfc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "CFC2 {}, {}",
-        op.rtn(),
-        Registers::fpr_name(op.rd())
-    ))
+fn cfc2_disassemble(_s: &System, op: Opcode) -> String {
+    format!("CFC2 {}, {}", op.rtn(), Registers::fpr_name(op.rd()))
 }
 
 fn ctc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
@@ -53,12 +49,8 @@ fn ctc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn ctc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "CTC2 {}, {}",
-        op.rtn(),
-        Registers::fpr_name(op.rd())
-    ))
+fn ctc2_disassemble(_s: &System, op: Opcode) -> String {
+    format!("CTC2 {}, {}", op.rtn(), Registers::fpr_name(op.rd()))
 }
 
 fn dmfc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
@@ -69,8 +61,8 @@ fn dmfc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn dmfc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DMFC2 {}, {}", op.rtn(), op.fsn()))
+fn dmfc2_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DMFC2 {}, {}", op.rtn(), op.fsn())
 }
 
 fn dmtc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
@@ -81,8 +73,8 @@ fn dmtc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn dmtc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DMTC2 {}, {}", op.rtn(), op.rd0n()))
+fn dmtc2_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DMTC2 {}, {}", op.rtn(), op.rd0n())
 }
 
 fn mfc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
@@ -93,8 +85,8 @@ fn mfc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn mfc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("MFC2 {}, {}", op.rtn(), op.rd0n()))
+fn mfc2_disassemble(_s: &System, op: Opcode) -> String {
+    format!("MFC2 {}, {}", op.rtn(), op.rd0n())
 }
 
 fn mtc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
@@ -105,6 +97,6 @@ fn mtc2_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-fn mtc2_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("MTC2 {}, {}", op.rtn(), op.rd0n()))
+fn mtc2_disassemble(_s: &System, op: Opcode) -> String {
+    format!("MTC2 {}, {}", op.rtn(), op.rd0n())
 }

@@ -4,7 +4,6 @@ use std::{collections::HashSet, simd::num::SimdInt};
 use arbitrary_int::prelude::*;
 use egui::Context;
 use n64_core::{
-    cpu::instructions::Disassembly,
     registers::Registers,
     sp::{self, Register},
 };
@@ -30,7 +29,7 @@ pub struct SpUpdate {
     pub vco: u16,
     pub vcc: u16,
     pub vce: u8,
-    pub instructions: Vec<(u32, Disassembly)>,
+    pub instructions: Vec<(u32, String)>,
 }
 
 #[derive(Default)]
@@ -77,7 +76,7 @@ impl ChildWidget for SpWidget {
                                 .color(colors::ACTIVE)
                                 .show(ui);
 
-                            Text::new(format!(" {}", disassembly.mnemonics)).show(ui);
+                            Text::new(disassembly).show(ui);
                         });
                     }
                 });
@@ -151,8 +150,8 @@ impl ChildWidget for SpWidget {
 
                             let data = update.vregs[row].to_array();
 
-                            for i in 0..8 {
-                                Text::new(format!("{:04X}", data[i])).show(ui);
+                            for i in &data {
+                                Text::new(format!("{:04X}", i)).show(ui);
                             }
                         });
                     }

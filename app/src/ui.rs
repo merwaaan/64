@@ -223,15 +223,11 @@ impl eframe::App for Ui {
                 // Pause/Resume/Step
 
                 match self.status {
-                    Status::Running => {
-                        if ui.button("⏸ Pause").clicked() {
-                            self.core_thread.send_command(Command::Pause);
-                        }
+                    Status::Running if ui.button("⏸ Pause").clicked() => {
+                        self.core_thread.send_command(Command::Pause);
                     }
-                    Status::Paused => {
-                        if ui.button("▶ Resume").clicked() {
-                            self.core_thread.send_command(Command::Resume);
-                        }
+                    Status::Paused if ui.button("▶ Resume").clicked() => {
+                        self.core_thread.send_command(Command::Resume);
                     }
                     _ => {}
                 }
@@ -365,12 +361,12 @@ fn gilrs_event_to_controller_input(event: gilrs::EventType) -> Option<Controller
     //log::info!("Gilrs event: {:?}", event);
 
     match event {
-        gilrs::EventType::ButtonPressed(button, _code) => gilrs_button_to_controller_button(button)
-            .map(|button| ControllerInput::PressButton(button)),
+        gilrs::EventType::ButtonPressed(button, _code) => {
+            gilrs_button_to_controller_button(button).map(ControllerInput::PressButton)
+        }
 
         gilrs::EventType::ButtonReleased(button, _code) => {
-            gilrs_button_to_controller_button(button)
-                .map(|button| ControllerInput::ReleaseButton(button))
+            gilrs_button_to_controller_button(button).map(ControllerInput::ReleaseButton)
         }
 
         // gilrs::EventType::AxisChanged(gilrs::Axis::LeftStickX, value, _code) => {

@@ -84,7 +84,6 @@ impl Exception {
 
         s.cpu.regs.pc = match self {
             Exception::TlbMissLoad { .. } | Exception::TlbMissStore { .. } => 0x8000_0000,
-            // TODO other tlb errors?
             _ => 0x8000_0180,
         };
 

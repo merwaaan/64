@@ -69,7 +69,7 @@ impl Tile {
 
         let tile_bytes = tile_stride as usize * tile_height as usize;
 
-        let tmem_address = tile.tmem_address_byte() as usize;
+        let tmem_address = tile.tmem_address_byte();
 
         hasher.write(&tmem[tmem_address..tmem_address + tile_bytes]);
 
@@ -132,7 +132,7 @@ impl Tile {
 
                     let bytes_per_row = tile_width * 2;
 
-                    read_block(&tmem, row_address, bytes_per_row, |tmem_data| {
+                    read_block(tmem, row_address, bytes_per_row, |tmem_data| {
                         rgba.extend(
                             tmem_data.chunks_exact(2)
                                 .flat_map(|texel| rgba5551_to_8888(texel[0], texel[1])),
@@ -145,7 +145,7 @@ impl Tile {
 
                     let bytes_per_row = tile_width * 4;
 
-                    read_block(&tmem, row_address, bytes_per_row, |tmem_data| {
+                    read_block(tmem, row_address, bytes_per_row, |tmem_data| {
                         rgba.extend_from_slice(tmem_data);
                     });
                 }
@@ -163,7 +163,7 @@ impl Tile {
 
                     // TODO optim: convert palettes on LoadTLUT? also when writing tex in case games do crazy hacks?
 
-                    read_block(&tmem, row_address, bytes_per_row, |tmem_data| {
+                    read_block(tmem, row_address, bytes_per_row, |tmem_data| {
                         rgba.extend(
                             tmem_data.iter()
                                 // Split each byte into two 4-bit texels
@@ -197,7 +197,7 @@ impl Tile {
 
                     let palette_offset = 0x800;
 
-                    read_block(&tmem, row_address, bytes_per_row, |tmem_data| {
+                    read_block(tmem, row_address, bytes_per_row, |tmem_data| {
                         rgba.extend(tmem_data.iter().flat_map(|color_index| {
                             let color_offset =
                                 palette_offset + (*color_index as usize) * 2;
@@ -215,7 +215,7 @@ impl Tile {
 
                     let bytes_per_row = tile_width.div_ceil(2);
 
-                    read_block(&tmem, row_address, bytes_per_row, |tmem_data| {
+                    read_block(tmem, row_address, bytes_per_row, |tmem_data| {
                         rgba.extend(
                             tmem_data.iter()
                                 // Split each byte into two 4-bit texels
@@ -244,7 +244,7 @@ impl Tile {
 
                     let bytes_per_row = tile_width;
 
-                    read_block(&tmem, row_address, bytes_per_row, |tmem_data| {
+                    read_block(tmem, row_address, bytes_per_row, |tmem_data| {
                         rgba.extend(tmem_data.iter().flat_map(|texel| {
                             let intensity = (*texel >> 4) * 255 / 15; // TODO optim?
                             let alpha = (*texel & 0x0F) * 255 / 15; // TODO optim?
@@ -259,7 +259,7 @@ impl Tile {
 
                     let bytes_per_row = tile_width * 2;
 
-                    read_block(&tmem, row_address, bytes_per_row, |tmem_data| {
+                    read_block(tmem, row_address, bytes_per_row, |tmem_data| {
                         rgba.extend(tmem_data.chunks_exact(2).flat_map(|texel| {
                             let intensity = texel[0];
                             let alpha = texel[1];
@@ -277,7 +277,7 @@ impl Tile {
 
                     let bytes_per_row = tile_width.div_ceil(2);
 
-                    read_block(&tmem, row_address, bytes_per_row, |tmem_data| {
+                    read_block(tmem, row_address, bytes_per_row, |tmem_data| {
                         rgba.extend(
                             tmem_data.iter()
                                 // Split each byte into two 4-bit texels
@@ -308,7 +308,7 @@ impl Tile {
 
                     let bytes_per_row = tile_width;
 
-                    read_block(&tmem, row_address, bytes_per_row, |tmem_data| {
+                    read_block(tmem, row_address, bytes_per_row, |tmem_data| {
                         rgba.extend(tmem_data.iter().flat_map(|intensity| {
                             [*intensity, *intensity, *intensity, *intensity]
                         }));
@@ -338,8 +338,6 @@ impl Tile {
 #[derive(Default)]
 pub struct TileCache {
     tiles: HashMap<u64, Tile>,
-
-    i: u64,
 }
 
 impl TileCache {
@@ -354,15 +352,6 @@ impl TileCache {
             .or_insert_with(|| Tile::decode(tmem, tile, size));
 
         (tile, hash)
-
-        // let tile = self
-        //     .tiles
-        //     .entry(self.i)
-        //     .or_insert_with(|| Tile::decode(tmem, tile, size));
-
-        // self.i += 1;
-
-        // (tile, self.i)
     }
 }
 

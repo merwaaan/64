@@ -16,30 +16,8 @@ pub enum InstructionEffect {
 
 pub type InstructionResult = Result<Option<InstructionEffect>, Exception>;
 
-#[derive(Clone, Debug)]
-pub struct Disassembly {
-    pub mnemonics: String,
-    pub hint: Option<String>,
-}
-
-impl Disassembly {
-    pub fn new(mnemonics: String) -> Self {
-        Self {
-            mnemonics,
-            hint: None,
-        }
-    }
-
-    pub fn with_hint(self, hint: String) -> Self {
-        Self {
-            hint: Some(hint),
-            ..self
-        }
-    }
-}
-
 pub type ExecuteFn = fn(&mut System, Opcode) -> InstructionResult;
-pub type DisassembleFn = fn(&System, Opcode) -> Disassembly;
+pub type DisassembleFn = fn(&System, Opcode) -> String;
 pub type DecodedInstruction = (ExecuteFn, DisassembleFn);
 
 /// Expands to `(name_execute, name_disassemble)` for use in decode match arms.
@@ -60,18 +38,19 @@ pub fn decode(opcode: Opcode) -> DecodedInstruction {
         0b010000 => instructions_cop0::decode(opcode),
         0b010001 => instructions_cop1::decode(opcode),
         0b010010 => instructions_cop2::decode(opcode),
+        // Move standard here, same discriminant
         _ => instructions_cpu::decode_standard(opcode),
     }
 }
 
 // Reserved instruction
 
-fn reserved_execute(s: &mut System, _op: Opcode) -> InstructionResult {
+fn reserved_execute(_s: &mut System, _op: Opcode) -> InstructionResult {
     Err(Exception::ReservedInstruction)
 }
 
-pub fn reserved_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("<RESERVED {:08X}>", op.0))
+pub fn reserved_disassemble(_s: &System, op: Opcode) -> String {
+    format!("<RESERVED {:08X}>", op.0)
 }
 
 pub const RESERVED_INSTRUCTION: DecodedInstruction = (reserved_execute, reserved_disassemble);

@@ -1,3 +1,10 @@
+//! Reality Display Processor
+//!
+//! Resources:
+//! - Nintendo Ultra64 RDP Command Summary https://ultra64.ca/files/documentation/silicon-graphics/SGI_RDP_Command_Summary.pdf
+//! - N64brew / Reality Display Processor https://n64brew.dev/wiki/Reality_Display_Processor
+//! - Notes on the Angrylion implementation https://emudev.org/2021/09/21/Angrylion_RDP_Comments
+
 use std::collections::VecDeque;
 
 use arbitrary_int::prelude::*;
@@ -19,7 +26,6 @@ use crate::{
 
 const REG_START: u32 = 0x0410_0000;
 const REG_END: u32 = 0x0420_0000;
-// TODO other regs after 20 0000?
 
 pub type DpLocation = Location<REG_START, REG_END>;
 
@@ -342,7 +348,7 @@ impl Dp {
 
             match first_byte & 0x3F {
                 0..=7 | 0x10..=0x23 | 0x31 => {
-                    loggg.push_str(&format!("DP: NOP"));
+                    loggg.push_str("DP: NOP");
 
                     if_ready!(8, {});
                 }
@@ -422,17 +428,17 @@ impl Dp {
                     });
                 }
                 0x2A => {
-                    loggg.push_str(&"DP: Set key GB");
+                    loggg.push_str("DP: Set key GB");
 
                     if_ready!(8, {});
                 }
                 0x2B => {
-                    loggg.push_str(&"DP: Set key R");
+                    loggg.push_str("DP: Set key R");
 
                     if_ready!(8, {});
                 }
                 0x2C => {
-                    loggg.push_str(&"DP: Set convert");
+                    loggg.push_str("DP: Set convert");
 
                     if_ready!(8, {});
                 }
@@ -453,12 +459,12 @@ impl Dp {
                     });
                 }
                 0x2E => {
-                    loggg.push_str(&"DP: Set prim depth");
+                    loggg.push_str("DP: Set prim depth");
 
                     if_ready!(8, {});
                 }
                 0x2F => {
-                    loggg.push_str(&"DP: Set other mode");
+                    loggg.push_str("DP: Set other mode");
 
                     if_ready!(8, {});
                 }
@@ -624,7 +630,7 @@ impl Dp {
                     });
                 }
                 0x3B => {
-                    loggg.push_str(&"DP: set env color");
+                    loggg.push_str("DP: set env color");
 
                     if_ready!(8, {
                         s.dp.decoded_commands.push(Command::SetEnvironmentColor(
@@ -642,7 +648,7 @@ impl Dp {
                     });
                 }
                 0x3C => {
-                    loggg.push_str(&"DP: set combine");
+                    loggg.push_str("DP: set combine");
 
                     if_ready!(8, {});
                 }
@@ -663,22 +669,22 @@ impl Dp {
                     });
                 }
                 0x3E => {
-                    loggg.push_str(&"DP: set zimg");
+                    loggg.push_str("DP: set zimg");
 
                     if_ready!(8, {});
                 }
                 0x3F => {
-                    loggg.push_str(&"DP: set cimg");
+                    loggg.push_str("DP: set cimg");
 
                     if_ready!(8, {});
                 }
                 x => panic!("Unknown DP DMA command: {:X}", x),
             }
 
-            if false && loggg.len() > 0 {
-                log::debug!("LOGGG");
-                log::debug!("{}", loggg);
-            }
+            // if !loggg.is_empty() {
+            //     log::debug!("LOGGG");
+            //     log::debug!("{}", loggg);
+            // }
         }
     }
 
@@ -777,13 +783,13 @@ impl Dp {
 
                     // TODO dxt stuff?
 
-                    let mut tmem_address = slot.tile.tmem_address_byte() as usize;
+                    let mut tmem_address = slot.tile.tmem_address_byte();
 
                     s.ram.read_block(
                         RamLocation::from_absolute(ram_address),
-                        byte_count as usize,
+                        byte_count,
                         |ram_data| {
-                            write_block(ram_data, &mut s.dp.tmem, tmem_address as usize);
+                            write_block(ram_data, &mut s.dp.tmem, tmem_address);
 
                             tmem_address += byte_count;
                         },
@@ -1005,7 +1011,7 @@ impl Dp {
         // (we're here because we got a SYNC FULL command)
         // TODO handle SyncFull like the other commands, in the match
 
-        if s.dp.decoded_commands.len() > 0 {
+        if !s.dp.decoded_commands.is_empty() {
             s.video_renderer.push_command(video::Command::Render);
         }
 

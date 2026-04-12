@@ -2,8 +2,7 @@ use crate::{
     check_aligned, check_cop_usable,
     cpu::{
         instructions::{
-            DecodedInstruction, Disassembly, InstructionEffect, InstructionResult,
-            RESERVED_INSTRUCTION,
+            DecodedInstruction, InstructionEffect, InstructionResult, RESERVED_INSTRUCTION,
         },
         opcode::Opcode,
     },
@@ -161,8 +160,8 @@ fn add_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn add_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("ADD {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn add_disassemble(_s: &System, op: Opcode) -> String {
+    format!("ADD {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn addi_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -178,13 +177,8 @@ fn addi_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn addi_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "ADDI {}, {}, {:#06X}",
-        op.rtn(),
-        op.rsn(),
-        op.imm16()
-    ))
+fn addi_disassemble(_s: &System, op: Opcode) -> String {
+    format!("ADDI {}, {}, {:#06X}", op.rtn(), op.rsn(), op.imm16())
 }
 
 fn addiu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -195,13 +189,8 @@ fn addiu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn addiu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "ADDIU {}, {}, {:#06X}",
-        op.rtn(),
-        op.rsn(),
-        op.imm16()
-    ))
+fn addiu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("ADDIU {}, {}, {:#06X}", op.rtn(), op.rsn(), op.imm16())
 }
 
 fn addu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -210,8 +199,8 @@ fn addu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn addu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("ADDU {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn addu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("ADDU {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn and_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -220,8 +209,8 @@ fn and_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn and_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("AND {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn and_disassemble(_s: &System, op: Opcode) -> String {
+    format!("AND {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn andi_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -230,86 +219,67 @@ fn andi_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn andi_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "ANDI {}, {}, {:#06X}",
-        op.rtn(),
-        op.rsn(),
-        op.imm16()
-    ))
+fn andi_disassemble(_s: &System, op: Opcode) -> String {
+    format!("ANDI {}, {}, {:#06X}", op.rtn(), op.rsn(), op.imm16())
 }
 
-// TODO generic branching?
+fn branch<const DISCARD_DELAY_SLOT: bool>(
+    s: &mut System,
+    op: Opcode,
+    condition: bool,
+) -> InstructionResult {
+    Ok(Some(InstructionEffect::DelayedBranching(if condition {
+        Some(op.branch_target(s))
+    } else {
+        // Discard the instruction in the delay slot TODO return special val??
+        if DISCARD_DELAY_SLOT {
+            s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
+        }
+
+        None
+    })))
+}
+
 fn beq_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    Ok(Some(InstructionEffect::DelayedBranching(
-        if op.rsv64(s) == op.rtv64(s) {
-            Some(op.branch_target(s))
-        } else {
-            None
-        },
-    )))
+    branch::<false>(s, op, op.rsv64(s) == op.rtv64(s))
 }
 
-pub fn beq_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
+fn beq_disassemble(_s: &System, op: Opcode) -> String {
+    format!(
         "BEQ {}, {}, {:#06X}",
         op.rsn(),
         op.rtn(),
         op.branch_offset()
-    ))
+    )
 }
 
 fn beql_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    if op.rsv64(s) == op.rtv64(s) {
-        Ok(Some(InstructionEffect::DelayedBranching(Some(
-            op.branch_target(s),
-        ))))
-    } else {
-        // Discard the instruction in the delay slot TODO return special val??
-        s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
-
-        Ok(None)
-    }
+    branch::<true>(s, op, op.rsv64(s) == op.rtv64(s))
 }
 
-pub fn beql_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
+fn beql_disassemble(_s: &System, op: Opcode) -> String {
+    format!(
         "BEQL {}, {}, {:#06X}",
         op.rsn(),
         op.rtn(),
         op.branch_offset()
-    ))
+    )
 }
 
 fn bgez_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    Ok(Some(InstructionEffect::DelayedBranching(
-        if (op.rsv64(s) as i64) >= 0 {
-            Some(op.branch_target(s))
-        } else {
-            None
-        },
-    )))
+    branch::<false>(s, op, (op.rsv64(s) as i64) >= 0)
 }
 
-pub fn bgez_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BGEZ {}, {:#06X}", op.rsn(), op.branch_offset()))
+fn bgez_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BGEZ {}, {:#06X}", op.rsn(), op.branch_offset())
 }
 
 fn bgezl_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    if (op.rsv64(s) as i64) >= 0 {
-        Ok(Some(InstructionEffect::DelayedBranching(Some(
-            op.branch_target(s),
-        ))))
-    } else {
-        // Discard the instruction in the delay slot TODO return special val??
-        s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
-
-        Ok(None)
-    }
+    branch::<true>(s, op, (op.rsv64(s) as i64) >= 0)
 }
 
-pub fn bgezl_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BGEZ {}, {:#06X}", op.rsn(), op.branch_offset()))
+fn bgezl_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BGEZ {}, {:#06X}", op.rsn(), op.branch_offset())
 }
 
 fn bgezal_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -319,16 +289,11 @@ fn bgezal_execute(s: &mut System, op: Opcode) -> InstructionResult {
     // The return address is the instruction that follows the delay slot
     s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
-    Ok(Some(InstructionEffect::DelayedBranching(if rs >= 0 {
-        Some(op.branch_target(s))
-    } else {
-        None
-    })))
+    branch::<false>(s, op, rs >= 0)
 }
 
-pub fn bgezal_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BGEZAL {}, {:#06X}", op.rsn(), op.branch_offset()))
-    // TODO cond result?
+fn bgezal_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BGEZAL {}, {:#06X}", op.rsn(), op.branch_offset())
 }
 
 fn bgezall_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -338,97 +303,52 @@ fn bgezall_execute(s: &mut System, op: Opcode) -> InstructionResult {
     // The return address is the instruction that follows the delay slot
     s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
-    if rs >= 0 {
-        Ok(Some(InstructionEffect::DelayedBranching(Some(
-            op.branch_target(s),
-        ))))
-    } else {
-        // Discard the instruction in the delay slot TODO return special val??
-        s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
-
-        Ok(None)
-    }
+    branch::<true>(s, op, rs >= 0)
 }
 
-pub fn bgezall_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BGEZALL {}, {:#06X}", op.rsn(), op.branch_offset()))
+fn bgezall_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BGEZALL {}, {:#06X}", op.rsn(), op.branch_offset())
     // TODO cond result?
 }
 
 fn bgtz_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    Ok(Some(InstructionEffect::DelayedBranching(
-        if (op.rsv64(s) as i64) > 0 {
-            Some(op.branch_target(s))
-        } else {
-            None
-        },
-    )))
+    branch::<false>(s, op, (op.rsv64(s) as i64) > 0)
 }
 
-pub fn bgtz_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BGTZ {}, {:#06X}", op.rsn(), op.branch_offset()))
+fn bgtz_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BGTZ {}, {:#06X}", op.rsn(), op.branch_offset())
 }
 
 fn bgtzl_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    if (op.rsv64(s) as i64) > 0 {
-        Ok(Some(InstructionEffect::DelayedBranching(Some(
-            op.branch_target(s),
-        ))))
-    } else {
-        // Discard the instruction in the delay slot TODO return special val??
-        s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
-
-        Ok(None)
-    }
+    branch::<true>(s, op, (op.rsv64(s) as i64) > 0)
 }
 
-fn bgtzl_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BGTZL {}, {:#06X}", op.rsn(), op.branch_offset()))
+fn bgtzl_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BGTZL {}, {:#06X}", op.rsn(), op.branch_offset())
 }
 
 fn blez_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    Ok(Some(InstructionEffect::DelayedBranching(
-        if (op.rsv64(s) as i64) <= 0 {
-            Some(op.branch_target(s))
-        } else {
-            None
-        },
-    )))
+    branch::<false>(s, op, (op.rsv64(s) as i64) <= 0)
 }
 
-pub fn blez_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BLEZ {}, {:#06X}", op.rsn(), op.branch_offset()))
+fn blez_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BLEZ {}, {:#06X}", op.rsn(), op.branch_offset())
 }
 
 fn blezl_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    if (op.rsv64(s) as i64) <= 0 {
-        Ok(Some(InstructionEffect::DelayedBranching(Some(
-            op.branch_target(s),
-        ))))
-    } else {
-        // Discard the instruction in the delay slot TODO return special val??
-        s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
-
-        Ok(None)
-    }
+    branch::<true>(s, op, (op.rsv64(s) as i64) <= 0)
 }
 
-pub fn blezl_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BLEZL {}, {:#06X}", op.rsn(), op.branch_offset()))
+fn blezl_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BLEZL {}, {:#06X}", op.rsn(), op.branch_offset())
 }
 
 fn bltz_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    Ok(Some(InstructionEffect::DelayedBranching(
-        if (op.rsv64(s) as i64) < 0 {
-            Some(op.branch_target(s))
-        } else {
-            None
-        },
-    )))
+    branch::<false>(s, op, (op.rsv64(s) as i64) < 0)
 }
 
-pub fn bltz_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BLTZ {}, {:#06X}", op.rsn(), op.branch_offset()))
+fn bltz_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BLTZ {}, {:#06X}", op.rsn(), op.branch_offset())
 }
 
 fn bltzal_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -438,81 +358,43 @@ fn bltzal_execute(s: &mut System, op: Opcode) -> InstructionResult {
     // The return address is the instruction that follows the delay slot
     s.cpu.regs.gpr[31].set(s.cpu.regs.pc.wrapping_add(8));
 
-    Ok(Some(InstructionEffect::DelayedBranching(if rs < 0 {
-        Some(op.branch_target(s))
-    } else {
-        None
-    })))
+    branch::<false>(s, op, rs < 0)
 }
 
-pub fn bltzal_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BLTZAL {}, {:#06X}", op.rsn(), op.branch_offset()))
+fn bltzal_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BLTZAL {}, {:#06X}", op.rsn(), op.branch_offset())
 }
 
 fn bltzl_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    if (op.rsv64(s) as i64) < 0 {
-        Ok(Some(InstructionEffect::DelayedBranching(Some(
-            op.branch_target(s),
-        ))))
-    } else {
-        // Discard the instruction in the delay slot TODO return special val??
-        s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
-
-        Ok(None)
-    }
+    branch::<true>(s, op, (op.rsv64(s) as i64) < 0)
 }
 
-pub fn bltzl_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("BLTZL {}, {:#06X}", op.rsn(), op.branch_offset()))
+fn bltzl_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BLTZL {}, {:#06X}", op.rsn(), op.branch_offset())
 }
 
 fn bne_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    Ok(Some(InstructionEffect::DelayedBranching(
-        if op.rsv64(s) != op.rtv64(s) {
-            Some(op.branch_target(s))
-        } else {
-            None
-        },
-    )))
+    branch::<false>(s, op, op.rsv64(s) != op.rtv64(s))
 }
 
-pub fn bne_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "BNE {}, {}, {:#X}",
-        op.rsn(),
-        op.rtn(),
-        op.branch_offset()
-    ))
+fn bne_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BNE {}, {}, {:#X}", op.rsn(), op.rtn(), op.branch_offset())
 }
 
 fn bnel_execute(s: &mut System, op: Opcode) -> InstructionResult {
-    if op.rsv64(s) != op.rtv64(s) {
-        Ok(Some(InstructionEffect::DelayedBranching(Some(
-            op.branch_target(s),
-        ))))
-    } else {
-        // Discard the instruction in the delay slot TODO return special val??
-        s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
-
-        Ok(None)
-    }
+    branch::<true>(s, op, op.rsv64(s) != op.rtv64(s))
 }
 
-pub fn bnel_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "BNEL {}, {}, {:#X}",
-        op.rsn(),
-        op.rtn(),
-        op.branch_offset()
-    ))
+fn bnel_disassemble(_s: &System, op: Opcode) -> String {
+    format!("BNEL {}, {}, {:#X}", op.rsn(), op.rtn(), op.branch_offset())
 }
 
 fn break_execute(_s: &mut System, _op: Opcode) -> InstructionResult {
     Err(Exception::Breakpoint)
 }
 
-pub fn break_disassemble(_s: &System, _op: Opcode) -> Disassembly {
-    Disassembly::new("BREAK".to_string())
+fn break_disassemble(_s: &System, _op: Opcode) -> String {
+    "BREAK".to_string()
 }
 
 fn cache_execute(_s: &mut System, _op: Opcode) -> InstructionResult {
@@ -520,13 +402,8 @@ fn cache_execute(_s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn cache_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "CACHE {}, {}({})",
-        op.rtn(),
-        op.imm16(),
-        op.basen()
-    ))
+fn cache_disassemble(_s: &System, op: Opcode) -> String {
+    format!("CACHE {}, {}({})", op.rtn(), op.imm16(), op.basen())
 }
 
 fn dadd_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -542,8 +419,8 @@ fn dadd_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn dadd_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DADD {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn dadd_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DADD {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn daddi_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -559,8 +436,8 @@ fn daddi_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn daddi_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DADDI {}, {}, {}", op.rtn(), op.rsn(), op.imm16()))
+fn daddi_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DADDI {}, {}, {}", op.rtn(), op.rsn(), op.imm16())
 }
 
 fn daddiu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -571,13 +448,8 @@ fn daddiu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn daddiu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "DADDIU {}, {}, {:#06X}",
-        op.rtn(),
-        op.rsn(),
-        op.imm16()
-    ))
+fn daddiu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DADDIU {}, {}, {:#06X}", op.rtn(), op.rsn(), op.imm16())
 }
 
 fn daddu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -586,8 +458,8 @@ fn daddu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn daddu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DADDU {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn daddu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DADDU {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 // TODO div by zero?
@@ -614,8 +486,8 @@ fn div_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn div_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DIV {}, {}", op.rsn(), op.rtn()))
+fn div_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DIV {}, {}", op.rsn(), op.rtn())
 }
 
 fn divu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -633,8 +505,8 @@ fn divu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn divu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DIVU {}, {}", op.rsn(), op.rtn()))
+fn divu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DIVU {}, {}", op.rsn(), op.rtn())
 }
 
 fn ddiv_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -663,8 +535,8 @@ fn ddiv_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn ddiv_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DDIV {}, {}", op.rsn(), op.rtn()))
+fn ddiv_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DDIV {}, {}", op.rsn(), op.rtn())
 }
 
 fn ddivu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -682,8 +554,8 @@ fn ddivu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn ddivu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DDIVU {}, {}", op.rsn(), op.rtn()))
+fn ddivu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DDIVU {}, {}", op.rsn(), op.rtn())
 }
 
 fn dmult_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -695,8 +567,8 @@ fn dmult_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn dmult_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DMULT {}, {}", op.rsn(), op.rtn()))
+fn dmult_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DMULT {}, {}", op.rsn(), op.rtn())
 }
 
 fn dmultu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -708,8 +580,8 @@ fn dmultu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn dmultu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DMULTU {}, {}", op.rsn(), op.rtn()))
+fn dmultu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DMULTU {}, {}", op.rsn(), op.rtn())
 }
 
 fn dsll_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -720,8 +592,8 @@ fn dsll_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn dsll_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DSLL {}, {}, {}", op.rdn(), op.rtn(), op.shift()))
+fn dsll_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DSLL {}, {}, {}", op.rdn(), op.rtn(), op.shift())
 }
 
 fn dsll32_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -732,8 +604,8 @@ fn dsll32_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn dsll32_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DSLL32 {}, {}, {}", op.rdn(), op.rtn(), op.shift()))
+fn dsll32_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DSLL32 {}, {}, {}", op.rdn(), op.rtn(), op.shift())
 }
 
 fn dsllv_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -744,8 +616,8 @@ fn dsllv_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn dsllv_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DSLLV {}, {}, {}", op.rdn(), op.rtn(), op.rsn()))
+fn dsllv_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DSLLV {}, {}, {}", op.rdn(), op.rtn(), op.rsn())
 }
 
 fn dsra_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -756,8 +628,8 @@ fn dsra_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn dsra_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DSRA {}, {}, {}", op.rdn(), op.rtn(), op.shift()))
+fn dsra_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DSRA {}, {}, {}", op.rdn(), op.rtn(), op.shift())
 }
 
 fn dsra32_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -768,8 +640,8 @@ fn dsra32_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn dsra32_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DSRA32 {}, {}, {}", op.rdn(), op.rtn(), op.shift()))
+fn dsra32_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DSRA32 {}, {}, {}", op.rdn(), op.rtn(), op.shift())
 }
 
 fn dsrav_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -780,8 +652,8 @@ fn dsrav_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn dsrav_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DSRAV {}, {}, {}", op.rdn(), op.rtn(), op.rsn()))
+fn dsrav_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DSRAV {}, {}, {}", op.rdn(), op.rtn(), op.rsn())
 }
 
 fn dsrl_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -792,8 +664,8 @@ fn dsrl_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn dsrl_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DSRL {}, {}, {}", op.rdn(), op.rtn(), op.shift()))
+fn dsrl_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DSRL {}, {}, {}", op.rdn(), op.rtn(), op.shift())
 }
 
 fn dsrl32_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -803,8 +675,8 @@ fn dsrl32_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn dsrl32_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DSRL32 {}, {}, {}", op.rdn(), op.rtn(), op.shift()))
+fn dsrl32_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DSRL32 {}, {}, {}", op.rdn(), op.rtn(), op.shift())
 }
 
 fn dsrlv_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -814,8 +686,8 @@ fn dsrlv_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn dsrlv_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DSRLV {}, {}, {}", op.rdn(), op.rtn(), op.rsn()))
+fn dsrlv_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DSRLV {}, {}, {}", op.rdn(), op.rtn(), op.rsn())
 }
 
 fn dsub_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -831,8 +703,8 @@ fn dsub_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn dsub_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DSUB {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn dsub_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DSUB {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn dsubu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -841,8 +713,8 @@ fn dsubu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn dsubu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("DSUBU {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn dsubu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("DSUBU {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn j_target(pc: u32, op: Opcode) -> u32 {
@@ -858,8 +730,8 @@ fn j_execute(s: &mut System, op: Opcode) -> InstructionResult {
     )))))
 }
 
-pub fn j_disassemble(s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("J {:#06X}", j_target(s.cpu.regs.pc, op)))
+fn j_disassemble(s: &System, op: Opcode) -> String {
+    format!("J {:#06X}", j_target(s.cpu.regs.pc, op))
 }
 
 fn jal_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -871,8 +743,8 @@ fn jal_execute(s: &mut System, op: Opcode) -> InstructionResult {
     )))))
 }
 
-pub fn jal_disassemble(s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("JAL {:#06X}", j_target(s.cpu.regs.pc, op)))
+fn jal_disassemble(s: &System, op: Opcode) -> String {
+    format!("JAL {:#06X}", j_target(s.cpu.regs.pc, op))
 }
 
 fn jalr_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -883,21 +755,16 @@ fn jalr_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(Some(InstructionEffect::DelayedBranching(Some(target))))
 }
 
-pub fn jalr_disassemble(s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "JALR {}, {}={:#06X}",
-        op.rdn(),
-        op.rsn(),
-        op.rsv(s)
-    ))
+fn jalr_disassemble(s: &System, op: Opcode) -> String {
+    format!("JALR {}, {}={:#06X}", op.rdn(), op.rsn(), op.rsv(s))
 }
 
 fn jr_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(Some(InstructionEffect::DelayedBranching(Some(op.rsv(s)))))
 }
 
-pub fn jr_disassemble(s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("JR {}={:#06X}", op.rsn(), op.rsv(s)))
+fn jr_disassemble(s: &System, op: Opcode) -> String {
+    format!("JR {}={:#06X}", op.rsn(), op.rsv(s))
 }
 
 fn lb_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -908,14 +775,8 @@ fn lb_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn lb_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LB {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
-    //.with_address_hint(op.offset_addr(s))
+fn lb_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LB {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
 }
 
 fn lbu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -926,14 +787,8 @@ fn lbu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn lbu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LBU {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
-    //.with_address_hint(op.offset_addr(s))
+fn lbu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LBU {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
 }
 
 fn ld_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -946,13 +801,8 @@ fn ld_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn ld_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LD {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn ld_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LD {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -968,8 +818,8 @@ fn ldc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn ldc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("LDC1 {}, {}({})", op.ftn(), op.imm16(), op.basen()))
+fn ldc1_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LDC1 {}, {}({})", op.ftn(), op.imm16(), op.basen())
 }
 
 fn ldl_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -989,13 +839,8 @@ fn ldl_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn ldl_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LDL {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn ldl_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LDL {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1016,13 +861,8 @@ fn ldr_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn ldr_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LDR {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn ldr_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LDR {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1036,14 +876,8 @@ fn lh_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn lh_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LH {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
-    //.with_address_hint(op.offset_addr(s))
+fn lh_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LH {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
 }
 
 fn lhu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1056,13 +890,8 @@ fn lhu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn lhu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LHU {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn lhu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LHU {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1079,13 +908,8 @@ fn ll_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn ll_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LL {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn ll_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LL {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1102,13 +926,8 @@ fn lld_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn lld_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LDD {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn lld_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LDD {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1118,8 +937,8 @@ fn lui_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn lui_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("LUI {}, {:#04X}", op.rtn(), op.imm16()))
+fn lui_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LUI {}, {:#04X}", op.rtn(), op.imm16())
 }
 
 fn lw_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1132,13 +951,8 @@ fn lw_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn lw_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LW {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn lw_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LW {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1154,8 +968,8 @@ fn lwc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn lwc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("LWC1 {}, {}({})", op.ftn(), op.imm16(), op.basen()))
+fn lwc1_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LWC1 {}, {}({})", op.ftn(), op.imm16(), op.basen())
 }
 
 fn lwl_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1179,13 +993,8 @@ fn lwl_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn lwl_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LWL {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn lwl_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LWL {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1212,13 +1021,8 @@ fn lwr_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn lwr_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LWR {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn lwr_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LWR {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1232,13 +1036,8 @@ fn lwu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn lwu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "LWU {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn lwu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("LWU {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1248,8 +1047,8 @@ fn mfhi_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn mfhi_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("MFHI {}", op.rdn()))
+fn mfhi_disassemble(_s: &System, op: Opcode) -> String {
+    format!("MFHI {}", op.rdn())
 }
 
 fn mflo_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1258,8 +1057,8 @@ fn mflo_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn mflo_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("MFLO {}", op.rdn()))
+fn mflo_disassemble(_s: &System, op: Opcode) -> String {
+    format!("MFLO {}", op.rdn())
 }
 
 fn mthi_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1268,8 +1067,8 @@ fn mthi_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn mthi_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("MTHI {}", op.rsn()))
+fn mthi_disassemble(_s: &System, op: Opcode) -> String {
+    format!("MTHI {}", op.rsn())
 }
 
 fn mtlo_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1278,8 +1077,8 @@ fn mtlo_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn mtlo_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("MTLO {}", op.rsn()))
+fn mtlo_disassemble(_s: &System, op: Opcode) -> String {
+    format!("MTLO {}", op.rsn())
 }
 
 fn mult_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1291,8 +1090,8 @@ fn mult_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn mult_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("MULT {}, {}", op.rsn(), op.rtn()))
+fn mult_disassemble(_s: &System, op: Opcode) -> String {
+    format!("MULT {}, {}", op.rsn(), op.rtn())
 }
 
 fn multu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1304,8 +1103,8 @@ fn multu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn multu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("MULTU {}, {}", op.rsn(), op.rtn()))
+fn multu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("MULTU {}, {}", op.rsn(), op.rtn())
 }
 
 fn nor_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1314,8 +1113,8 @@ fn nor_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn nor_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("NOR {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn nor_disassemble(_s: &System, op: Opcode) -> String {
+    format!("NOR {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn or_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1324,8 +1123,8 @@ fn or_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn or_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("OR {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn or_disassemble(_s: &System, op: Opcode) -> String {
+    format!("OR {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn ori_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1334,13 +1133,8 @@ fn ori_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn ori_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "ORI {}, {}, {:#06X}",
-        op.rtn(),
-        op.rsn(),
-        op.imm16()
-    ))
+fn ori_disassemble(_s: &System, op: Opcode) -> String {
+    format!("ORI {}, {}, {:#06X}", op.rtn(), op.rsn(), op.imm16())
 }
 
 fn sb_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1349,13 +1143,8 @@ fn sb_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sb_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SB {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn sb_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SB {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1374,13 +1163,8 @@ fn sc_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sc_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SC {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.basen()
-    ))
+fn sc_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SC {}, {:#06X}({})", op.rtn(), op.imm16(), op.basen())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1399,14 +1183,8 @@ fn scd_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn scd_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SCD {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.basen()
-    ))
-    //.with_address_hint(op.offset_addr(s))
+fn scd_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SCD {}, {:#06X}({})", op.rtn(), op.imm16(), op.basen())
 }
 
 fn sd_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1418,13 +1196,8 @@ fn sd_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sd_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SD {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn sd_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SD {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1439,13 +1212,8 @@ fn sdc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sdc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SDC1 {}, {:#06X}({})",
-        op.ftn(),
-        op.imm16(),
-        op.basen()
-    ))
+fn sdc1_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SDC1 {}, {:#06X}({})", op.ftn(), op.imm16(), op.basen())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1468,13 +1236,8 @@ fn sdl_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sdl_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SDL {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.basen()
-    ))
+fn sdl_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SDL {}, {:#06X}({})", op.rtn(), op.imm16(), op.basen())
 }
 
 fn sdr_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1496,13 +1259,8 @@ fn sdr_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sdr_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SDR {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.basen()
-    ))
+fn sdr_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SDR {}, {:#06X}({})", op.rtn(), op.imm16(), op.basen())
 }
 
 fn sh_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1514,13 +1272,8 @@ fn sh_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sh_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SH {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn sh_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SH {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1530,12 +1283,12 @@ fn sll_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sll_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(if op.rd() == 0 && op.rt() == 0 {
+fn sll_disassemble(_s: &System, op: Opcode) -> String {
+    if op.rd() == 0 && op.rt() == 0 {
         "NOP".to_string()
     } else {
         format!("SLL {}, {}, {}", op.rdn(), op.rtn(), op.shift())
-    })
+    }
 }
 
 fn sllv_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1544,8 +1297,8 @@ fn sllv_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sllv_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("SLLV {}, {}, {}", op.rdn(), op.rtn(), op.rsn()))
+fn sllv_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SLLV {}, {}, {}", op.rdn(), op.rtn(), op.rsn())
 }
 
 fn slt_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1554,8 +1307,8 @@ fn slt_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn slt_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("SLT {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn slt_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SLT {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn slti_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1564,13 +1317,8 @@ fn slti_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn slti_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SLTI {}, {}, {:#06X}",
-        op.rtn(),
-        op.rsn(),
-        op.imm16()
-    ))
+fn slti_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SLTI {}, {}, {:#06X}", op.rtn(), op.rsn(), op.imm16())
 }
 
 fn sltiu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1581,13 +1329,8 @@ fn sltiu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sltiu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SLTIU {}, {}, {:#06X}",
-        op.rtn(),
-        op.rsn(),
-        op.imm16()
-    ))
+fn sltiu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SLTIU {}, {}, {:#06X}", op.rtn(), op.rsn(), op.imm16())
 }
 
 fn sltu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1596,8 +1339,8 @@ fn sltu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sltu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("SLTU {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn sltu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SLTU {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn sra_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1607,8 +1350,8 @@ fn sra_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sra_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("SRA {}, {}, {}", op.rdn(), op.rtn(), op.shift()))
+fn sra_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SRA {}, {}, {}", op.rdn(), op.rtn(), op.shift())
 }
 
 fn srav_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1618,8 +1361,8 @@ fn srav_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn srav_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("SRAV {}, {}, {}", op.rdn(), op.rtn(), op.rsn()))
+fn srav_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SRAV {}, {}, {}", op.rdn(), op.rtn(), op.rsn())
 }
 
 fn srl_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1628,8 +1371,8 @@ fn srl_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn srl_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("SRL {}, {}, {}", op.rdn(), op.rtn(), op.shift()))
+fn srl_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SRL {}, {}, {}", op.rdn(), op.rtn(), op.shift())
 }
 
 fn srlv_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1638,8 +1381,8 @@ fn srlv_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn srlv_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("SRLV {}, {}, {}", op.rdn(), op.rtn(), op.rsn()))
+fn srlv_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SRLV {}, {}, {}", op.rdn(), op.rtn(), op.rsn())
 }
 
 fn sub_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1654,8 +1397,8 @@ fn sub_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn sub_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("SUB {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn sub_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SUB {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn subu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1664,8 +1407,8 @@ fn subu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn subu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("SUBU {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn subu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SUBU {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn sw_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1677,14 +1420,8 @@ fn sw_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sw_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SW {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
-    //.with_address_hint(op.offset_addr(s))
+fn sw_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SW {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
 }
 
 fn swc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1698,13 +1435,8 @@ fn swc1_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn swc1_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SWC1 {}, {:#06X}({})",
-        op.ftn(),
-        op.imm16(),
-        op.basen()
-    ))
+fn swc1_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SWC1 {}, {:#06X}({})", op.ftn(), op.imm16(), op.basen())
 }
 
 fn sync_execute(_s: &mut System, _op: Opcode) -> InstructionResult {
@@ -1713,8 +1445,8 @@ fn sync_execute(_s: &mut System, _op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn sync_disassemble(_s: &System, _op: Opcode) -> Disassembly {
-    Disassembly::new("SYNC".to_string())
+fn sync_disassemble(_s: &System, _op: Opcode) -> String {
+    "SYNC".to_string()
 }
 
 fn swl_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1736,13 +1468,8 @@ fn swl_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn swl_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SWL {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn swl_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SWL {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1765,13 +1492,8 @@ fn swr_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn swr_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "SWR {}, {:#06X}({})",
-        op.rtn(),
-        op.imm16(),
-        op.rsn()
-    ))
+fn swr_disassemble(_s: &System, op: Opcode) -> String {
+    format!("SWR {}, {:#06X}({})", op.rtn(), op.imm16(), op.rsn())
     //.with_address_hint(op.offset_addr(s))
 }
 
@@ -1779,8 +1501,8 @@ fn syscall_execute(_s: &mut System, _op: Opcode) -> InstructionResult {
     Err(Exception::Syscall)
 }
 
-pub fn syscall_disassemble(_s: &System, _op: Opcode) -> Disassembly {
-    Disassembly::new("SYSCALL".to_string())
+fn syscall_disassemble(_s: &System, _op: Opcode) -> String {
+    "SYSCALL".to_string()
 }
 
 // TODO traps: use generic helper
@@ -1793,8 +1515,8 @@ fn teq_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn teq_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("TEQ {}, {}", op.rsn(), op.rtn()))
+fn teq_disassemble(_s: &System, op: Opcode) -> String {
+    format!("TEQ {}, {}", op.rsn(), op.rtn())
 }
 
 fn teqi_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1805,8 +1527,8 @@ fn teqi_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn teqi_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("TEQI {}, {:#06X}", op.rsn(), op.imm16()))
+fn teqi_disassemble(_s: &System, op: Opcode) -> String {
+    format!("TEQI {}, {:#06X}", op.rsn(), op.imm16())
 }
 
 fn tge_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1817,8 +1539,8 @@ fn tge_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn tge_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("TGE {}, {}", op.rsn(), op.rtn()))
+fn tge_disassemble(_s: &System, op: Opcode) -> String {
+    format!("TGE {}, {}", op.rsn(), op.rtn())
 }
 
 fn tgei_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1829,8 +1551,8 @@ fn tgei_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn tgei_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("TGEI {}, {:#06X}", op.rsn(), op.imm16()))
+fn tgei_disassemble(_s: &System, op: Opcode) -> String {
+    format!("TGEI {}, {:#06X}", op.rsn(), op.imm16())
 }
 
 fn tgeiu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1841,8 +1563,8 @@ fn tgeiu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn tgeiu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("TGEIU {}, {:#06X}", op.rsn(), op.imm16()))
+fn tgeiu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("TGEIU {}, {:#06X}", op.rsn(), op.imm16())
 }
 
 fn tgeu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1853,8 +1575,8 @@ fn tgeu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn tgeu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("TGEU {}, {}", op.rsn(), op.rtn()))
+fn tgeu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("TGEU {}, {}", op.rsn(), op.rtn())
 }
 
 fn tlt_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1865,8 +1587,8 @@ fn tlt_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn tlt_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("TLT {}, {}", op.rsn(), op.rtn()))
+fn tlt_disassemble(_s: &System, op: Opcode) -> String {
+    format!("TLT {}, {}", op.rsn(), op.rtn())
 }
 
 fn tlti_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1877,8 +1599,8 @@ fn tlti_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn tlti_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("TLTI {}, {:#06X}", op.rsn(), op.imm16()))
+fn tlti_disassemble(_s: &System, op: Opcode) -> String {
+    format!("TLTI {}, {:#06X}", op.rsn(), op.imm16())
 }
 
 fn tltiu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1889,8 +1611,8 @@ fn tltiu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn tltiu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("TLTIU {}, {:#06X}", op.rsn(), op.imm16()))
+fn tltiu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("TLTIU {}, {:#06X}", op.rsn(), op.imm16())
 }
 
 fn tltu_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1901,8 +1623,8 @@ fn tltu_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn tltu_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("TLTU {}, {}", op.rsn(), op.rtn()))
+fn tltu_disassemble(_s: &System, op: Opcode) -> String {
+    format!("TLTU {}, {}", op.rsn(), op.rtn())
 }
 
 fn tne_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1913,8 +1635,8 @@ fn tne_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn tne_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("TNE {}, {}", op.rsn(), op.rtn()))
+fn tne_disassemble(_s: &System, op: Opcode) -> String {
+    format!("TNE {}, {}", op.rsn(), op.rtn())
 }
 
 fn tnei_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1925,8 +1647,8 @@ fn tnei_execute(s: &mut System, op: Opcode) -> InstructionResult {
     }
 }
 
-pub fn tnei_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("TNEI {}, {:#06X}", op.rsn(), op.imm16()))
+fn tnei_disassemble(_s: &System, op: Opcode) -> String {
+    format!("TNEI {}, {:#06X}", op.rsn(), op.imm16())
 }
 
 fn xor_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1935,8 +1657,8 @@ fn xor_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn xor_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!("XOR {}, {}, {}", op.rdn(), op.rsn(), op.rtn()))
+fn xor_disassemble(_s: &System, op: Opcode) -> String {
+    format!("XOR {}, {}, {}", op.rdn(), op.rsn(), op.rtn())
 }
 
 fn xori_execute(s: &mut System, op: Opcode) -> InstructionResult {
@@ -1945,11 +1667,6 @@ fn xori_execute(s: &mut System, op: Opcode) -> InstructionResult {
     Ok(None)
 }
 
-pub fn xori_disassemble(_s: &System, op: Opcode) -> Disassembly {
-    Disassembly::new(format!(
-        "XORI {}, {}, {:#06X}",
-        op.rtn(),
-        op.rsn(),
-        op.imm16()
-    ))
+fn xori_disassemble(_s: &System, op: Opcode) -> String {
+    format!("XORI {}, {}, {:#06X}", op.rtn(), op.rsn(), op.imm16())
 }

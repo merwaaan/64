@@ -20,7 +20,7 @@ pub enum Register {
     Compare,
     Status,
     Cause,
-    EPC, // TODO rename Except(ion)PC?
+    ExceptionPC,
     PRId,
     Config,
     LLAddr,
@@ -36,14 +36,14 @@ pub enum Register {
     CacheErr,
     TagLo,
     TagHi,
-    ErrorEPC, // TODO rename ErrorPC?
+    ErrorPC,
     Rsv31,
 }
 
 const WRITABLE: u64 = 0xFFFFFFFF_FFFFFFFF;
 const READ_ONLY: u64 = 0;
 
-const REG_WRITE_MASK: [u64; 32] = [
+const REG_WRITE_MASKS: [u64; 32] = [
     0x00000000_8000003F, // Index
     READ_ONLY,           // Random
     0x00000000_3FFFFFFF, // EntryLo0
@@ -82,10 +82,8 @@ const REG_WRITE_MASK: [u64; 32] = [
 pub struct Cop0 {
     regs: [Reg64; 32],
 
-    pub tlb: Tlb, // TODO visibility?
+    pub tlb: Tlb,
 }
-
-// TODO bitfields or something?
 
 impl Default for Cop0 {
     fn default() -> Self {
@@ -116,7 +114,7 @@ impl Cop0 {
 
         let value_sign_extended = value as i32 as u64;
 
-        let mask = REG_WRITE_MASK[reg];
+        let mask = REG_WRITE_MASKS[reg];
 
         self.regs[reg].set64((self.regs[reg].get64() & !mask) | (value_sign_extended & mask));
 
@@ -124,7 +122,7 @@ impl Cop0 {
     }
 
     pub fn write64(&mut self, reg: usize, value: u64) {
-        let mask = REG_WRITE_MASK[reg];
+        let mask = REG_WRITE_MASKS[reg];
 
         self.regs[reg].set64((self.regs[reg].get64() & !mask) | (value & mask));
 
@@ -176,7 +174,8 @@ impl Cop0 {
         }
     }
 
-    // BadVAddr register
+    // TODO bitfields or something?
+    // TODO write to get side effects?
 
     pub fn set_bad_virtual_address(&mut self, value: u32) {
         self.regs[Register::BadVAddr as usize].set(value);
@@ -190,10 +189,8 @@ impl Cop0 {
         self.regs[Register::XContext as usize].set(value);
     }
 
-    // STATUS register
-
     pub fn set_status(&mut self, value: u32) {
-        self.regs[Register::Status as usize].set(value); // TODO write?
+        self.regs[Register::Status as usize].set(value);
     }
 
     pub fn ie(&self) -> bool {
@@ -204,7 +201,6 @@ impl Cop0 {
         self.regs[Register::Status as usize].get() & STATUS_ERL_MASK != 0
     }
 
-    // TODO set???
     pub fn clear_erl(&mut self) {
         self.regs[Register::Status as usize]
             .set(self.regs[Register::Status as usize].get() & !STATUS_ERL_MASK);
@@ -235,8 +231,6 @@ impl Cop0 {
     pub fn cop2_usable(&self) -> bool {
         self.regs[Register::Status as usize].get() & 0x4000_0000 != 0
     }
-
-    // CAUSE register
 
     pub fn set_exception_code(&mut self, value: u32) {
         self.regs[Register::Cause as usize]
@@ -272,45 +266,66 @@ impl Cop0 {
             .set((self.regs[Register::Cause as usize].get() & !0x8000) | ((value as u32) << 15));
     }
 
-    // EPC register
-
     pub fn exception_pc(&self) -> u32 {
-        self.regs[Register::EPC as usize].get() // TODO 64/32?
+        self.regs[Register::ExceptionPC as usize].get()
     }
 
     pub fn set_exception_pc(&mut self, value: u32) {
-        self.regs[Register::EPC as usize].set(value);
+        self.regs[Register::ExceptionPC as usize].set(value);
     }
 
-    // ErrorEPC register
-
     pub fn error_pc(&self) -> u32 {
-        self.regs[Register::ErrorEPC as usize].get() // TODO 64/32?
+        self.regs[Register::ErrorPC as usize].get()
     }
 
     pub fn set_error_pc(&mut self, value: u32) {
-        self.regs[Register::ErrorEPC as usize].set(value);
+        self.regs[Register::ErrorPC as usize].set(value);
     }
 
     pub fn f64(&self) -> bool {
         self.regs[Register::Status as usize].get() & 0x0400_0000 != 0
     }
 
-    // LLAddr register
-
     pub fn set_ll_addr(&mut self, value: u32) {
         self.regs[Register::LLAddr as usize].set(value >> 4);
     }
 
-    // TODO just to_string enum?
     pub fn reg_name(index: usize) -> &'static str {
         const NAMES: [&str; 32] = [
-            "Index", "Random", "EntryLo0", "EntryLo1", "Context", "PageMask", "Wired", "Rsv7",
-            "BadVAddr", "Count", "EntryHi", "Compare", "Status", "Cause", "EPC", "PRId", "Config",
-            "LLAddr", "WatchLo", "WatchHi", "XContext", "Rsv21", "Rsv22", "Rsv23", "Rsv24",
-            "Rsv25", "PErr", "CacheErr", "TagLo", "TagHi", "ErrorEPC", "Rsv31",
+            "Index",
+            "Random",
+            "EntryLo0",
+            "EntryLo1",
+            "Context",
+            "PageMask",
+            "Wired",
+            "Rsv7",
+            "BadVAddr",
+            "Count",
+            "EntryHi",
+            "Compare",
+            "Status",
+            "Cause",
+            "ExceptionPC",
+            "PRId",
+            "Config",
+            "LLAddr",
+            "WatchLo",
+            "WatchHi",
+            "XContext",
+            "Rsv21",
+            "Rsv22",
+            "Rsv23",
+            "Rsv24",
+            "Rsv25",
+            "PErr",
+            "CacheErr",
+            "TagLo",
+            "TagHi",
+            "ErrorPC",
+            "Rsv31",
         ];
 
-        NAMES.get(index).copied().unwrap_or("?") // TODO copied?
+        NAMES[index & 0x1F]
     }
 }

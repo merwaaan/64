@@ -1,23 +1,21 @@
+//! Serial interface
+//!
+//! Handles DMA transfers between RAM and PIF RAM/ROM.
+//! Typically used to communicate with the controllers.
+
 use strum::{Display, EnumIter};
 
 use crate::{
     events::{EventType, Events},
     location::Location,
     mi::Interrupt,
-    pif::{Pif, PifRamLocation},
+    pif::PifRamLocation,
     ram::RamLocation,
-    system::{Address, System},
+    system::System,
     value::Value,
 };
 
-/// Serial interface
-///
-/// Handles DMA transfers between RAM and PIF RAM/ROM.
-/// Typically used to communicate with the controllers.
-
 pub type SiLocation = Location<0x0480_0000, 0x0490_0000>;
-
-// TODO modernize regs
 
 const MASK: u32 = 0x1F; // TODO?
 
@@ -161,7 +159,7 @@ impl Si {
         s.si.regs[STATUS_REG] &= !STATUS_DMA_BUSY_MASK;
         // TODO IO busy?
 
-        // Raise the interrupt
+        // Raise an SI interrupt
 
         s.mi.set_pending_interrupt(Interrupt::Si, &mut s.cop0);
     }
