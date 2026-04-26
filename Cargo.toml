@@ -1,6 +1,6 @@
 [workspace]
-members = ["specs", "core", "app", "runner"]
-default-members = ["specs", "core", "app"]
+members = ["specs", "core", "app", "runner", "test-suite"]
+default-members = ["specs", "core", "app", "test-suite"]
 resolver = "3"
 
 #[profile.release]
