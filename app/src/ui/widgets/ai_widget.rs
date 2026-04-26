@@ -44,18 +44,29 @@ impl Widget for AiWidget {
 impl ChildWidget for AiWidget {
     fn show(&mut self, ui: &mut egui::Ui) -> Vec<Command> {
         if let Some(update) = &self.last_update {
-            reg32(ui, "DMA RAM address", update.ai.dma_ram_address);
-            reg32(ui, "DMA length", update.ai.dma_length);
-            reg32(ui, "DMA enabled", update.ai.dma_enabled as u32);
-            reg32(ui, "Status", update.ai.status.raw_value());
+            // Registers
+
+            reg32(
+                ui,
+                "DMA RAM address",
+                update.ai.regs.dma_ram_address.raw_value(),
+            );
+
+            reg32(ui, "DMA length", update.ai.regs.dma_length.raw_value());
+
+            reg32(ui, "DMA enabled", update.ai.regs.control.raw_value());
+
+            reg32(ui, "Status", update.ai.regs.status.raw_value());
 
             ui.horizontal(|ui| {
-                reg32(ui, "Dac rate", update.ai.dac_rate);
+                reg32(ui, "Dac rate", update.ai.regs.dac_rate.raw_value());
 
                 Text::new(format!("{} Hz", update.ai.sample_rate())).show(ui);
             });
 
             ui.separator();
+
+            // Samples
 
             ui.horizontal(|ui| {
                 Text::new("Queued samples").show(ui);

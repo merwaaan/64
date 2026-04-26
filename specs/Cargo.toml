@@ -1,0 +1,8 @@
+[package]
+name = "n64_specs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arbitrary-int = "2.1"
+bitbybit = "2.0"
