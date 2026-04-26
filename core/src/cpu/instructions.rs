@@ -1,26 +1,37 @@
 use crate::{
-    cpu::{
-        instructions_cop0, instructions_cop1, instructions_cop2, instructions_cpu, opcode::Opcode,
-    },
+    cpu::{opcode::Opcode, operands::Operands},
     exception::Exception,
     system::System,
 };
 
+pub mod cop0;
+pub mod cop1;
+pub mod cop2;
+pub mod regimm;
+pub mod special;
+pub mod standard;
+
+/// Effect of an executed instruction.
 #[derive(Clone, Copy, Debug)]
 pub enum InstructionEffect {
-    /// The instruction was a delayed branching.
-    /// If the branch was taken, contains the target address.
+    /// The instruction is a delayed branching.
+    /// If the branch is taken, contains the target address.
     DelayedBranching(Option<u32>),
     // TODO SkipDelaySlot
 }
 
 pub type InstructionResult = Result<Option<InstructionEffect>, Exception>;
 
-pub type ExecuteFn = fn(&mut System, Opcode) -> InstructionResult;
-pub type DisassembleFn = fn(&System, Opcode) -> String;
+pub trait Instruction {
+    fn execute(s: &mut System, opcode: Opcode, operands: Operands) -> InstructionResult;
+    fn disassemble(s: &System, opcode: Opcode, operands: Operands) -> String;
+}
+
+pub type ExecuteFn = fn(&mut System, Opcode, Operands) -> InstructionResult;
+pub type DisassembleFn = fn(&System, Opcode, Operands) -> String;
 pub type DecodedInstruction = (ExecuteFn, DisassembleFn);
 
-/// Expands to `(name_execute, name_disassemble)` for use in decode match arms.
+// TODO move out?
 #[macro_export]
 macro_rules! inst {
     ($name:ident) => {
@@ -31,26 +42,52 @@ macro_rules! inst {
     };
 }
 
-pub fn decode(opcode: Opcode) -> DecodedInstruction {
-    match opcode.group() {
-        0b000000 => instructions_cpu::decode_special(opcode),
-        0b000001 => instructions_cpu::decode_regimm(opcode),
-        0b010000 => instructions_cop0::decode(opcode),
-        0b010001 => instructions_cop1::decode(opcode),
-        0b010010 => instructions_cop2::decode(opcode),
-        // Move standard here, same discriminant
-        _ => instructions_cpu::decode_standard(opcode),
+// Reserved instruction
+
+// TODO mips manual p 544, not all invalid opcodes cause exceptions?
+
+pub struct Reserved;
+
+impl Instruction for Reserved {
+    fn execute(_s: &mut System, opcode: Opcode, _operands: Operands) -> InstructionResult {
+        log::warn!("Reserved instruction: {:08X}", opcode.0);
+
+        Err(Exception::ReservedInstruction)
+    }
+
+    fn disassemble(_s: &System, opcode: Opcode, _operands: Operands) -> String {
+        format!("<RESERVED {:08X}>", opcode.0)
     }
 }
 
-// Reserved instruction
+pub const RESERVED_INSTRUCTION: DecodedInstruction = (
+    <Reserved as Instruction>::execute,
+    <Reserved as Instruction>::disassemble,
+);
 
-fn reserved_execute(_s: &mut System, _op: Opcode) -> InstructionResult {
-    Err(Exception::ReservedInstruction)
+// Helpers
+
+fn trap(condition: bool) -> InstructionResult {
+    if condition {
+        Err(Exception::Trap)
+    } else {
+        Ok(None)
+    }
 }
 
-pub fn reserved_disassemble(_s: &System, op: Opcode) -> String {
-    format!("<RESERVED {:08X}>", op.0)
-}
+fn branch<const DISCARD_DELAY_SLOT: bool>(
+    s: &mut System,
+    op: Opcode,
+    condition: bool,
+) -> InstructionResult {
+    Ok(Some(InstructionEffect::DelayedBranching(if condition {
+        Some(op.branch_target(s))
+    } else {
+        // Discard the instruction in the delay slot TODO return special val??
+        if DISCARD_DELAY_SLOT {
+            s.cpu.regs.pc = s.cpu.regs.pc.wrapping_add(4);
+        }
 
-pub const RESERVED_INSTRUCTION: DecodedInstruction = (reserved_execute, reserved_disassemble);
+        None
+    })))
+}

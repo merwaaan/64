@@ -7,8 +7,7 @@ use std::{
 use crossbeam::channel::{Receiver, Sender, TryRecvError, unbounded};
 
 use n64_core::{
-    cpu,
-    cpu::opcode::Opcode,
+    cpu::{decoder::Decoder, opcode::Opcode},
     sp,
     system::{Address, System},
     value::Value,
@@ -247,17 +246,16 @@ impl CoreThread {
                                         .map(|instruction| {
                                             let opcode = Opcode(instruction);
 
-                                            let (_execute, disassemble) =
-                                                cpu::instructions::decode(opcode);
-
-                                            (addr, disassemble(system, opcode))
+                                            let dec = system.cpu.decoder;
+                                            (addr, dec.disassemble(system, opcode))
                                         })
                                         .unwrap_or((addr, "<CANNOT DECODE>".to_string()))
                                 })
                                 .collect();
 
                             events.push(Event::Cpu(CpuUpdate {
-                                cpu: system.cpu,
+                                regs: system.cpu.regs,
+                                cycles: system.cpu.cycles(),
                                 instructions,
                             }));
                         }

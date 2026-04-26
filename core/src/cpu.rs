@@ -1,29 +1,45 @@
 use crate::{
-    cpu::{instructions::InstructionEffect, opcode::Opcode},
+    cpu::{
+        decoder::{Decoder, basic::BasicDecoder},
+        instructions::InstructionEffect,
+        opcode::Opcode,
+    },
     exception::Exception,
     registers::Registers,
     system::{Address, System},
 };
 
+pub mod decoder;
 pub mod instructions;
-pub(crate) mod instructions_cop0;
-pub(crate) mod instructions_cop1;
-pub(crate) mod instructions_cop2;
-pub(crate) mod instructions_cpu;
 pub mod opcode;
+mod operands;
 
 pub const FREQUENCY: f64 = 93_750_000.0;
 
-#[derive(Default, Copy, Clone, Debug)]
 pub struct Cpu {
     pub regs: Registers,
 
+    cycles: usize,
+
     /// Delayed branching, two levels:
     /// - Outer Option: whether there is a delayed branching
-    /// - Inner Option: whether the branch was taken
+    /// - Inner Option: target address if the branch was taken
     delayed_branching: Option<Option<u32>>,
 
-    cycles: usize,
+    //pub decoder: LutDecoder,
+    pub decoder: BasicDecoder,
+}
+
+impl Default for Cpu {
+    fn default() -> Self {
+        Self {
+            regs: Registers::default(),
+            delayed_branching: None,
+            cycles: 0,
+            //decoder: LutDecoder::default(), // BasicDecoder::default(),
+            decoder: BasicDecoder::default(),
+        }
+    }
 }
 
 impl Cpu {
@@ -36,10 +52,8 @@ impl Cpu {
 
         let result = s.read(Address::v(s.cpu.regs.pc)).and_then(|instruction| {
             let opcode = Opcode(instruction);
-
-            let (execute, _disassemble) = instructions::decode(opcode);
-
-            execute(s, opcode)
+            let decoder = s.cpu.decoder;
+            decoder.execute(s, opcode)
         });
 
         // Advance the PC

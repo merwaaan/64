@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use egui::CursorIcon;
-use n64_core::{breakpoints::Breakpoints, cpu::Cpu, registers::Registers};
+use n64_core::{breakpoints::Breakpoints, registers::Registers};
 
 use crate::{
     command::Command,
@@ -15,7 +15,8 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub struct CpuUpdate {
-    pub cpu: Cpu,
+    pub regs: Registers,
+    pub cycles: usize,
     pub instructions: Vec<(u32, String)>,
 }
 
@@ -78,7 +79,7 @@ impl ChildWidget for CpuWidget {
 
                             let opcode_response = Text::new(format!("{:08X}", address))
                                 .color(colors::ACTIVE)
-                                .reverse(*address == last_update.cpu.regs.pc)
+                                .reverse(*address == last_update.regs.pc)
                                 .show(ui);
 
                             if opcode_response.hovered() {
@@ -125,16 +126,16 @@ impl ChildWidget for CpuWidget {
                 });
 
                 ui[1].vertical(|ui| {
-                    reg64(ui, "CYCLES", last_update.cpu.cycles() as u64);
+                    reg64(ui, "CYCLES", last_update.cycles as u64);
 
-                    reg64(ui, "PC", last_update.cpu.regs.pc as u64);
+                    reg64(ui, "PC", last_update.regs.pc as u64);
 
                     ui.horizontal(|ui| {
-                        reg64(ui, "HI", last_update.cpu.regs.mult_hi.get64());
-                        reg64(ui, "LO", last_update.cpu.regs.mult_lo.get64());
+                        reg64(ui, "HI", last_update.regs.mult_hi.get64());
+                        reg64(ui, "LO", last_update.regs.mult_lo.get64());
                     });
 
-                    reg32(ui, "LLBit", last_update.cpu.regs.load_linked_bit as u32);
+                    reg32(ui, "LLBit", last_update.regs.load_linked_bit as u32);
 
                     // GPR
 
@@ -143,7 +144,7 @@ impl ChildWidget for CpuWidget {
                             for col in 0..2 {
                                 let reg_index = row + col * 16;
                                 let name = Registers::gpr_name(reg_index);
-                                let value = last_update.cpu.regs.gpr[reg_index].get64();
+                                let value = last_update.regs.gpr[reg_index].get64();
 
                                 reg64(ui, name, value);
                             }

@@ -699,23 +699,23 @@ impl Dp {
             //log::debug!("Applying command: {:#?}", command);
 
             match command {
-                Command::SetScissor(data) => {
+                Command::SetScissor(_data) => {
                     //log::warn!("DP: set scissor: {:?}", data);
                 }
 
-                Command::SetPrimitiveColor(data) => {
+                Command::SetPrimitiveColor(_data) => {
                     //log::warn!("DP: set primitive color: {:?}", data);
                 }
 
-                Command::SetEnvironmentColor(data) => {
+                Command::SetEnvironmentColor(_data) => {
                     //log::warn!("DP: set environment color: {:?}", data);
                 }
 
-                Command::SetFogColor(data) => {
+                Command::SetFogColor(_data) => {
                     //log::warn!("DP: set fog color: {:?}", data);
                 }
 
-                Command::SetBlendColor(data) => {
+                Command::SetBlendColor(_data) => {
                     //log::warn!("DP: set blend color: {:?}", data);
                 }
 

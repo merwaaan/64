@@ -1,131 +1,32 @@
 use arbitrary_int::prelude::*;
 
-use crate::{cop0::Cop0, cop1, registers::Registers, system::System};
-
-/// Helper to decode opcodes
-#[derive(Clone, Copy)]
-pub struct Opcode(pub u32);
+use crate::{cop1, system::System};
 
 // TODO rewrite with bitfiedstruct??
 
+/// Instruction opcode
+#[derive(Clone, Copy)]
+pub struct Opcode(pub u32);
+
 impl Opcode {
     // Group (special, regimm, cop0, cop1, or just top-level instructions)
-    pub(crate) fn group(&self) -> u32 {
+    pub(crate) const fn group(&self) -> u32 {
         self.0 >> 26
     }
 
-    // x -> register index
-    // xv -> register value
-    // xn -> register name
-    // x0n -> COP0 register name TODO weird?
-
-    // rs
-
-    pub(crate) fn rs(&self) -> usize {
+    pub(crate) const fn rs(&self) -> usize {
         ((self.0 >> 21) & 0x1F) as usize
     }
 
-    pub(crate) fn rsv(&self, s: &System) -> u32 {
-        s.cpu.regs.gpr[self.rs()].get()
-    }
-
-    pub(crate) fn rsv64(&self, s: &System) -> u64 {
-        s.cpu.regs.gpr[self.rs()].get64()
-    }
-
-    pub(crate) fn rsn(&self) -> &'static str {
-        Registers::gpr_name(self.rs())
-    }
-
-    // rt
-
-    pub(crate) fn rt(&self) -> usize {
+    pub(crate) const fn rt(&self) -> usize {
         ((self.0 >> 16) & 0x1F) as usize
     }
 
-    pub(crate) fn rtv(&self, s: &System) -> u32 {
-        s.cpu.regs.gpr[self.rt()].get()
-    }
-
-    pub(crate) fn rtv64(&self, s: &System) -> u64 {
-        s.cpu.regs.gpr[self.rt()].get64()
-    }
-
-    pub(crate) fn rtn(&self) -> &'static str {
-        Registers::gpr_name(self.rt())
-    }
-
-    // rd
-
-    pub(crate) fn rd(&self) -> usize {
+    pub(crate) const fn rd(&self) -> usize {
         ((self.0 >> 11) & 0x1F) as usize
     }
 
-    pub(crate) fn rdn(&self) -> &'static str {
-        Registers::gpr_name(self.rd())
-    }
-
-    pub(crate) fn rd0n(&self) -> &'static str {
-        Cop0::reg_name(self.rd())
-    }
-
-    // ft
-
-    pub(crate) fn ft(&self) -> usize {
-        ((self.0 >> 16) & 0x1F) as usize
-    }
-
-    pub(crate) fn ftv(&self, s: &System) -> u32 {
-        s.cop1.get32(self.ft(), s.cop0.f64())
-    }
-
-    pub(crate) fn ftv64(&self, s: &System) -> u64 {
-        s.cop1.get64(self.ft(), s.cop0.f64())
-    }
-
-    pub(crate) fn ftn(&self) -> &'static str {
-        Registers::fpr_name(self.ft())
-    }
-
-    // fs
-
-    pub(crate) fn fs(&self) -> usize {
-        ((self.0 >> 11) & 0x1F) as usize
-    }
-
-    pub(crate) fn fsv(&self, s: &System) -> u32 {
-        s.cop1.get32(self.fs(), s.cop0.f64())
-    }
-
-    pub(crate) fn fsv64(&self, s: &System) -> u64 {
-        s.cop1.get64(self.fs(), s.cop0.f64())
-    }
-
-    pub(crate) fn fsn(&self) -> &'static str {
-        Registers::fpr_name(self.fs())
-    }
-
-    // fd
-
-    pub(crate) fn fd(&self) -> usize {
-        ((self.0 >> 6) & 0x1F) as usize
-    }
-
-    pub(crate) fn fdv(&self, s: &System) -> u32 {
-        s.cop1.get32(self.fd(), s.cop0.f64())
-    }
-
-    pub(crate) fn fdv64(&self, s: &System) -> u64 {
-        s.cop1.get64(self.fd(), s.cop0.f64())
-    }
-
-    pub(crate) fn fdn(&self) -> &'static str {
-        Registers::fpr_name(self.fd())
-    }
-
-    // base
-
-    pub(crate) fn base(&self) -> usize {
+    pub(crate) const fn base(&self) -> usize {
         ((self.0 >> 21) & 0x1F) as usize
     }
 
@@ -133,12 +34,8 @@ impl Opcode {
         s.cpu.regs.gpr[self.base()].get()
     }
 
-    pub(crate) fn basen(&self) -> &'static str {
-        Registers::gpr_name(self.base())
-    }
-
     // Immediate 16-bits value
-    pub(crate) fn imm16(&self) -> u16 {
+    pub(crate) const fn imm16(&self) -> u16 {
         self.0 as u16
     }
 
@@ -162,7 +59,7 @@ impl Opcode {
     }
 
     // Shift amount
-    pub(crate) fn shift(&self) -> u32 {
+    pub(crate) const fn shift(&self) -> u32 {
         (self.0 >> 6) & 0x1F
     }
 
