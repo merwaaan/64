@@ -37,3 +37,7 @@ rstest = "0.26"
 [[bench]]
 name = "endianness"
 harness = false
+
+[[bench]]
+name = "rom_execution"
+harness = false
