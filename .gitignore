@@ -3,4 +3,6 @@ target
 *.n64
 *.z64
 *.json
+*.bin
+*.exe
 _*

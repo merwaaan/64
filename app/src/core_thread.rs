@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     panic::{self, AssertUnwindSafe},
+    sync::Arc,
     thread::{self, JoinHandle},
 };
 
@@ -11,6 +12,7 @@ use n64_core::{
     sp,
     system::{Address, System},
     value::Value,
+    vi::Vi,
 };
 
 use crate::ui::widgets::ai_widget::AiUpdate;
@@ -349,9 +351,9 @@ impl CoreThread {
                         }
 
                         Data::Framebuffer => {
-                            //let frame = Arc::new(Vi::extract_framebuffer(system));
+                            let frame = Arc::new(Vi::extract_framebuffer(system));
 
-                            let frame = system.video_renderer.get_frame();
+                            //let frame = system.video_renderer.get_frame();
 
                             events.push(Event::Framebuffer(FramebufferUpdate(frame)));
                         }
