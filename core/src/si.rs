@@ -3,19 +3,19 @@
 //! Handles DMA transfers between RAM and PIF RAM/ROM.
 //! Typically used to communicate with the controllers.
 
+use n64_specs as specs;
 use strum::{Display, EnumIter};
 
 use crate::{
     events::{EventType, Events},
     location::Location,
-    mi::Interrupt,
     pif::PifRamLocation,
     ram::RamLocation,
     system::System,
     value::Value,
 };
 
-pub type SiLocation = Location<0x0480_0000, 0x0490_0000>;
+pub type SiLocation = Location<{ specs::si::START }, { specs::si::END }>;
 
 const MASK: u32 = 0x1F; // TODO?
 
@@ -98,7 +98,7 @@ impl Si {
 
                 s.si.regs[STATUS_REG] &= !STATUS_INTERRUPT_MASK;
 
-                s.mi.clear_pending_interrupt(Interrupt::Si, &mut s.cop0);
+                s.mi.clear_pending_interrupt(specs::interrupt::Interrupt::Si, &mut s.cop0);
             }
             _ => unimplemented!("Write SI register @ {:08X}", addr.relative()),
         }
@@ -161,6 +161,6 @@ impl Si {
 
         // Raise an SI interrupt
 
-        s.mi.set_pending_interrupt(Interrupt::Si, &mut s.cop0);
+        s.mi.set_pending_interrupt(specs::interrupt::Interrupt::Si, &mut s.cop0);
     }
 }

@@ -5,6 +5,7 @@ use std::{
     path::Path,
 };
 
+use n64_specs as specs;
 use thiserror::Error;
 use zip::ZipArchive;
 
@@ -29,10 +30,7 @@ pub enum CartError {
     Zip(#[from] zip::result::ZipError),
 }
 
-const ROM_START: u32 = 0x1000_0000;
-const ROM_END: u32 = 0x1FC0_0000;
-
-pub type CartLocation = Location<ROM_START, ROM_END>;
+pub type CartLocation = Location<{ specs::cart::START }, { specs::cart::END }>;
 
 #[derive(Debug)]
 pub struct Cart {

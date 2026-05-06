@@ -1,254 +1,70 @@
 use arbitrary_int::prelude::*;
-use bitbybit::bitfield;
-use strum::{Display, EnumIter};
+use n64_specs as specs;
 
 use crate::{
     cpu,
     events::{EventType, Events},
     location::Location,
-    mi::Interrupt,
-    register_overlaps,
     rendering::video::Frame,
     system::{Address, System},
     value::Value,
 };
 
-pub type ViLocation = Location<0x0440_0000, 0x0450_0000>;
+pub type ViLocation = Location<{ specs::vi::START }, { specs::vi::END }>;
 
-#[derive(Debug, Display, Clone, Copy, EnumIter)]
-#[repr(u32)]
-pub enum Register {
-    Status,
-    FramebufferAddr,
-    Width,
-    InterruptScanline,
-    CurrentScanline,
-    Burst,
-    VSync,
-    HSync,
-    HSyncLeap,
-    /// Horizontal start/end
-    HVideo,
-    /// Vertical start/end
-    VVideo,
-    VBurst,
-    XScale,
-    YScale,
-}
-
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Control {
-    #[bits(0..=1, rw)] // TODO enum
-    color_mode: u2,
-
-    #[bit(2, rw)]
-    gamma_dither: bool,
-
-    #[bit(3, rw)]
-    gamma: bool,
-
-    #[bit(4, rw)]
-    divot: bool,
-
-    #[bit(5, rw)]
-    vbus_clock: bool,
-
-    #[bit(6, rw)]
-    serrate: bool,
-
-    #[bit(7, rw)]
-    test_mode: bool,
-
-    #[bits(8..=9, rw)] // TODO enum
-    antialias_mode: u2,
-
-    #[bit(11, rw)]
-    kill_writes: bool,
-
-    #[bits(12..=15, rw)] // TODO enum
-    pixel_advance: u4,
-
-    #[bit(16, rw)]
-    dither: bool,
-}
-
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Origin {
-    #[bits(0..=23, rw)]
-    ram_address: u24,
-}
-
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Width {
-    #[bits(0..=11, rw)]
-    value: u12,
-}
-
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable)]
-pub struct InterruptLine {
-    #[bits(0..=9, rw)]
-    value: u10,
-}
-
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable)]
-pub struct CurrentLine {
-    #[bit(0, rw)]
-    field: u1,
-
-    #[bits(1..=9, rw)]
-    line: u9,
-}
-
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Burst {
-    #[bits(0..=7, rw)]
-    hsync_width: u8,
-
-    #[bits(8..=15, rw)]
-    burst_width: u8,
-
-    #[bits(16..=19, rw)]
-    vsync_height: u4,
-
-    #[bits(20..=29, rw)]
-    vburst_start: u10,
-}
-
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable)]
-pub struct VerticalTotal {
-    #[bits(0..=9, rw)]
-    value: u10,
-}
-
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable)]
-pub struct HorizontalTotal {
-    #[bits(0..=11, rw)]
-    total: u12,
-
-    #[bits(16..=20, rw)]
-    leap: u5,
-}
-
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable)]
-pub struct HorizontalTotalLeap {
-    #[bits(0..=11, rw)]
-    leap_b: u12,
-
-    #[bits(16..=27, rw)]
-    leap_a: u12,
-}
-
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable)]
-pub struct StartEnd {
-    #[bits(0..=9, rw)]
-    end: u10,
-
-    #[bits(16..=25, rw)]
-    start: u10,
-}
-
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable)]
-pub struct HorizontalScale {
-    #[bits(0..=11, rw)]
-    scale: u12,
-
-    #[bits(16..=27, rw)]
-    offset: u12,
-}
-
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable)]
-pub struct VerticalScale {
-    #[bits(0..=11, rw)]
-    scale: u12,
-
-    #[bits(16..=25, rw)]
-    offset: u10,
-}
-
-#[repr(C)]
-#[derive(Default, Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Registers {
-    pub control: Control,
-    pub origin: Origin,
-    pub width: Width,
-    pub interrupt_line: InterruptLine,
-    pub current_line: CurrentLine,
-    pub burst: Burst,
-    pub vertical_total: VerticalTotal,
-    pub horizontal_total: HorizontalTotal,
-    pub horizontal_leap: HorizontalTotalLeap,
-    pub horizontal_video: StartEnd,
-    pub vertical_video: StartEnd,
-    pub vertical_burst: StartEnd,
-    pub x_scale: HorizontalScale,
-    pub y_scale: VerticalScale,
-    // TODO others?
-    test_address: u32,
-    staged_data: u32,
-}
-
-impl Registers {
-    pub fn read<T: Value>(&self, offset: u32) -> T {
-        let words = bytemuck::cast_slice(bytemuck::bytes_of(self));
-
-        T::read_reg(words, offset)
-    }
-
-    pub fn write<T: Value>(&mut self, offset: u32, data: T) {
-        let words = bytemuck::cast_slice_mut(bytemuck::bytes_of_mut(self));
-
-        data.write_reg(words, offset);
-    }
-}
-
-const REGISTERS_MASK: u32 = 0x3F;
-
-// NTSC 59.94 Hz, 262.5 scanlines
-// PAL 50.00 Hz, 312.5 scanlines
-const NTSC_FREQUENCY: f64 = 60.0; // TODO exact?
-const _PAL_FREQUENCY: f64 = 50.0;
-
+// TODO move to specs
 const TOTAL_SCANLINES: usize = 525; // TODO depends????
-const FRAME_CPU_CYCLES: usize = (cpu::FREQUENCY / NTSC_FREQUENCY) as usize;
+const FRAME_CPU_CYCLES: usize = (cpu::FREQUENCY / specs::timing::NTSC_FREQUENCY) as usize;
 pub const SCANLINE_CPU_CYCLES: usize = FRAME_CPU_CYCLES / TOTAL_SCANLINES; // TODO fractional part?
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Vi {
-    regs: Registers,
+    regs: specs::vi::Registers,
 }
 
 impl Vi {
-    pub fn regs(&self) -> &Registers {
+    pub fn regs(&self) -> &specs::vi::Registers {
         &self.regs
     }
 
     pub fn read<T: Value>(s: &System, addr: ViLocation) -> T {
-        s.vi.regs.read(addr.relative() & REGISTERS_MASK)
+        assert!(T::BYTES == 4, "VI: read with invalid size {}", T::BYTES);
+
+        let offset = addr.relative() & specs::vi::REGISTERS_MASK;
+
+        assert!(
+            offset & 3 == 0,
+            "VI: read from unaligned address {:08X}",
+            offset
+        );
+
+        let regs_slice = bytemuck::cast_slice(bytemuck::bytes_of(&s.vi.regs));
+        T::read_reg(regs_slice, offset)
     }
 
     pub fn write<T: Value>(s: &mut System, addr: ViLocation, data: T) {
+        assert!(T::BYTES == 4, "VI: write with invalid size {}", T::BYTES);
+
+        let offset = addr.relative() & specs::vi::REGISTERS_MASK;
+
+        assert!(
+            offset & 3 == 0,
+            "VI: write to unaligned address {:08X}",
+            offset
+        );
+
         let current_line = s.vi.regs.current_line;
 
-        let offset = addr.relative() & REGISTERS_MASK;
+        let offset = addr.relative() & specs::vi::REGISTERS_MASK;
 
-        s.vi.regs.write(offset, data);
+        let regs_slice = bytemuck::cast_slice_mut(bytemuck::bytes_of_mut(&mut s.vi.regs));
+        data.write_reg(regs_slice, offset);
 
-        if register_overlaps!(offset, offset + T::BYTES as u32, Registers::current_line) {
-            s.mi.clear_pending_interrupt(Interrupt::Vi, &mut s.cop0);
+        if offset == specs::vi::CurrentLine::OFFSET {
+            s.mi.clear_pending_interrupt(specs::interrupt::Interrupt::Vi, &mut s.cop0);
 
             // CURRENT_LINE is read-only
+            // TODO add mask to specs
             s.vi.regs.current_line = current_line;
         }
     }
@@ -285,7 +101,7 @@ impl Vi {
 
         if s.vi.regs.current_line.line().value() == s.vi.regs.interrupt_line.value().value() {
             // TODO halfline overlap?
-            s.mi.set_pending_interrupt(Interrupt::Vi, &mut s.cop0);
+            s.mi.set_pending_interrupt(specs::interrupt::Interrupt::Vi, &mut s.cop0);
         }
 
         // Schedule the next scanline
@@ -299,7 +115,7 @@ impl Vi {
         let width = s.vi.framebuffer_width();
         let height = s.vi.framebuffer_height();
 
-        let mut data = Vec::with_capacity(width * height * 4);
+        let mut rgba = Vec::with_capacity(width * height * 4);
 
         let color32 = s.vi.regs.control.color_mode().value() == 3;
 
@@ -311,10 +127,11 @@ impl Vi {
                         .read::<u32>(Address::p(base_addr + ((y * width + x) * 4) as u32))
                         .expect("Invalid pixel address");
 
-                    data.push((pixel >> 24) as u8);
-                    data.push((pixel >> 16) as u8);
-                    data.push((pixel >> 8) as u8);
-                    data.push(0xFF); // TODO real val
+                    // TODO use color specs
+                    rgba.push((pixel >> 24) as u8);
+                    rgba.push((pixel >> 16) as u8);
+                    rgba.push((pixel >> 8) as u8);
+                    rgba.push(0xFF); // TODO real val
                 }
             }
         } else {
@@ -324,17 +141,18 @@ impl Vi {
                         .read::<u16>(Address::p(base_addr + ((y * width + x) * 2) as u32))
                         .expect("Invalid pixel address");
 
-                    data.push(Self::b5_to_b8(pixel >> 11));
-                    data.push(Self::b5_to_b8(pixel >> 6));
-                    data.push(Self::b5_to_b8(pixel >> 1));
-                    data.push(0xFF); // TODO real val
+                    // TODO use color specs
+                    rgba.push(Self::b5_to_b8(pixel >> 11));
+                    rgba.push(Self::b5_to_b8(pixel >> 6));
+                    rgba.push(Self::b5_to_b8(pixel >> 1));
+                    rgba.push(0xFF); // TODO real val
                 }
             }
         }
 
         Frame {
             index: 0,
-            rgba: data,
+            rgba,
             width,
             height,
         }

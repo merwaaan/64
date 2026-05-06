@@ -4,4 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+n64_specs = { path = "../specs" }
 serde = { version = "1.0", default-features = false, features = ["derive"] }

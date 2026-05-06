@@ -10,6 +10,7 @@ const DATA_END: u32 = 0x03F0_0000;
 
 const DATA_MAPPED_SIZE: u32 = 0x080_0000; // TODO more with exp pack?
 
+// TODO move to specs
 pub type RamLocation = Location<DATA_START, DATA_END>;
 
 const REG_START: u32 = DATA_END;

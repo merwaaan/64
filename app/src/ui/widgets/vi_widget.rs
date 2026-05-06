@@ -43,22 +43,14 @@ impl ChildWidget for ViWidget {
             reg32(ui, "Interrupt", mi.regs().interrupt_line.raw_value());
             reg32(ui, "Current", mi.regs().current_line.raw_value());
             reg32(ui, "Burst", mi.regs().burst.raw_value());
-            reg32(ui, "Vertical Total", mi.regs().vertical_total.raw_value());
-            reg32(
-                ui,
-                "Horizontal Total",
-                mi.regs().horizontal_total.raw_value(),
-            );
-            reg32(ui, "Horizontal Leap", mi.regs().horizontal_leap.raw_value());
-            reg32(
-                ui,
-                "Horizontal Video",
-                mi.regs().horizontal_video.raw_value(),
-            );
-            reg32(ui, "Vertical Video", mi.regs().vertical_video.raw_value());
-            reg32(ui, "Vertical Burst", mi.regs().vertical_burst.raw_value());
-            reg32(ui, "X Scale", mi.regs().x_scale.raw_value());
-            reg32(ui, "Y Scale", mi.regs().y_scale.raw_value());
+            reg32(ui, "V Total", mi.regs().vertical_total.raw_value());
+            reg32(ui, "H Total", mi.regs().horizontal_total.raw_value());
+            reg32(ui, "H Leap", mi.regs().horizontal_leap.raw_value());
+            reg32(ui, "H Video", mi.regs().horizontal_video.raw_value());
+            reg32(ui, "V Video", mi.regs().vertical_video.raw_value());
+            reg32(ui, "V Burst", mi.regs().vertical_burst.raw_value());
+            reg32(ui, "H Scale", mi.regs().horizontal_scale.raw_value());
+            reg32(ui, "V Scale", mi.regs().vertical_scale.raw_value());
         }
 
         vec![]

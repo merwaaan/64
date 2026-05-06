@@ -23,8 +23,8 @@ impl TestResult {
 /// Result of a test case
 #[derive(Default, Serialize, Deserialize, PartialEq, Debug)]
 pub struct TestCaseResult {
-    pub name: Option<String>,
-    pub states: Vec<State>,
+    name: Option<String>,
+    states: Vec<State>,
 }
 
 impl TestCaseResult {
@@ -34,14 +34,36 @@ impl TestCaseResult {
             states: Vec::new(),
         }
     }
+
+    pub fn push_comment(&mut self, comment: &str) {
+        self.states.push(State::Comment(String::from(comment)));
+    }
+
+    pub fn push_value(&mut self, value: u32) {
+        self.states.push(State::Value(value));
+    }
+
+    pub fn push_pc(&mut self) {
+        self.states.push(State::Pc(0)); // TODO get actual PC
+    }
+
+    pub fn push_memory(&mut self, address: u32) {
+        let value = unsafe {
+            ((n64_specs::map::Segment::KSEG1 as u32 | address) as *mut u32).read_volatile()
+        };
+
+        self.states.push(State::Memory { address, value });
+    }
 }
 
 /// Piece of state in a test case
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub enum State {
-    /// An informative comment
+    /// A descriptive comment
     Comment(String),
-    /// Program counter
+    /// Some arbitrary value relevant to the test
+    Value(u32),
+    /// Program counter TODO use it?
     Pc(u32),
     /// Memory read
     Memory { address: u32, value: u32 },

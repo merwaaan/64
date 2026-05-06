@@ -9,11 +9,11 @@ use std::collections::VecDeque;
 
 use arbitrary_int::prelude::*;
 use bitbybit::bitfield;
+use n64_specs as specs;
 
 use crate::{
     blocks::write_block,
     location::Location,
-    mi::Interrupt,
     ram::RamLocation,
     rendering::{
         tile_cache::{ImageFormat, TexelSize, TileCache},
@@ -24,10 +24,7 @@ use crate::{
     value::Value,
 };
 
-const REG_START: u32 = 0x0410_0000;
-const REG_END: u32 = 0x0420_0000;
-
-pub type DpLocation = Location<REG_START, REG_END>;
+pub type DpLocation = Location<{ specs::rdp::START }, { specs::rdp::END }>;
 
 const START_REG: u32 = 0;
 const END_REG: u32 = 1;
@@ -424,7 +421,7 @@ impl Dp {
                     if_ready!(8, {
                         Self::apply_command(s);
 
-                        s.mi.set_pending_interrupt(Interrupt::Dp, &mut s.cop0); // TODO temp
+                        s.mi.set_pending_interrupt(specs::interrupt::Interrupt::Dp, &mut s.cop0); // TODO temp
                     });
                 }
                 0x2A => {

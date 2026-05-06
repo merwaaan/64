@@ -8,16 +8,22 @@
 use arbitrary_int::prelude::*;
 use bitbybit::bitfield;
 
+use crate::mapped_registers;
+
 pub const START: u32 = 0x0450_0000;
 pub const END: u32 = 0x0460_0000;
 
+pub const REGISTERS_MASK: u32 = 0x1F;
+
 // TODO wo
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DmaRamAddress {
     #[bits(0..=23, rw)]
     value: u24,
 }
 
+// TODO move to regs macro
 impl DmaRamAddress {
     pub fn write_masked(&mut self, value: u32) {
         *self = Self::new_with_raw_value(value & 0x00FF_FFF8);
@@ -26,6 +32,7 @@ impl DmaRamAddress {
 
 // TODO wo
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DmaLength {
     #[bits(0..=17, rw)]
     value: u18,
@@ -40,6 +47,7 @@ impl DmaLength {
 // TODO wo
 // TODO masked or not? test
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Control {
     #[bit(0, rw)]
     dma_enabled: bool,
@@ -53,6 +61,7 @@ impl Control {
 
 // TODO r? w?
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0x0110_0000, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Status {
     #[bit(31, rw)]
     dma_full: bool,
@@ -78,6 +87,7 @@ pub struct Status {
 
 // TODO wo
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DacRate {
     #[bits(0..=13, rw)]
     value: u14,
@@ -91,6 +101,7 @@ impl DacRate {
 
 // TODO wo
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct BitRate {
     #[bits(0..=3, rw)]
     value: u4,
@@ -102,12 +113,12 @@ impl BitRate {
     }
 }
 
-#[derive(Default, Clone, Copy, Debug)]
-pub struct Registers {
-    pub dma_ram_address: DmaRamAddress,
-    pub dma_length: DmaLength,
-    pub control: Control,
-    pub status: Status,
-    pub dac_rate: DacRate,
-    pub bit_rate: BitRate,
-}
+mapped_registers!(
+    START,
+    dma_ram_address: DmaRamAddress,
+    dma_length: DmaLength,
+    control: Control,
+    status: Status,
+    dac_rate: DacRate,
+    bit_rate: BitRate,
+);

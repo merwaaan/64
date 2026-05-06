@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use egui::Context;
-use n64_core::mi::{Interrupt, Mi};
+use n64_core::mi::Mi;
+use n64_specs as specs;
 use strum::IntoEnumIterator;
 
 use crate::{
@@ -39,7 +40,7 @@ impl Widget for MiWidget {
 
             let now = ctx.input(|i| i.time);
 
-            for (index, interrupt) in Interrupt::iter().enumerate() {
+            for (index, interrupt) in specs::interrupt::Interrupt::iter().enumerate() {
                 if mi.is_interrupt_pending(interrupt) && mi.is_interrupt_enabled(interrupt) {
                     self.last_interrupt_time[index] = now;
                 }
@@ -55,15 +56,15 @@ impl ChildWidget for MiWidget {
         if let Some(mi) = &self.last_update {
             reg32(ui, "Mode", mi.regs().mode.raw_value());
             reg32(ui, "Version", mi.regs().version.raw_value());
-            reg32(ui, "Interrupts", mi.regs().interrupts.raw_value());
-            reg32(ui, "Mask", mi.regs().mask.raw_value());
+            reg32(ui, "Interrupts", mi.regs().pending_interrupts.raw_value());
+            reg32(ui, "Mask", mi.regs().enabled_interrupts.raw_value());
 
             ui.separator();
 
             ui.horizontal(|ui| {
                 let now = ui.ctx().input(|i| i.time);
 
-                for (index, interrupt) in Interrupt::iter().enumerate().rev() {
+                for (index, interrupt) in specs::interrupt::Interrupt::iter().enumerate().rev() {
                     let color = {
                         let state_color = if mi.is_interrupt_pending(interrupt) {
                             if mi.is_interrupt_enabled(interrupt) {

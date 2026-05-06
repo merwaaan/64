@@ -1,9 +1,8 @@
+use n64_specs as specs;
+
 use crate::{location::Location, system::System, value::Value};
 
-const RAM_START: u32 = 0x0500_0000;
-const RAM_END: u32 = 0x0600_0800;
-
-pub type DdLocation = Location<RAM_START, RAM_END>;
+pub type DdLocation = Location<{ specs::dd::START }, { specs::dd::END }>;
 
 #[derive(Default)]
 pub struct Dd;
@@ -11,6 +10,7 @@ pub struct Dd;
 impl Dd {
     pub fn read<T: Value>(&self, addr: DdLocation) -> T {
         log::warn!("DD: read {:08X}", addr.relative());
+
         T::default()
     }
 

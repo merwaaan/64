@@ -2,6 +2,8 @@
 //!
 //! https://n64brew.dev/wiki/Joybus_Protocol
 
+use n64_specs as specs;
+
 use crate::{
     blocks::{read_block, write_block},
     controller::{Button, Controller},
@@ -9,10 +11,7 @@ use crate::{
     value::Value,
 };
 
-const START: u32 = 0x1FC0_07C0;
-const END: u32 = 0x1FC0_0800;
-
-pub type PifRamLocation = Location<START, END>;
+pub type PifRamLocation = Location<{ specs::pif::START }, { specs::pif::END }>;
 
 pub struct Pif {
     ram: [u8; 0x40],

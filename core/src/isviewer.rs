@@ -1,7 +1,12 @@
+use n64_specs as specs;
+
 use crate::{location::Location, value::Value};
 
-pub type IsViewerControlLocation = Location<0x13FF_0014, 0x13FF_0018>;
-pub type IsViewerBufferLocation = Location<0x13FF_0020, 0x13FF_0220>;
+pub type IsViewerControlLocation =
+    Location<{ specs::isviewer::CONTROL_ADDRESS }, { specs::isviewer::CONTROL_ADDRESS + 4 }>;
+
+pub type IsViewerBufferLocation =
+    Location<{ specs::isviewer::BUFFER_START }, { specs::isviewer::BUFFER_END }>;
 
 /// The IS-Viewer is a memory-mapped device connected to a PC that allows users to interact with a live program.
 ///

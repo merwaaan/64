@@ -1,17 +1,16 @@
 use core::slice;
 
-use n64_specs::ai as specs;
+use n64_specs as specs;
 
 use crate::{
     events::{EventType, Events},
     location::Location,
-    mi::Interrupt,
     ram::RamLocation,
     system::System,
     value::Value,
 };
 
-pub type AiLocation = Location<{ specs::START }, { specs::END }>;
+pub type AiLocation = Location<{ specs::ai::START }, { specs::ai::END }>;
 
 #[derive(Default, Clone, Copy, Debug)]
 struct DmaSlot {
@@ -21,19 +20,17 @@ struct DmaSlot {
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct Ai {
-    pub regs: specs::Registers,
+    pub regs: specs::ai::Registers,
 
     active_dma: Option<DmaSlot>,
     pending_dma: Option<DmaSlot>,
 }
 
-const REGISTERS_MASK: u32 = 0x1F;
-
 impl Ai {
     pub(crate) fn read<T: Value>(s: &System, addr: AiLocation) -> T {
         assert!(T::BYTES == 4, "AI: read with invalid size {}", T::BYTES);
 
-        let offset = addr.relative() & REGISTERS_MASK;
+        let offset = addr.relative() & specs::ai::REGISTERS_MASK;
 
         assert!(
             offset & 3 == 0,
@@ -61,7 +58,7 @@ impl Ai {
     pub(crate) fn write<T: Value>(s: &mut System, addr: AiLocation, data: T) {
         assert!(T::BYTES == 4, "AI: write with invalid size {}", T::BYTES);
 
-        let offset = addr.relative() & REGISTERS_MASK;
+        let offset = addr.relative() & specs::ai::REGISTERS_MASK;
 
         assert!(
             offset & 3 == 0,
@@ -104,7 +101,7 @@ impl Ai {
 
             // Status: read-only, writes clear the AI interrupt
             0xC => {
-                s.mi.clear_pending_interrupt(Interrupt::Ai, &mut s.cop0);
+                s.mi.clear_pending_interrupt(specs::interrupt::Interrupt::Ai, &mut s.cop0);
             }
 
             // Dac rate
@@ -195,7 +192,7 @@ impl Ai {
 
         // Raise an AI interrupt
 
-        s.mi.set_pending_interrupt(Interrupt::Ai, &mut s.cop0);
+        s.mi.set_pending_interrupt(specs::interrupt::Interrupt::Ai, &mut s.cop0);
 
         // Switch to the pending DMA, if any
 

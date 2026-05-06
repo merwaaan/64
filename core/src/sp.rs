@@ -18,13 +18,13 @@
 use std::simd::*;
 
 use arbitrary_int::prelude::*;
+use n64_specs as specs;
 use strum::{Display, EnumIter};
 
 use crate::{
     blocks::{read_block, write_block},
     events::{EventType, Events},
     location::Location,
-    mi::Interrupt,
     ram::RamLocation,
     sp::{instructions::InstructionEffect, opcode::Opcode},
     system::System,
@@ -396,9 +396,9 @@ impl Sp {
                     let clear_int = trigger_bits[0] & 8 != 0;
 
                     if clear_int && !set_int {
-                        s.mi.clear_pending_interrupt(Interrupt::Sp, &mut s.cop0);
+                        s.mi.clear_pending_interrupt(specs::interrupt::Interrupt::Sp, &mut s.cop0);
                     } else if !clear_int && set_int {
-                        s.mi.set_pending_interrupt(Interrupt::Sp, &mut s.cop0);
+                        s.mi.set_pending_interrupt(specs::interrupt::Interrupt::Sp, &mut s.cop0);
                     }
 
                     // SSTEP

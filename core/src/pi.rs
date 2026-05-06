@@ -2,22 +2,19 @@
 //!
 //! Handles DMA transfers between RAM and Cartridge.
 
+use n64_specs as specs;
 use strum::{Display, EnumIter};
 
 use crate::{
     cart::CartLocation,
     events::{EventType, Events},
     location::Location,
-    mi::Interrupt,
     ram::RamLocation,
     system::System,
     value::Value,
 };
 
-const START: u32 = 0x0460_0000;
-const END: u32 = 0x0470_0000;
-
-pub type PiLocation = Location<START, END>;
+pub type PiLocation = Location<{ specs::pi::START }, { specs::pi::END }>;
 
 const MASK: u32 = 0x3F;
 
@@ -118,7 +115,7 @@ impl Pi {
 
                 if (trigger_bits[0] & 2) != 0 {
                     s.pi.regs[STATUS_REG] &= !STATUS_DMA_COMPLETED_MASK;
-                    s.mi.clear_pending_interrupt(Interrupt::Pi, &mut s.cop0);
+                    s.mi.clear_pending_interrupt(specs::interrupt::Interrupt::Pi, &mut s.cop0);
                 }
 
                 // Bit 0: clear the error
@@ -245,6 +242,6 @@ impl Pi {
 
         // Raise the interrupt
 
-        s.mi.set_pending_interrupt(Interrupt::Pi, &mut s.cop0);
+        s.mi.set_pending_interrupt(specs::interrupt::Interrupt::Pi, &mut s.cop0);
     }
 }

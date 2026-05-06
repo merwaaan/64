@@ -1,53 +1,183 @@
-use core::ptr::{addr_of, addr_of_mut};
+use alloc::vec::Vec;
+use embedded_graphics::{
+    mono_font::{MonoTextStyle, ascii::FONT_6X10},
+    pixelcolor::Rgb888,
+    prelude::*,
+    primitives::{PrimitiveStyleBuilder, Rectangle, StrokeAlignment},
+};
+use embedded_text::{
+    TextBox,
+    style::{HeightMode, TextBoxStyleBuilder},
+};
+use n64_specs::{color::RGBA8888, vi};
 
-use n64_specs::color::RGBA8888;
+use crate::reg_mut_ptr;
 
 pub const WIDTH: u32 = 320;
 pub const HEIGHT: u32 = 240;
 pub const PIXELS: usize = WIDTH as usize * HEIGHT as usize;
 
+const MARGIN: u32 = 16;
+
 pub const WHITE: RGBA8888 = RGBA8888::from_rgba(0xFF, 0xFF, 0xFF, 0xFF);
-pub const RED: RGBA8888 = RGBA8888::from_rgba(0xFF, 0x00, 0x00, 0xFF);
-pub const GREEN: RGBA8888 = RGBA8888::from_rgba(0x00, 0xFF, 0x00, 0xFF);
+pub const SUCCESS: RGBA8888 = RGBA8888::from_rgba(0x4C, 0xAF, 0x50, 0xFF);
+pub const WARNING: RGBA8888 = RGBA8888::from_rgba(0xFF, 0x98, 0x00, 0xFF);
+pub const ERROR: RGBA8888 = RGBA8888::from_rgba(0xEF, 0x53, 0x50, 0xFF);
 
-// TODO
-// - vi regs to specs + use them here
-// - add index() func to regs?
-const VI_BASE_REG: *mut u32 = 0xA440_0000 as *mut u32;
-
-static mut BUFFER: [u32; PIXELS] = [0; PIXELS];
-
-pub struct Framebuffer;
+pub struct Framebuffer {
+    buffer: Vec<u32>,
+    text_cursor_y: u32,
+}
 
 impl Framebuffer {
-    pub fn configure() {
-        // TODO be explicit
+    pub fn new() -> Self {
+        let buffer = alloc::vec![WHITE.raw_value(); PIXELS];
+
+        // TODO use specific reg for each write instead of base + offset
+        let vi_reg_base = reg_mut_ptr(vi::START);
+
+        // TODO be explicit about values
         unsafe {
-            VI_BASE_REG.write_volatile(12879);
-            VI_BASE_REG.add(1).write_volatile(addr_of!(BUFFER) as u32);
-            VI_BASE_REG.add(2).write_volatile(WIDTH);
-            VI_BASE_REG.add(3).write_volatile(2);
-            VI_BASE_REG.add(5).write_volatile(0x03E5_2239);
-            VI_BASE_REG.add(6).write_volatile(0x0000_020D);
-            VI_BASE_REG.add(7).write_volatile(0x0000_0C15);
-            VI_BASE_REG.add(8).write_volatile(0x0C15_0C15);
-            VI_BASE_REG.add(9).write_volatile(0x006C_02EC);
-            VI_BASE_REG.add(10).write_volatile(0x0025_01FF);
-            VI_BASE_REG.add(11).write_volatile(0x000E_0204);
-            VI_BASE_REG.add(12).write_volatile((0x100 * WIDTH) / 160);
-            VI_BASE_REG.add(13).write_volatile((0x100 * HEIGHT) / 60);
+            vi_reg_base.add(vi::Control::INDEX).write_volatile(12879);
+
+            vi_reg_base
+                .add(vi::Origin::INDEX)
+                .write_volatile(buffer.as_ptr() as u32);
+
+            vi_reg_base.add(vi::Width::INDEX).write_volatile(WIDTH);
+
+            vi_reg_base.add(vi::InterruptLine::INDEX).write_volatile(2);
+
+            vi_reg_base
+                .add(vi::Burst::INDEX)
+                .write_volatile(0x03E5_2239);
+
+            vi_reg_base
+                .add(vi::VerticalTotal::INDEX)
+                .write_volatile(0x0000_020D);
+
+            vi_reg_base
+                .add(vi::HorizontalTotal::INDEX)
+                .write_volatile(0x0000_0C15);
+
+            vi_reg_base
+                .add(vi::HorizontalTotalLeap::INDEX)
+                .write_volatile(0x0C15_0C15);
+
+            vi_reg_base
+                .add(vi::HorizontalVideo::INDEX)
+                .write_volatile(0x006C_02EC);
+
+            vi_reg_base
+                .add(vi::VerticalVideo::INDEX)
+                .write_volatile(0x0025_01FF);
+
+            vi_reg_base
+                .add(vi::VerticalBurst::INDEX)
+                .write_volatile(0x000E_0204);
+
+            vi_reg_base
+                .add(vi::HorizontalScale::INDEX)
+                .write_volatile((0x100 * WIDTH) / 160);
+
+            vi_reg_base
+                .add(vi::VerticalScale::INDEX)
+                .write_volatile((0x100 * HEIGHT) / 60);
         }
 
-        Self::fill(WHITE);
+        Self {
+            buffer,
+            text_cursor_y: MARGIN,
+        }
     }
 
-    pub fn fill(color: RGBA8888) {
-        let p = addr_of_mut!(BUFFER).cast::<u32>();
+    pub fn fill(&mut self, color: RGBA8888) {
+        let buffer_uncached = self.buffer_ptr();
 
-        for i in 0..PIXELS {
-            unsafe {
-                p.add(i).write_volatile(color.raw_value());
+        unsafe {
+            for i in 0..PIXELS {
+                buffer_uncached.add(i).write_volatile(color.raw_value());
             }
         }
+    }
+
+    pub fn print(&mut self, text: &str, color: Option<RGBA8888>) {
+        let text_color = if let Some(color) = color {
+            Rgb888::new(color.red(), color.green(), color.blue())
+        } else {
+            Rgb888::BLACK
+        };
+
+        let text_style = MonoTextStyle::new(&FONT_6X10, text_color);
+
+        let bounds = Rectangle::new(
+            Point::new(MARGIN as i32, self.text_cursor_y as i32),
+            Size::new(WIDTH - 2 * MARGIN, HEIGHT - 2 * MARGIN),
+        );
+
+        let textbox_style = TextBoxStyleBuilder::new()
+            .height_mode(HeightMode::FitToText)
+            .build();
+
+        let text_box = TextBox::with_textbox_style(text, bounds, text_style, textbox_style);
+        text_box
+            .draw(self)
+            .expect("Failed to print text in framebuffer");
+
+        self.text_cursor_y += text_box.bounding_box().size.height as u32;
+    }
+
+    pub fn frame(&mut self, success: bool) {
+        let color = if success { SUCCESS } else { ERROR };
+        let color = Rgb888::new(color.red(), color.green(), color.blue());
+
+        Rectangle::new(Point::zero(), Size::new(WIDTH, HEIGHT))
+            .into_styled(
+                PrimitiveStyleBuilder::new()
+                    .stroke_color(color)
+                    .stroke_width(MARGIN / 2)
+                    .stroke_alignment(StrokeAlignment::Inside)
+                    .build(),
+            )
+            .draw(self)
+            .expect("Failed to draw frame in framebuffer");
+    }
+
+    fn buffer_ptr(&self) -> *mut u32 {
+        // Must be accessed via the uncached segment to avoid caching glitches
+
+        (n64_specs::map::Segment::KSEG1 as u32 | self.buffer.as_ptr() as u32) as *mut u32
+    }
+}
+
+impl OriginDimensions for Framebuffer {
+    fn size(&self) -> Size {
+        Size::new(WIDTH, HEIGHT)
+    }
+}
+
+impl DrawTarget for Framebuffer {
+    type Color = Rgb888;
+    type Error = core::convert::Infallible;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        let buffer_uncached = self.buffer_ptr();
+
+        for Pixel(coord, color) in pixels.into_iter() {
+            if let Ok((x @ 0..=WIDTH, y @ 0..=HEIGHT)) = coord.try_into() {
+                let offset: u32 = x as u32 + y as u32 * WIDTH;
+
+                unsafe {
+                    buffer_uncached.add(offset as usize).write_volatile(
+                        RGBA8888::from_rgba(color.r(), color.g(), color.b(), 0xFF).raw_value(),
+                    );
+                }
+            }
+        }
+
+        Ok(())
     }
 }

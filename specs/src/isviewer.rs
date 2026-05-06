@@ -1,0 +1,4 @@
+pub const CONTROL_ADDRESS: u32 = 0x13FF_0014;
+
+pub const BUFFER_START: u32 = 0x13FF_0020;
+pub const BUFFER_END: u32 = 0x13FF_0220;

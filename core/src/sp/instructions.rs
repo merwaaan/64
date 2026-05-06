@@ -8,12 +8,12 @@ use std::{
 };
 
 use arbitrary_int::prelude::*;
+use n64_specs as specs;
 
 use crate::{
     blocks::write_block,
     dp::{Dp, DpLocation},
     inst,
-    mi::Interrupt,
     sp::{self, Register, Sp, SpRegsLocation, opcode::Opcode},
     system::System,
 };
@@ -473,7 +473,7 @@ fn break_execute(s: &mut System, _op: Opcode) -> InstructionResult {
     s.sp.cregs[Register::Status as usize] |= sp::STATUS_BROKE | sp::STATUS_HALTED;
 
     if s.sp.interrupt_on_break() {
-        s.mi.set_pending_interrupt(Interrupt::Sp, &mut s.cop0);
+        s.mi.set_pending_interrupt(specs::interrupt::Interrupt::Sp, &mut s.cop0);
     }
 
     None
@@ -952,8 +952,6 @@ fn swc2_execute(_s: &mut System, _op: Opcode) -> InstructionResult {
     // TODO
 
     unimplemented!("SWC2");
-
-    None
 }
 
 fn swc2_disassemble(_s: &System, op: Opcode) -> String {

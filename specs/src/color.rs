@@ -1,6 +1,7 @@
 use arbitrary_int::prelude::*;
 use bitbybit::bitfield;
 
+/// 32-bit color format
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct RGBA8888 {
     #[bits(24..=31, rw)]
@@ -24,6 +25,7 @@ impl RGBA8888 {
     }
 }
 
+/// 16-bit color format
 #[bitfield(u16, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct RGBA5551 {
     #[bits(11..=15, rw)]

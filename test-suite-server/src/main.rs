@@ -1,185 +1,113 @@
+mod build;
+mod record;
+
 use std::{
-    fs::{self, File},
-    io::{Read, Write},
-    time::Duration,
+    fs,
+    path::{Path, PathBuf},
+    process::ExitCode,
 };
 
-use clap::Parser;
-use test_suite_common::{Message, State, TestResult};
-use winnow::{
-    Parser as WinnowParser, Partial,
-    binary::{be_u8, be_u24, be_u32},
-    error::ErrMode,
-    prelude::*,
-    token::{literal, take},
-};
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+
+#[derive(Clone, Debug, strum::Display, clap::ValueEnum)]
+pub enum Mode {
+    /// The ROM runs its test and sends back results.
+    Record,
+    /// The ROM runs its test and compares its own results to embedded results recorded on hardware.
+    Compare,
+}
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "test_suite_server",
-    about = "SC64 serial test message listener"
+    name = "test_suite_server", // TODO
+    about = "SC64 serial test message listener"// TODO
 )]
 struct Args {
-    /// Serial port
-    #[arg(value_name = "PORT", default_value = "COM3")]
-    port: String,
+    #[command(subcommand)]
+    command: Command,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Builds the test ROMs in either record or compare mode.
+    /// Compare mode requires the test data to have been recorded beforehand.
+    Build {
+        #[arg(value_enum)]
+        mode: Mode,
+
+        /// Specific test name.
+        /// Builds all the available tests if not specified.
+        test_name: Option<String>,
+    },
+    /// Records the test results by executing the test ROMs
+    Record {
+        /// Specific test name.
+        /// Records all the available tests if not specified.
+        test_name: Option<String>,
+        // TODO repetitions to validate determinism?
+        // TODO run recorded on the same hardware to validate determinism?
+    },
+    /// Compares the test results by executing the compare-mode ROMs
+    Compare {
+        /// Specific test name.
+        /// Records all the available tests if not specified.
+        test_name: Option<String>,
+    },
+    /// Builds the record-mode ROMs, executes them to collect results and builds the compare-mode ROMs.
+    All {
+        /// Specific test name.
+        /// Builds all the available tests if not specified.
+        test_name: Option<String>,
+    },
+    /// Clears any previously generated files.
+    Clear,
+}
+
+fn main() -> ExitCode {
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Debug)
+        .format_target(false)
+        .format_timestamp(None)
+        .init();
+
     let args = Args::parse();
 
-    listen(args.port)
-}
+    let result = match args.command {
+        Command::Build { mode, test_name } => build::run(&mode, &test_name),
 
-/// Listens to the selected port and processes the incoming messages.
-fn listen(port_name: String) -> Result<(), Box<dyn std::error::Error>> {
-    let mut port = serialport::new(&port_name, 115_200)
-        .timeout(Duration::from_millis(500))
-        .data_bits(serialport::DataBits::Eight)
-        .flow_control(serialport::FlowControl::None)
-        .parity(serialport::Parity::None)
-        .stop_bits(serialport::StopBits::One)
-        .open()?;
+        Command::Record { test_name } => record::run(&test_name),
 
-    println!("Opened {}, listening...", port_name);
+        Command::Compare { test_name } => todo!(),
 
-    let mut port_buffer = [0u8; 512];
-    let mut acc_buffer = Vec::new();
+        Command::All { test_name } => {
+            // TODO
+            //clear_package_dir()?;
+            //build::run(&Mode::Record, &test_name)?;
+            //record::run(&test_name)?;
+            //compare::run(&Mode::Compare, &test_name)
+            todo!()
+        }
 
-    loop {
-        match port.read(&mut port_buffer) {
-            Ok(0) => {
-                // timeout or EOF depending on OS
-            }
-            Ok(n) => {
-                //println!("read: {:0X?}", &port_buffer[..n]);
+        Command::Clear => clear_package_dir(),
 
-                acc_buffer.extend_from_slice(&port_buffer[..n]);
+        _ => todo!(),
+    };
 
-                println!("acc_buffer: {:0X?}", acc_buffer.len());
-
-                let messages = parse_messages(&mut acc_buffer);
-
-                for message in messages {
-                    match message {
-                        Message::Hello => {
-                            println!("Hello!");
-                        }
-                        Message::TestResult(result) => {
-                            println!("TestResult: {:0X?}", result);
-
-                            if let Err(e) = save_test_result(&result) {
-                                eprintln!("failed to save test result: {e}");
-                            }
-                        }
-                        Message::Panic => {
-                            eprintln!("Panic!");
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::TimedOut {
-                    // Normal with short timeout if no data
-                } else {
-                    return Err(e.into());
-                }
-            }
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            log::error!("{err:#}");
+            ExitCode::FAILURE
         }
     }
 }
 
-/// Processes possibly-partial data and returns all the fully received messages.
-fn parse_messages(buffer: &mut Vec<u8>) -> Vec<Message> {
-    let mut messages = Vec::new();
-
-    loop {
-        if buffer.is_empty() {
-            break;
-        }
-
-        let mut cursor = Partial::new(buffer.as_slice());
-
-        match parse_message(&mut cursor) {
-            Ok(message) => {
-                messages.push(message);
-
-                let consumed = buffer.len() - cursor.len();
-                buffer.drain(..consumed);
-            }
-            Err(ErrMode::Incomplete(_)) => break,
-            Err(e) => {
-                panic!("Error parsing packet: {:?}", e);
-            }
-        }
-    }
-
-    messages
+pub fn package_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../_test_suite_output")
 }
 
-/// Parses possibly-partial data and returns the first fully received message.
-/// https://github.com/Polprzewodnikowy/SummerCart64/blob/main/docs/03_usb_interface.md#sc64---pc-packets
-fn parse_message<'s>(input: &mut Partial<&'s [u8]>) -> ModalResult<Message> {
-    // Packet identifier
-    literal("PKT").parse_next(input)?;
-
-    // Packet type = data
-    literal("U").parse_next(input)?;
-
-    let _packet_data_len = be_u32.parse_next(input)?;
-
-    let _data_type = be_u8.parse_next(input)?; // TODO literal?
-
-    let data_len: u32 = be_u24.parse_next(input)?;
-
-    let message_data = take(data_len).parse_next(input)?;
-
-    let message: Message =
-        postcard::from_bytes(&message_data).expect("failed to deserialize message");
-
-    Ok(message)
-}
-
-/// Saves test results.
-fn save_test_result(result: &TestResult) -> Result<(), Box<dyn std::error::Error>> {
-    save_test_result_to_json(result)?;
-    save_test_result_to_bin(result)?;
-
-    Ok(())
-}
-
-const OUTPUT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../_test_suite_output");
-
-/// Saves test results as JSON.
-fn save_test_result_to_json(result: &TestResult) -> Result<(), Box<dyn std::error::Error>> {
-    fs::create_dir_all(OUTPUT_DIR)?;
-
-    let path = format!("{}/{}.json", OUTPUT_DIR, result.name);
-
-    let json = serde_json::to_string_pretty(result)?;
-
-    let mut f = File::create(&path)?;
-    f.write_all(json.as_bytes())?;
-    f.sync_all()?;
-
-    println!("Saved JSON test result to {}", path);
-
-    Ok(())
-}
-
-/// Saves test results as binary data.
-fn save_test_result_to_bin(result: &TestResult) -> Result<(), Box<dyn std::error::Error>> {
-    fs::create_dir_all(OUTPUT_DIR)?;
-
-    let path = format!("{}/{}.bin", OUTPUT_DIR, result.name);
-
-    let bytes = postcard::to_allocvec(result)?;
-
-    let mut f = File::create(&path)?;
-    f.write_all(&bytes)?;
-    f.sync_all()?;
-
-    println!("Saved binary test result to {}", path);
-
+fn clear_package_dir() -> Result<()> {
+    fs::remove_dir_all(package_dir())?;
     Ok(())
 }
