@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use anyhow::{Result, anyhow};
 use embedded_graphics::{
     mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::Rgb888,
@@ -101,7 +102,7 @@ impl Framebuffer {
         }
     }
 
-    pub fn print(&mut self, text: &str, color: Option<RGBA8888>) {
+    pub fn print(&mut self, text: &str, color: Option<RGBA8888>) -> Result<()> {
         let text_color = if let Some(color) = color {
             Rgb888::new(color.red(), color.green(), color.blue())
         } else {
@@ -122,12 +123,14 @@ impl Framebuffer {
         let text_box = TextBox::with_textbox_style(text, bounds, text_style, textbox_style);
         text_box
             .draw(self)
-            .expect("Failed to print text in framebuffer");
+            .map_err(|e| anyhow!("failed to print text in framebuffer: {e}"))?;
 
         self.text_cursor_y += text_box.bounding_box().size.height as u32;
+
+        Ok(())
     }
 
-    pub fn frame(&mut self, success: bool) {
+    pub fn frame(&mut self, success: bool) -> Result<()> {
         let color = if success { SUCCESS } else { ERROR };
         let color = Rgb888::new(color.red(), color.green(), color.blue());
 
@@ -140,7 +143,9 @@ impl Framebuffer {
                     .build(),
             )
             .draw(self)
-            .expect("Failed to draw frame in framebuffer");
+            .map_err(|e| anyhow!("failed to draw frame in framebuffer: {e}"))?;
+
+        Ok(())
     }
 
     fn buffer_ptr(&self) -> *mut u32 {

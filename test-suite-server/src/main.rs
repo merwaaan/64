@@ -7,7 +7,7 @@ use std::{
     process::ExitCode,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 #[derive(Clone, Debug, strum::Display, clap::ValueEnum)]
@@ -78,20 +78,11 @@ fn main() -> ExitCode {
 
         Command::Record { test_name } => record::run(&test_name),
 
-        Command::Compare { test_name } => todo!(),
+        Command::Compare { test_name: _ } => todo!("compare subcommand"),
 
-        Command::All { test_name } => {
-            // TODO
-            //clear_package_dir()?;
-            //build::run(&Mode::Record, &test_name)?;
-            //record::run(&test_name)?;
-            //compare::run(&Mode::Compare, &test_name)
-            todo!()
-        }
+        Command::All { test_name } => run_all(&test_name),
 
         Command::Clear => clear_package_dir(),
-
-        _ => todo!(),
     };
 
     match result {
@@ -103,11 +94,49 @@ fn main() -> ExitCode {
     }
 }
 
+fn run_all(test_name: &Option<String>) -> Result<()> {
+    clear_package_dir().context("failed to clear package directory")?;
+    build::run(&Mode::Record, test_name).context("failed to build record-mode ROMs")?;
+    record::run(test_name).context("failed to record results on hardware")?;
+    build::run(&Mode::Compare, test_name).context("failed to build compare-mode ROMs")
+}
+
+pub fn list_tests() -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+
+    for entry in fs::read_dir(rom_bin_dir())? {
+        let path = entry?.path();
+
+        if path.extension().is_some_and(|ext| ext == "rs") {
+            paths.push(path);
+        }
+    }
+
+    Ok(paths)
+}
+
+pub fn rom_crate_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-suite-rom")
+}
+
+pub fn rom_bin_dir() -> PathBuf {
+    rom_crate_dir().join("src/bin")
+}
+
+pub fn rom_target_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/mips-nintendo64-none/release")
+}
+
 pub fn package_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../_test_suite_output")
 }
 
 fn clear_package_dir() -> Result<()> {
-    fs::remove_dir_all(package_dir())?;
+    log::info!("Clearing package directory...");
+
+    if package_dir().is_dir() {
+        fs::remove_dir_all(package_dir()).with_context(|| "failed to clear package directory")?;
+    }
+
     Ok(())
 }

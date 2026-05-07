@@ -1,29 +1,25 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{fs, path::Path, process::Command};
 
 use anyhow::{Result, anyhow, bail};
 
-use crate::{Mode, package_dir};
+use crate::{Mode, list_tests, package_dir, rom_bin_dir, rom_crate_dir, rom_target_dir};
 
 pub fn run(mode: &Mode, test_name: &Option<String>) -> Result<()> {
+    log::info!("Building tests in {mode:?} mode...");
+
     // Use the provided test or list all the available tests
 
-    let mut test_paths = Vec::new();
-
-    if let Some(test_name) = test_name {
+    let test_paths = if let Some(test_name) = test_name {
         let path = rom_bin_dir().join(format!("{test_name}.rs"));
 
         if !path.is_file() {
-            bail!("no test source at {}", path.display());
+            bail!("no test source for {test_name}");
         }
 
-        test_paths.push(path);
+        vec![path]
     } else {
-        test_paths.extend(list_tests()?);
-    }
+        list_tests()?
+    };
 
     // Build each test
 
@@ -34,51 +30,13 @@ pub fn run(mode: &Mode, test_name: &Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn rom_crate_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-suite-rom")
-}
-
-fn rom_bin_dir() -> PathBuf {
-    rom_crate_dir().join("src/bin")
-}
-
-fn rom_target_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/mips-nintendo64-none/release")
-}
-
-fn list_tests() -> Result<Vec<PathBuf>> {
-    log::info!("Listing all tests...");
-
-    let bin_dir = rom_bin_dir();
-
-    let mut paths = Vec::new();
-
-    for entry in fs::read_dir(&bin_dir)? {
-        let path = entry?.path();
-
-        if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-            paths.push(path);
-        }
-    }
-
-    paths.sort_by_key(|p| p.to_string_lossy().into_owned()); // TODO needed?
-
-    log::info!("Found {} tests:", paths.len());
-
-    for path in &paths {
-        log::info!("  - {}", path.display());
-    }
-
-    Ok(paths)
-}
-
 fn build_test(mode: &Mode, test_path: &Path) -> Result<()> {
     let test_name = test_path
         .file_stem()
         .and_then(|s| s.to_str())
         .ok_or_else(|| anyhow!("test path has no file name: {}", test_path.display()))?;
 
-    log::info!("Building test \"{test_name}\"...");
+    log::info!("Building test \"{test_name}\" in {mode:?} mode...");
 
     // Compare mode: check that results have been recorded beforehand
 

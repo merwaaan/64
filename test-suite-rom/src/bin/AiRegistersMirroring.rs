@@ -22,7 +22,7 @@ test_suite_rom::define_test! {
 
             // TODO use specs
 
-            for address in (n64_specs::ai::START..n64_specs::ai::START + 0x00_1000).step_by(4) {
+            for address in (specs::ai::START..specs::ai::START + 0x00_1000).step_by(4) {
                 result.push_memory(address);
             }
         }

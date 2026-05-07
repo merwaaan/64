@@ -2,12 +2,12 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    thread,
     time::Duration,
 };
 
 use anyhow::{Context, Result, bail};
 use duct::cmd;
+use similar::{ChangeTag, TextDiff};
 use test_suite_common::{Message, TestResult};
 use winnow::{
     Parser as WinnowParser, Partial,
@@ -17,24 +17,36 @@ use winnow::{
     token::{literal, take},
 };
 
-use crate::package_dir;
+use crate::{list_tests, package_dir};
 
 pub fn run(test_name: &Option<String>) -> Result<()> {
     // Use the provided test or list all the available tests
 
-    let mut test_paths = Vec::new();
-
-    if let Some(test_name) = test_name {
+    let test_paths = if let Some(test_name) = test_name {
         let path = package_dir().join(format!("{test_name}_record.z64"));
 
         if !path.is_file() {
             bail!("no record-mode ROM at {}", path.display());
         }
 
-        test_paths.push(path);
+        vec![path]
     } else {
-        test_paths.extend(list_record_roms()?);
-    }
+        let mut paths = Vec::new();
+
+        for test_path in list_tests()? {
+            let test_name = test_path.file_stem().and_then(|s| s.to_str()).unwrap();
+
+            let path = package_dir().join(format!("{}_record.z64", test_name));
+
+            if path.is_file() {
+                paths.push(path);
+            } else {
+                log::warn!("no record-mode ROM for {}", test_name);
+            }
+        }
+
+        paths
+    };
 
     // Record the test results for each ROM
 
@@ -45,51 +57,69 @@ pub fn run(test_name: &Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn list_record_roms() -> Result<Vec<PathBuf>> {
-    log::info!("Listing all record-mode ROMs...");
-
-    let mut paths = Vec::new();
-
-    for entry in fs::read_dir(&package_dir())? {
-        let path = entry?.path();
-
-        if path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|name| name.ends_with("_record.z64"))
-        {
-            paths.push(path);
-        }
-    }
-
-    paths.sort_by_key(|p| p.to_string_lossy().into_owned()); // TODO needed?
-
-    log::info!("Found {} record-mode ROMs:", paths.len());
-
-    for path in &paths {
-        log::info!("  - {}", path.display());
-    }
-
-    Ok(paths)
-}
-
 fn record_test(path: &PathBuf) -> Result<()> {
-    log::info!("Recording test \"{}\"...", path.display());
+    log::info!("Recording {}...", path.display());
 
     // Upload the ROM to the SC64
 
     upload_rom_to_sc64(path).with_context(|| "failed to upload ROM to SC64")?;
 
-    // Listen for the test result
+    log::warn!(
+        "Reboot the console manually to start the test (automatic reboot not supported yet!)"
+    );
 
-    let handle = thread::spawn(listen_for_test_result);
+    // Wait for the result to be sent back
 
-    match handle.join() {
-        Ok(result) => result,
-        Err(_) => bail!("listener thread panicked"),
+    let result = listen_for_test_result()?;
+
+    // If requested, repeat the recording to validate determinism
+
+    let repetitions = None; // Some(1); // TODO to arg
+
+    if let Some(repetitions) = repetitions {
+        check_determinism(&result, repetitions)?;
     }
+
+    // Save the test result
+
+    save_test_result(&result).with_context(|| "failed to save test result")
 }
 
+fn check_determinism(result: &TestResult, repetitions: usize) -> Result<()> {
+    log::info!(
+        "Checking recording determinism for {} repetitions...",
+        repetitions
+    );
+
+    let result_text = serde_json::to_string_pretty(&result)?;
+
+    for i in 0..repetitions {
+        log::info!("Recording repetition {}/{}...", i + 1, repetitions);
+
+        let repeat = listen_for_test_result()?;
+
+        let repeat_text = serde_json::to_string_pretty(&repeat)?;
+
+        let diff = TextDiff::from_lines(&result_text, &repeat_text);
+
+        if diff.ratio() < 1.0 {
+            log::error!("Received different test result");
+
+            for change in diff
+                .iter_all_changes()
+                .filter(|c| c.tag() != ChangeTag::Equal)
+            {
+                log::info!("{}{}", change.tag(), change);
+            }
+
+            bail!("recording is not deterministic");
+        } else {
+            log::info!("Received the same test result");
+        }
+    }
+
+    Ok(())
+}
 fn sc64deployer_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../sc64deployer.exe")
 }
@@ -116,7 +146,7 @@ pub fn upload_rom_to_sc64(path: &PathBuf) -> Result<()> {
 }
 
 /// Listens on the serial port until a `TestResult` is received and saved.
-fn listen_for_test_result() -> Result<()> {
+fn listen_for_test_result() -> Result<TestResult> {
     const SERIAL_PORT: &str = "COM3";
 
     let mut port = serialport::new(SERIAL_PORT, 115_200)
@@ -128,7 +158,7 @@ fn listen_for_test_result() -> Result<()> {
         .open()
         .with_context(|| format!("failed to open serial port {SERIAL_PORT}"))?;
 
-    log::info!("Listening on {SERIAL_PORT}...");
+    log::info!("Listening for test result on {SERIAL_PORT}...");
 
     let mut port_buffer = [0u8; 512];
     let mut acc_buffer = Vec::new();
@@ -139,28 +169,25 @@ fn listen_for_test_result() -> Result<()> {
                 // timeout or EOF depending on OS
             }
             Ok(n) => {
-                log::debug!("Received {} bytes: {:02X?}", n, &port_buffer[..n]);
+                //log::debug!("Received {} bytes: {:02X?}", n, &port_buffer[..n]);
 
                 acc_buffer.extend_from_slice(&port_buffer[..n]);
 
                 let messages = parse_messages(&mut acc_buffer);
 
                 for message in messages {
+                    log::debug!("Received: {:0X?}", message);
+
                     match message {
-                        Message::Hello => {
-                            log::info!("Hello!");
-                        }
                         Message::TestResult(result) => {
-                            log::info!("TestResult: {:0X?}", result);
+                            log::info!("Received test result");
 
-                            save_test_result(&result)
-                                .with_context(|| "failed to save test result")?;
-
-                            return Ok(());
+                            return Ok(result);
                         }
                         Message::Panic => {
-                            bail!("ROM reported panic over serial");
+                            bail!("ROM panicked");
                         }
+                        _ => {}
                     }
                 }
             }
@@ -229,9 +256,7 @@ fn parse_partial_message<'s>(input: &mut Partial<&'s [u8]>) -> ModalResult<Messa
 /// Saves test results.
 fn save_test_result(result: &TestResult) -> Result<()> {
     save_json_test_result(result).with_context(|| "failed to save JSON test result")?;
-    save_binary_test_result(result).with_context(|| "failed to save binary test result")?;
-
-    Ok(())
+    save_binary_test_result(result).with_context(|| "failed to save binary test result")
 }
 
 /// Saves test results as JSON.

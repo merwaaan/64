@@ -20,6 +20,8 @@ macro_rules! define_test {
     ($test:ident { $($body:tt)* }) => {
         extern crate alloc;
 
+        use alloc::{format, string::*, vec::*, vec};
+        use anyhow::{anyhow, Result};
         use n64_specs as specs;
         use test_suite_common::*;
         use test_suite_rom::*;
@@ -32,8 +34,10 @@ macro_rules! define_test {
 
         #[panic_handler]
         fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
-            framebuffer().print(&alloc::format!("{}", info), Some($crate::framebuffer::ERROR));
-            framebuffer().frame(false);
+            framebuffer().print(&alloc::format!("{}", info), Some($crate::framebuffer::ERROR)).ok();
+            framebuffer().frame(false).ok();
+
+            $crate::sc64::Sc64::send(Message::Panic).ok();
 
             $crate::sc64::Sc64::wait_for_reboot();
         }
@@ -58,53 +62,53 @@ macro_rules! define_test {
 
             // Start the main loop
 
-            main_loop::<$test>()
+            match main_loop::<$test>() {
+                Ok(()) => $crate::sc64::Sc64::wait_for_reboot(),
+                Err(e) => panic!("{e:#}"),
+            }
         }
 
-        fn main_loop<T: Test>() -> ! {
+        fn main_loop<T: Test>() -> Result<()> {
             let (mode, verb) = if cfg!(feature = "record") {
                 ("record", "Recording")
             } else {
                 ("compare", "Comparing")
             };
 
-            framebuffer().print(&alloc::format!("{} (mode: {})\n", T::name(), mode), None);
+            framebuffer().print(&alloc::format!("{} (mode: {})\n", T::name(), mode), None)?;
 
             // Run the test
 
-            framebuffer().print(&alloc::format!("{} {} test case{}...", verb, T::cases().len(), if T::cases().len() == 1 { "" } else { "s" }), None);
+            framebuffer().print(&alloc::format!("{} {} test case{}...", verb, T::cases().len(), if T::cases().len() == 1 { "" } else { "s" }), None)?;
 
             let result = T::run();
 
             // Record or compare the results
 
             #[cfg(feature = "record")]
-            record(result);
+            record(result)?;
 
             #[cfg(feature = "compare")]
-            compare(result);
+            compare(result)?;
 
-            // We're done, wait for the SC64 to reboot
-
-            framebuffer().print("Done", None);
-            framebuffer().frame(true);
-
-            $crate::sc64::Sc64::wait_for_reboot();
+            Ok(())
         }
 
         /// Record mode: sends the test results to the server.
         #[cfg(feature = "record")]
-        fn record(result: TestResult) {
-            framebuffer().print("Sending results to server...", None);
+        fn record(result: TestResult) -> Result<()> {
+            framebuffer().print("Sending results over USB...", None)?;
 
-            $crate::sc64::Sc64::configure();
+            $crate::sc64::Sc64::configure()?;
             $crate::sc64::Sc64::send(Message::TestResult(result));
+
+            framebuffer().print("\nDone!\n", Some($crate::framebuffer::SUCCESS))?;
+            framebuffer().frame(true)
         }
 
         /// Compare mode: compares the test results with the embedded results recorded on hardware.
         #[cfg(feature = "compare")]
-        fn compare(result: TestResult) {
-
+        fn compare(result: TestResult) -> Result<()> {
             let reference_result_data = include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../_test_suite_output/",
@@ -113,15 +117,26 @@ macro_rules! define_test {
             ));
 
             let reference_result: TestResult = postcard::from_bytes(reference_result_data)
-                .expect("failed to deserialize reference result");
+                .map_err(|e| anyhow!("failed to deserialize embedded result: {e}"))?;
 
             let success = result == reference_result;
 
-            framebuffer().fill(if success { $crate::framebuffer::SUCCESS } else { $crate::framebuffer::ERROR });
+            if success {
+                framebuffer().print("\nSuccess!\n", Some($crate::framebuffer::SUCCESS))?;
+            } else {
+                framebuffer().print("\nFailure!\n", Some($crate::framebuffer::WARNING))?;
+
+                if let Some(diff) = result.first_diff(&reference_result) {
+                    framebuffer().print(&diff, Some($crate::framebuffer::ERROR))?;
+                }
+            }
+
+            framebuffer().frame(success)
         }
     };
 }
 
+// TODO mvoe to io helpers
 pub fn reg_mut_ptr(offset: u32) -> *mut u32 {
     (n64_specs::map::Segment::KSEG1 as u32 | offset) as *mut u32
 }

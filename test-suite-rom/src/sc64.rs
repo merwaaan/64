@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow, bail};
 use test_suite_common::Message;
 
 const SCR: *mut u32 = 0xBFFF_0000 as *mut u32;
@@ -6,10 +7,6 @@ const SCR_CMD_ERROR_BIT: u32 = 1 << 30;
 
 const DATA0: *mut u32 = 0xBFFF_0004 as *mut u32;
 const DATA1: *mut u32 = 0xBFFF_0008 as *mut u32;
-
-const CMD_CONFIG_SET: u32 = 'C' as u32;
-const CMD_CONFIG_SET_ROM_WRITE_ENABLE: u32 = 1;
-const CMD_USB_WRITE: u32 = 'M' as u32;
 
 const KEY: *mut u32 = 0xBFFF_0010 as *mut u32;
 
@@ -28,51 +25,80 @@ pub struct Sc64;
 
 impl Sc64 {
     /// Configures the SC64 before using it.
-    pub fn configure() {
+    pub fn configure() -> Result<()> {
         unsafe {
             // Unlock the SC registers
 
-            KEY.write_volatile(0x00000000);
+            KEY.write_volatile(0x00000000); // reset the sequencer
             Self::pi_wait();
             KEY.write_volatile(0x5F554E4C); // _UNL
             Self::pi_wait();
             KEY.write_volatile(0x4F434B5F); // OCK_
             Self::pi_wait();
 
-            // Verify that the unlock succeeded by reading the IDENTIFIER whichshould be "SCv2" (0x53437632)
+            // Verify that the unlock succeeded by reading the IDENTIFIER which should be "SCv2" (0x53437632).
+            // If still locked, we'll get 0x000C_000C (open bus).
 
             let id = ID.read_volatile();
 
             if id != 0x53437632 {
-                panic!("SC64 unlock failed, ID={:08X}", id);
+                bail!("SC64 unlock failed, ID={:08X}", id);
             }
 
             // Enable writes to the cart
 
-            DATA0.write_volatile(CMD_CONFIG_SET_ROM_WRITE_ENABLE);
-            Self::pi_wait();
-            DATA1.write_volatile(1); // enabled
-            Self::pi_wait();
-            SCR.write_volatile(CMD_CONFIG_SET);
-            Self::pi_wait();
-            Self::wait_for_command();
-
-            // Enable AUX IRQ to receive halt/reboot events
-
-            //AUX_IRQ.write_volatile(AUX_IRQ_ENABLE_BIT);
+            Self::run_command(Command::ConfigSet {
+                config: Config::RomWriteEnable,
+            })
         }
     }
 
+    fn run_command(command: Command) -> Result<()> {
+        unsafe {
+            // Send the command
+
+            let (data0, data1) = command.args();
+
+            DATA0.write_volatile(data0);
+            Self::pi_wait();
+
+            DATA1.write_volatile(data1);
+            Self::pi_wait();
+
+            SCR.write_volatile(command.id());
+            Self::pi_wait();
+
+            // Wait until the command is complete
+
+            let mut timeout = 0u32;
+
+            Self::pi_wait();
+
+            while (SCR.read_volatile() & SCR_CMD_BUSY_BIT) != 0 {
+                timeout = timeout.wrapping_add(1);
+
+                if timeout == 0xFFFF_FFFF {
+                    bail!("SC64 command {:?} timed out", command);
+                }
+            }
+
+            if (SCR.read_volatile() & SCR_CMD_ERROR_BIT) != 0 {
+                bail!("SC64 command {:?} failed", command);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Sends a message over USB.
-    pub fn send(message: Message) {
+    pub fn send(message: Message) -> Result<()> {
         // Serialize the message
 
         // TODO to_slice to save mem?
-        let mut buffer = postcard::to_allocvec(&message).unwrap();
+        let mut buffer = postcard::to_allocvec(&message)
+            .map_err(|e| anyhow!("failed to serialize message: {e}"))?;
 
-        let data_length = buffer.len() as u32;
-
-        // Pad the buffer to be aligned to 4-bytes
+        // Pad the buffer to be aligned to 4-bytes or we'll get errors
 
         buffer.resize(buffer.len().next_multiple_of(4), 0);
 
@@ -88,38 +114,16 @@ impl Sc64 {
                 ]);
 
                 CART_STAGING.add(i).write_volatile(word);
-            }
-
-            // Send the data
-
-            DATA0.write_volatile(CART_STAGING_PHYSICAL as u32);
-            Self::pi_wait();
-            DATA1.write_volatile((0x02 << 24) | data_length);
-            Self::pi_wait();
-            SCR.write_volatile(CMD_USB_WRITE);
-            Self::pi_wait();
-
-            Self::wait_for_command();
-        }
-    }
-
-    /// Waits until a command is complete.
-    fn wait_for_command() {
-        unsafe {
-            let mut t = 0u32;
-
-            while (SCR.read_volatile() & SCR_CMD_BUSY_BIT) != 0 {
-                t = t.wrapping_add(1);
-
-                if t == 0xFFFF_FFFF {
-                    panic!("SC64 command timed out");
-                }
-            }
-
-            if (SCR.read_volatile() & SCR_CMD_ERROR_BIT) != 0 {
-                panic!("SC64 command failed");
+                Self::pi_wait();
             }
         }
+
+        // Send the data
+
+        Self::run_command(Command::UsbWrite {
+            address: CART_STAGING_PHYSICAL,
+            length: buffer.len() as u32,
+        })
     }
 
     /// Waits for the SC64 to receive a reboot request and jumps to the bootloader to start fresh.
@@ -179,4 +183,33 @@ impl Sc64 {
         const PI_STATUS: *mut u32 = 0xA460_0010 as *mut u32;
         unsafe { while PI_STATUS.read_volatile() & 0x3 != 0 {} }
     }
+}
+
+#[derive(Debug)]
+enum Command {
+    ConfigSet { config: Config },
+    UsbWrite { address: u32, length: u32 },
+}
+
+impl Command {
+    fn id(&self) -> u32 {
+        match self {
+            Command::ConfigSet { .. } => 'C' as u32,
+            Command::UsbWrite { .. } => 'M' as u32,
+        }
+    }
+
+    fn args(&self) -> (u32, u32) {
+        match self {
+            Command::ConfigSet { config } => match config {
+                Config::RomWriteEnable => (1, 1),
+            },
+            Command::UsbWrite { address, length } => (*address, (0x02 << 24) | length),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum Config {
+    RomWriteEnable,
 }

@@ -81,6 +81,6 @@ macro_rules! interrupts_reg {
 
 interrupts_reg!(PendingInterrupts);
 
-interrupts_reg!(EnabledInterrupts);
+interrupts_reg!(EnabledInterrupts); // TODO rename mask to be consistent with the doc?
 
 mapped_registers!(START, mode: Mode, version: Version, pending_interrupts: PendingInterrupts, enabled_interrupts: EnabledInterrupts);

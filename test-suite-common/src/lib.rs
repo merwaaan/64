@@ -1,7 +1,7 @@
 #![no_std]
 
 extern crate alloc;
-use alloc::{string::String, vec::Vec};
+use alloc::{format, string::String, vec::Vec};
 use serde::{Deserialize, Serialize};
 
 /// Result of a test
@@ -17,6 +17,59 @@ impl TestResult {
             name: String::from(name),
             cases: Vec::new(),
         }
+    }
+
+    /// Returns a description of the first difference with another test result.
+    pub fn first_diff(&self, expected: &TestResult) -> Option<String> {
+        if self.name != expected.name {
+            return Some(format!(
+                "different test name:\ncurrent = {}\nexpected = {}",
+                self.name, expected.name
+            ));
+        }
+
+        if self.cases.len() != expected.cases.len() {
+            return Some(format!(
+                "different case count:\ncurrent = {}\nexpected = {}",
+                self.cases.len(),
+                expected.cases.len()
+            ));
+        }
+
+        for (i, (own_case, expected_case)) in
+            self.cases.iter().zip(expected.cases.iter()).enumerate()
+        {
+            if own_case.name != expected_case.name {
+                return Some(format!(
+                    "different name for case #{i}:\ncurrent = {:?}\nexpected = {:?}",
+                    own_case.name, expected_case.name
+                ));
+            }
+
+            if own_case.states.len() != expected_case.states.len() {
+                return Some(format!(
+                    "different state count for case #{i}:\ncurrent = {}\nexpected = {}",
+                    own_case.states.len(),
+                    expected_case.states.len()
+                ));
+            }
+
+            for (j, (own_state, expected_state)) in own_case
+                .states
+                .iter()
+                .zip(expected_case.states.iter())
+                .enumerate()
+            {
+                if own_state != expected_state {
+                    return Some(format!(
+                        "different state for case #{i} state #{j}:\ncurrent = {:?}\nexpected = {:?}",
+                        own_state, expected_state
+                    ));
+                }
+            }
+        }
+
+        None
     }
 }
 
