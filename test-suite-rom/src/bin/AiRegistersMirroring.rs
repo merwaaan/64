@@ -1,11 +1,9 @@
 #![no_std]
 #![no_main]
 
-test_suite_rom::define_test! {
-    AiRegistersMirroring {
-        type Params = ();
-
-        fn run_case(_params: &Self::Params, result: &mut TestCaseResult) {
+test_suite_rom::run_test! {
+    TestNoParams AiRegistersMirroring {
+        fn run(result: &mut TestCaseResult) {
             // TODO write length/status
 
             //let mut regs = n64_specs::ai::Registers::default();

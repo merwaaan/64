@@ -15,7 +15,7 @@ pub const END: u32 = 0x0450_0000;
 pub const REGISTERS_MASK: u32 = 0x3F; // TODO check + rename
 
 #[bitenum(u2, exhaustive = true)]
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 pub enum ColorMode {
     // 32-bit color
     Rgba8888 = 0b11,
@@ -47,6 +47,10 @@ pub struct Control {
 
     #[bit(11, rw)]
     kill_writes: bool,
+
+    /// Unused bit, still writable according to hardwaretests
+    #[bit(10, rw)]
+    unused: bool,
 
     #[bits(8..=9, rw)]
     antialias_mode: AntiAliasingMode,

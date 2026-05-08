@@ -24,27 +24,56 @@ pub mod vi;
 /// TODO doc with test
 #[macro_export]
 macro_rules! mapped_registers {
-    ($base:expr, $($field:ident : $ty:ident),* $(,)?) => {
+    ($base:expr, $($reg_name:ident : $reg_type:ident),* $(,)?) => {
         #[repr(C)]
         #[derive(Default, Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
         pub struct Registers {
-            $(pub $field: $ty,)*
+            $(pub $reg_name: $reg_type,)*
         }
 
-        mapped_registers!(@each_impl $base, [], $($ty,)*);
+        mapped_registers!(@reg_impl $base, [], $($reg_type,)*);
+
+        #[derive(PartialEq, Debug, strum::Display, strum::EnumIter)]
+        pub enum Register {
+            $($reg_type,)*
+        }
+
+        impl Register {
+            pub const fn name(&self) -> &'static str {
+                match self {
+                    $(Register::$reg_type => stringify!($reg_name),)*
+                }
+            }
+            pub const fn index(&self) -> usize {
+                match self {
+                    $(Register::$reg_type => <$reg_type>::INDEX,)*
+                }
+            }
+            pub const fn offset(&self) -> u32 {
+                match self {
+                    $(Register::$reg_type => <$reg_type>::OFFSET,)*
+                }
+            }
+            pub const fn address(&self) -> u32 {
+                match self {
+                    $(Register::$reg_type => <$reg_type>::ADDRESS,)*
+                }
+            }
+        }
     };
 
-    (@each_impl $base:expr, [$($seen:tt)*], $head:ident, $($tail:ident,)*) => {
+    (@reg_impl $base:expr, [$($seen:tt)*], $head:ident, $($tail:ident,)*) => {
         impl $head {
+            pub const NAME: &'static str = stringify!($reg_name);
             pub const INDEX: usize = mapped_registers!(@reg_count; $($seen)*);
             pub const OFFSET: u32 = (Self::INDEX as u32) * 4;
             pub const ADDRESS: u32 = $base + Self::OFFSET;
         }
 
-        mapped_registers!(@each_impl $base, [$($seen)* x], $($tail,)*);
+        mapped_registers!(@reg_impl $base, [$($seen)* x], $($tail,)*);
     };
 
-    (@each_impl $base:expr, [$($seen:tt)*],) => {};
+    (@reg_impl $base:expr, [$($seen:tt)*],) => {};
 
     (@reg_count ;) => {
         0usize

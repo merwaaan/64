@@ -18,14 +18,18 @@ pub static mut FRAMEBUFFER: *mut crate::framebuffer::Framebuffer = core::ptr::nu
 
 /// Macro that defines a test implementing the `Test` trait and wires it to the entrypoint.
 #[macro_export]
-macro_rules! define_test {
-    ($test:ident { $($body:tt)* }) => {
+macro_rules! run_test {
+    ($test_type:ident $test_name:ident { $($body:tt)* }) => {
         extern crate alloc;
 
         use alloc::{format, string::*, vec::*, vec};
         use anyhow::{anyhow, Result};
         use n64_specs as specs;
-        use test_suite_common::*;
+        use test_suite_common::{
+            Message,
+            result::{TestResult, TestCaseResult},
+            test::{TestNoParams, TestWithParams}
+        };
         use test_suite_rom::*;
 
         fn framebuffer() -> &'static mut $crate::framebuffer::Framebuffer {
@@ -42,9 +46,9 @@ macro_rules! define_test {
             $crate::sc64::Sc64::wait_for_reboot();
         }
 
-        struct $test;
+        struct $test_name;
 
-        impl Test for $test {
+        impl $test_type for $test_name {
             $($body)*
         }
 
@@ -54,40 +58,36 @@ macro_rules! define_test {
 
             $crate::allocator::configure();
 
-            let x = $crate::allocator::used();
-
             // Setup the framebuffer
 
             let mut fb = alloc::boxed::Box::new($crate::framebuffer::Framebuffer::new());
 
             unsafe { FRAMEBUFFER = &raw mut *fb; }
 
-            framebuffer().print(&alloc::format!("Heap size: {} bytes", $crate::allocator::size()), None).unwrap();
-            framebuffer().print(&alloc::format!("Heap used: {} bytes", x), None).unwrap();
-            framebuffer().print(&alloc::format!("Heap used: {} bytes", $crate::allocator::used()), None).unwrap();
+            //framebuffer().print(&alloc::format!("Heap: {} / {} bytes", $crate::allocator::used(), $crate::allocator::size()), None).unwrap();
 
             // Start the main loop
 
-            match main_loop::<$test>() {
+            match main_loop() {
                 Ok(()) => $crate::sc64::Sc64::wait_for_reboot(),
                 Err(e) => panic!("{e:#}"),
             }
         }
 
-        fn main_loop<T: Test>() -> Result<()> {
+        fn main_loop() -> Result<()> {
             let (mode, verb) = if cfg!(feature = "record") {
                 ("record", "Recording")
             } else {
                 ("compare", "Comparing")
             };
 
-            framebuffer().print(&alloc::format!("{} (mode: {})\n", T::name(), mode), None)?;
+            framebuffer().print(&alloc::format!("{} (mode: {})\n", $test_name::name(), mode), None)?;
 
             // Run the test
 
-            framebuffer().print(&alloc::format!("{} {} test case{}...", verb, T::cases().len(), if T::cases().len() == 1 { "" } else { "s" }), None)?;
+            framebuffer().print("Running test...", None)?;
 
-            let result = T::run();
+            let result = $test_name::run_all();
 
             // Record or compare the results
 
@@ -106,7 +106,7 @@ macro_rules! define_test {
             framebuffer().print("Sending results over USB...", None)?;
 
             $crate::sc64::Sc64::configure()?;
-            $crate::sc64::Sc64::send(Message::TestResult(result));
+            $crate::sc64::Sc64::send(Message::TestResult(result))?;
 
             framebuffer().print("\nDone!\n", Some($crate::framebuffer::SUCCESS))?;
             framebuffer().frame(true)
@@ -118,7 +118,7 @@ macro_rules! define_test {
             let reference_result_data = include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../_test_suite_output/",
-                stringify!($test),
+                stringify!($test_name),
                 ".bin"
             ));
 

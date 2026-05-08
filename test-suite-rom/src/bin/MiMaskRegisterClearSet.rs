@@ -13,8 +13,8 @@ const CLEAR_ALL: u32 = 0x0000_0555;
 const SET_ALL: u32 = 0x0000_0AAA;
 const UNUSED_BITS: u32 = 0xFFFF_F000;
 
-test_suite_rom::define_test! {
-    MiMaskRegisterClearSet {
+test_suite_rom::run_test! {
+    TestWithParams MiMaskRegisterClearSet {
         type Params = u32;
 
         fn cases() -> Vec<Self::Params> {
@@ -52,11 +52,11 @@ test_suite_rom::define_test! {
             masks
         }
 
-        fn case_name(params: &Self::Params) -> Option<String> {
-            Some(format!("{:08X}", *params))
+        fn case_name(params: &Self::Params) -> String {
+            format!("{:08X}", *params)
         }
 
-        fn run_case(params: &Self::Params, result: &mut TestCaseResult) {
+        fn run(params: &Self::Params, result: &mut TestCaseResult) {
 
             let mask_reg = reg_mut_ptr(specs::mi::EnabledInterrupts::ADDRESS);
 

@@ -1,21 +1,21 @@
+//! Does nothing, just a dummy test to validate the recording mechanism
+
 #![no_std]
 #![no_main]
 
-// Does nothing, just a dummy test to validate the recording mechanism
-
-test_suite_rom::define_test! {
-    Dummy {
+test_suite_rom::run_test! {
+    TestWithParams Dummy {
         type Params = bool;
 
         fn cases() -> Vec<Self::Params> {
             vec![true, false]
         }
 
-        fn case_name(params: &Self::Params) -> Option<String> {
-            Some(format!("Dummy case: {}", params))
+        fn case_name(params: &Self::Params) -> String {
+            format!("Dummy case: {}", params)
         }
 
-        fn run_case(params: &Self::Params, result: &mut TestCaseResult) {
+        fn run(params: &Self::Params, result: &mut TestCaseResult) {
             result.push_comment(&format!("Dummy test result with {}", params));
             result.push_value(if *params { 1 } else { 0 });
             result.push_pc();

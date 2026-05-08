@@ -1,11 +1,9 @@
 #![no_std]
 #![no_main]
 
-test_suite_rom::define_test! {
-    AiLengthRegisterMasking {
-        type Params = ();
-
-        fn run_case(_params: &Self::Params, result: &mut TestCaseResult) {
+test_suite_rom::run_test! {
+    TestNoParams AiLengthRegisterMasking {
+        fn run(result: &mut TestCaseResult) {
             // Disable DMA
 
             let control_reg = reg_mut_ptr(specs::ai::Control::ADDRESS);

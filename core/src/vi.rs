@@ -117,7 +117,7 @@ impl Vi {
 
         let mut rgba = Vec::with_capacity(width * height * 4);
 
-        let color32 = s.vi.regs.control.color_mode().value() == 3;
+        let color32 = s.vi.regs.control.color_mode() == specs::vi::ColorMode::Rgba8888;
 
         if color32 {
             for y in 0..height {

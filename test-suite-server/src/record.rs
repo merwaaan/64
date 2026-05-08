@@ -8,7 +8,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use duct::cmd;
 use similar::{ChangeTag, TextDiff};
-use test_suite_common::{Message, TestResult};
+use test_suite_common::{Message, result::TestResult};
 use winnow::{
     Parser as WinnowParser, Partial,
     binary::{be_u8, be_u24, be_u32},
