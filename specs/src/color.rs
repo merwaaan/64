@@ -25,6 +25,24 @@ impl RGBA8888 {
     }
 }
 
+impl From<RGBA5551> for RGBA8888 {
+    fn from(rgba5551: RGBA5551) -> Self {
+        let r5 = ((rgba5551.raw_value() >> 11) & 0x1F) as u8;
+        let g5 = ((rgba5551.raw_value() >> 6) & 0x1F) as u8;
+        let b5 = ((rgba5551.raw_value() >> 1) & 0x1F) as u8;
+        let a1 = (rgba5551.raw_value() & 0x1) as u8;
+
+        // Replicate the upper bits into the lower bits
+
+        Self::from_rgba(
+            (r5 << 3) | (r5 >> 2),
+            (g5 << 3) | (g5 >> 2),
+            (b5 << 3) | (b5 >> 2),
+            a1 * 255,
+        )
+    }
+}
+
 /// 16-bit color format
 #[bitfield(u16, forbid_overlaps, instrospect, default = 0, debug)]
 pub struct RGBA5551 {
@@ -41,12 +59,15 @@ pub struct RGBA5551 {
     pub alpha: bool,
 }
 
-// impl From<RGBA8888> for RGBA5551 {
-//     fn from(rgba: RGBA8888) -> Self {
-//         Self::default()
-//             .with_red(rgba.red())
-//             .with_green(rgba.green())
-//             .with_blue(rgba.blue())
-//             .with_alpha(rgba.alpha())
-//     }
-// }
+impl RGBA5551 {
+    pub const fn from_rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
+        // Round to nearest
+
+        Self::new_with_raw_value(
+            (((r as u16 * 31 + 127) / 255) << 11)
+                | (((g as u16 * 31 + 127) / 255) << 6)
+                | (((b as u16 * 31 + 127) / 255) << 1)
+                | (a >= 128) as u16,
+        )
+    }
+}

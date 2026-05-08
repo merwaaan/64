@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use anyhow::{Result, anyhow};
+use arbitrary_int::*;
 use embedded_graphics::{
     mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::Rgb888,
@@ -10,23 +11,27 @@ use embedded_text::{
     TextBox,
     style::{HeightMode, TextBoxStyleBuilder},
 };
-use n64_specs::{color::RGBA8888, vi};
+use n64_specs::{
+    color::{RGBA5551, RGBA8888},
+    vi,
+};
 
 use crate::reg_mut_ptr;
 
 pub const WIDTH: u32 = 320;
 pub const HEIGHT: u32 = 240;
-pub const PIXELS: usize = WIDTH as usize * HEIGHT as usize;
+pub const PIXELS: usize = (WIDTH * HEIGHT) as usize;
 
 const MARGIN: u32 = 16;
 
-pub const WHITE: RGBA8888 = RGBA8888::from_rgba(0xFF, 0xFF, 0xFF, 0xFF);
-pub const SUCCESS: RGBA8888 = RGBA8888::from_rgba(0x4C, 0xAF, 0x50, 0xFF);
-pub const WARNING: RGBA8888 = RGBA8888::from_rgba(0xFF, 0x98, 0x00, 0xFF);
-pub const ERROR: RGBA8888 = RGBA8888::from_rgba(0xEF, 0x53, 0x50, 0xFF);
+pub const WHITE: RGBA5551 = RGBA5551::from_rgba(0xFF, 0xFF, 0xFF, 0xFF);
+pub const SUCCESS: RGBA5551 = RGBA5551::from_rgba(0x4C, 0xAF, 0x50, 0xFF);
+pub const WARNING: RGBA5551 = RGBA5551::from_rgba(0xFF, 0x98, 0x00, 0xFF);
+pub const ERROR: RGBA5551 = RGBA5551::from_rgba(0xEF, 0x53, 0x50, 0xFF);
 
 pub struct Framebuffer {
-    buffer: Vec<u32>,
+    // We use a 16-bit framebuffer to save memory
+    buffer: Vec<u16>,
     text_cursor_y: u32,
 }
 
@@ -35,11 +40,20 @@ impl Framebuffer {
         let buffer = alloc::vec![WHITE.raw_value(); PIXELS];
 
         // TODO use specific reg for each write instead of base + offset
+        // TODO does the IPL do that?
+
         let vi_reg_base = reg_mut_ptr(vi::START);
 
-        // TODO be explicit about values
         unsafe {
-            vi_reg_base.add(vi::Control::INDEX).write_volatile(12879);
+            vi_reg_base.add(vi::Control::INDEX).write_volatile(
+                vi::Control::default()
+                    .with_color_mode(vi::ColorMode::Rgba5551)
+                    .with_gamma_dither(true)
+                    .with_gamma(true)
+                    .with_antialias_mode(vi::AntiAliasingMode::Resample)
+                    .with_pixel_advance(u4::new(1))
+                    .raw_value(),
+            );
 
             vi_reg_base
                 .add(vi::Origin::INDEX)
@@ -51,39 +65,39 @@ impl Framebuffer {
 
             vi_reg_base
                 .add(vi::Burst::INDEX)
-                .write_volatile(0x03E5_2239);
+                .write_volatile(vi::BURST_NTSC);
 
             vi_reg_base
                 .add(vi::VerticalTotal::INDEX)
-                .write_volatile(0x0000_020D);
+                .write_volatile(vi::VERTICAL_TOTAL_NTSC_PROGRESSIVE);
 
             vi_reg_base
                 .add(vi::HorizontalTotal::INDEX)
-                .write_volatile(0x0000_0C15);
+                .write_volatile(vi::HORIZONTAL_TOTAL_NTSC);
 
             vi_reg_base
                 .add(vi::HorizontalTotalLeap::INDEX)
-                .write_volatile(0x0C15_0C15);
+                .write_volatile(vi::HORIZONTAL_TOTAL_LEAP_NTSC);
 
             vi_reg_base
                 .add(vi::HorizontalVideo::INDEX)
-                .write_volatile(0x006C_02EC);
+                .write_volatile(vi::HORIZONTAL_VIDEO_NTSC);
 
             vi_reg_base
                 .add(vi::VerticalVideo::INDEX)
-                .write_volatile(0x0025_01FF);
+                .write_volatile(vi::VERTICAL_VIDEO_NTSC);
 
             vi_reg_base
                 .add(vi::VerticalBurst::INDEX)
-                .write_volatile(0x000E_0204);
+                .write_volatile(vi::VERTICAL_BURST_NTSC);
 
             vi_reg_base
                 .add(vi::HorizontalScale::INDEX)
-                .write_volatile((0x100 * WIDTH) / 160);
+                .write_volatile(vi::horizontal_scale_from_width(WIDTH).raw_value());
 
             vi_reg_base
                 .add(vi::VerticalScale::INDEX)
-                .write_volatile((0x100 * HEIGHT) / 60);
+                .write_volatile(vi::vertical_scale_from_height(HEIGHT).raw_value());
         }
 
         Self {
@@ -92,7 +106,7 @@ impl Framebuffer {
         }
     }
 
-    pub fn fill(&mut self, color: RGBA8888) {
+    pub fn fill(&mut self, color: RGBA5551) {
         let buffer_uncached = self.buffer_ptr();
 
         unsafe {
@@ -102,9 +116,9 @@ impl Framebuffer {
         }
     }
 
-    pub fn print(&mut self, text: &str, color: Option<RGBA8888>) -> Result<()> {
+    pub fn print(&mut self, text: &str, color: Option<RGBA5551>) -> Result<()> {
         let text_color = if let Some(color) = color {
-            Rgb888::new(color.red(), color.green(), color.blue())
+            rgba5551_to_eg_rgb888(color)
         } else {
             Rgb888::BLACK
         };
@@ -132,7 +146,7 @@ impl Framebuffer {
 
     pub fn frame(&mut self, success: bool) -> Result<()> {
         let color = if success { SUCCESS } else { ERROR };
-        let color = Rgb888::new(color.red(), color.green(), color.blue());
+        let color = rgba5551_to_eg_rgb888(color);
 
         Rectangle::new(Point::zero(), Size::new(WIDTH, HEIGHT))
             .into_styled(
@@ -148,10 +162,10 @@ impl Framebuffer {
         Ok(())
     }
 
-    fn buffer_ptr(&self) -> *mut u32 {
+    fn buffer_ptr(&self) -> *mut u16 {
         // Must be accessed via the uncached segment to avoid caching glitches
 
-        (n64_specs::map::Segment::KSEG1 as u32 | self.buffer.as_ptr() as u32) as *mut u32
+        (n64_specs::map::Segment::KSEG1 as u32 | self.buffer.as_ptr() as u32) as *mut u16
     }
 }
 
@@ -177,7 +191,7 @@ impl DrawTarget for Framebuffer {
 
                 unsafe {
                     buffer_uncached.add(offset as usize).write_volatile(
-                        RGBA8888::from_rgba(color.r(), color.g(), color.b(), 0xFF).raw_value(),
+                        RGBA5551::from_rgba(color.r(), color.g(), color.b(), 0xFF).raw_value(),
                     );
                 }
             }
@@ -185,4 +199,10 @@ impl DrawTarget for Framebuffer {
 
         Ok(())
     }
+}
+
+fn rgba5551_to_eg_rgb888(rgba5551: RGBA5551) -> Rgb888 {
+    let rgb8888: RGBA8888 = rgba5551.into();
+
+    Rgb888::new(rgb8888.red(), rgb8888.green(), rgb8888.blue())
 }

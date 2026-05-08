@@ -10,6 +10,7 @@ default = ["record"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
+arbitrary-int = "2.1"
 embedded-graphics = "0.8.2"
 embedded-text = "0.7.3"
 linked_list_allocator = "0.10"

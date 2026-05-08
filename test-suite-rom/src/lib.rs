@@ -54,11 +54,17 @@ macro_rules! define_test {
 
             $crate::allocator::configure();
 
+            let x = $crate::allocator::used();
+
             // Setup the framebuffer
 
             let mut fb = alloc::boxed::Box::new($crate::framebuffer::Framebuffer::new());
 
             unsafe { FRAMEBUFFER = &raw mut *fb; }
+
+            framebuffer().print(&alloc::format!("Heap size: {} bytes", $crate::allocator::size()), None).unwrap();
+            framebuffer().print(&alloc::format!("Heap used: {} bytes", x), None).unwrap();
+            framebuffer().print(&alloc::format!("Heap used: {} bytes", $crate::allocator::used()), None).unwrap();
 
             // Start the main loop
 
@@ -76,9 +82,6 @@ macro_rules! define_test {
             };
 
             framebuffer().print(&alloc::format!("{} (mode: {})\n", T::name(), mode), None)?;
-
-            framebuffer().print(&alloc::format!("Heap size: {} bytes", $crate::allocator::size()), None)?;
-            framebuffer().print(&alloc::format!("Heap used: {} bytes", $crate::allocator::used()), None)?;
 
             // Run the test
 
