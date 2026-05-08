@@ -139,7 +139,7 @@ impl Framebuffer {
             .draw(self)
             .map_err(|e| anyhow!("failed to print text in framebuffer: {e}"))?;
 
-        self.text_cursor_y += text_box.bounding_box().size.height as u32;
+        self.text_cursor_y += text_box.bounding_box().size.height;
 
         Ok(())
     }
@@ -187,7 +187,7 @@ impl DrawTarget for Framebuffer {
 
         for Pixel(coord, color) in pixels.into_iter() {
             if let Ok((x @ 0..=WIDTH, y @ 0..=HEIGHT)) = coord.try_into() {
-                let offset: u32 = x as u32 + y as u32 * WIDTH;
+                let offset: u32 = x + y * WIDTH;
 
                 unsafe {
                     buffer_uncached.add(offset as usize).write_volatile(

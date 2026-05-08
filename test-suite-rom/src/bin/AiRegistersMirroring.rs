@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 
+// TODO DOC
+// TODO what if writing to empty slots?
+
 test_suite_rom::run_test! {
     TestNoParams AiRegistersMirroring {
         fn run(result: &mut TestCaseResult) {

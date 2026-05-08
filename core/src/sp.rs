@@ -1,25 +1,7 @@
-//! Reality Signal Processor
-//!
-//! This is a slimmed down version of the main MIPS processor:
-//! - Registers are strictly 32-bit
-//! - Cannot access RAM directly, transfers it to/from DMEM using DMA instead
-//! - The PC is 12-bit and wraps around IMEM
-//! - No exceptions or traps
-//! - Less arithmetic instructions (no mult/div, no 64-bit instructions like DADD/DSUB)
-//!
-//! TODO COP 0 = SP + DP registers
-//!
-//! TODO vector! = COP 2
-//!
-//! Resources:
-//! - Nintendo Ultra64 RSP Programmer’s Guide https://ultra64.ca/files/documentation/silicon-graphics/SGI_Nintendo_64_RSP_Programmers_Guide.pdf
-//! - N64brew / Reality Signal Processor https://n64brew.dev/wiki/Reality_Signal_Processor
-
 use std::simd::*;
 
 use arbitrary_int::prelude::*;
 use n64_specs as specs;
-use strum::{Display, EnumIter};
 
 use crate::{
     blocks::{read_block, write_block},
@@ -38,94 +20,9 @@ pub mod opcode;
 // TODO timing = 2/3 CPU
 // TODO increment clock regs
 
-const MEM_START: u32 = 0x0400_0000;
-const MEM_END: u32 = 0x0404_0000;
-const MEM_MASK: u32 = 0x1FFF;
+pub type SpMemLocation = Location<{ specs::rsp::MEMORY_START }, { specs::rsp::MEMORY_END }>;
 
-pub type SpMemLocation = Location<MEM_START, MEM_END>;
-
-const REG_START: u32 = MEM_END;
-const REG_END: u32 = 0x040C_0000;
-const REG_MASK: u32 = 0x1F;
-
-pub type SpRegsLocation = Location<REG_START, REG_END>;
-
-// RDP / display list opcodes
-// const G_SPNOOP: u8 = 0x00;
-// const G_MTX: u8 = 0x01;
-// const G_MOVEMEM: u8 = 0x03;
-// const G_VTX: u8 = 0x04;
-// const G_DL: u8 = 0x06;
-// const G_RDPHALF_CONT: u8 = 0xB2;
-// const G_RDPHALF_2: u8 = 0xB3;
-// const G_RDPHALF_1: u8 = 0xB4;
-// const G_CLEARGEOMETRYMODE: u8 = 0xB6;
-// const G_SETGEOMETRYMODE: u8 = 0xB7;
-// const G_ENDDL: u8 = 0xB8;
-// const G_SETOTHERMODE_L: u8 = 0xB9;
-// const G_SETOTHERMODE_H: u8 = 0xBA;
-// const G_TEXTURE: u8 = 0xBB;
-// const G_MOVEWORD: u8 = 0xBC;
-// const G_POPMTX: u8 = 0xBD;
-// const G_CULLDL: u8 = 0xBE;
-// const G_TRI1: u8 = 0xBF;
-// const G_NOOP: u8 = 0xC0;
-// const G_TEXRECT: u8 = 0xE4;
-// const G_TEXRECTFLIP: u8 = 0xE5;
-// const G_RDPLOADSYNC: u8 = 0xE6;
-// const G_RDPPIPESYNC: u8 = 0xE7;
-// const G_RDPTILESYNC: u8 = 0xE8;
-// const G_RDPFULLSYNC: u8 = 0xE9;
-// const G_SETKEYGB: u8 = 0xEA;
-// const G_SETKEYR: u8 = 0xEB;
-// const G_SETCONVERT: u8 = 0xEC;
-// const G_SETSCISSOR: u8 = 0xED;
-// const G_SETPRIMDEPTH: u8 = 0xEE;
-// const G_RDPSETOTHERMODE: u8 = 0xEF;
-// const G_LOADTLUT: u8 = 0xF0;
-// const G_SETTILESIZE: u8 = 0xF2;
-// const G_LOADBLOCK: u8 = 0xF3;
-// const G_LOADTILE: u8 = 0xF4;
-// const G_SETTILE: u8 = 0xF5;
-// const G_FILLRECT: u8 = 0xF6;
-// const G_SETFILLCOLOR: u8 = 0xF7;
-// const G_SETFOGCOLOR: u8 = 0xF8;
-// const G_SETBLENDCOLOR: u8 = 0xF9;
-// const G_SETPRIMCOLOR: u8 = 0xFA;
-// const G_SETENVCOLOR: u8 = 0xFB;
-// const G_SETCOMBINE: u8 = 0xFC;
-// const G_SETTIMG: u8 = 0xFD;
-// const G_SETZIMG: u8 = 0xFE;
-// const G_SETCIMG: u8 = 0xFF;
-
-#[derive(Debug, Display, Clone, Copy, EnumIter)]
-#[repr(u32)]
-pub enum Register {
-    DmaSpAddr,
-    DmaRamAddr,
-    DmaRdLen,
-    DmaWrLen,
-    Status,
-    DmaFull,
-    DmaBusy,
-    Semaphore,
-}
-
-// TODOrm
-const STATUS_HALTED: u32 = 1;
-const STATUS_BROKE: u32 = 1 << 1;
-const STATUS_DMA_BUSY: u32 = 1 << 2;
-const STATUS_DMA_FULL: u32 = 1 << 3;
-const STATUS_IO_BUSY: u32 = 1 << 4;
-const STATUS_SINGLE_STEP_MODE: u32 = 1 << 5;
-const STATUS_INTERRUPT_ON_BREAK: u32 = 1 << 6;
-// TODO others?
-
-#[derive(Debug, Clone, Copy)]
-enum DmaDirection {
-    RamToSp,
-    SpToRam,
-}
+pub type SpRegsLocation = Location<{ specs::rsp::REGISTERS_START }, { specs::rsp::REGISTERS_END }>;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Registers([u32; 32]);
@@ -143,12 +40,18 @@ impl Registers {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum DmaDirection {
+    RamToSp,
+    SpToRam,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct DmaSlot {
     direction: DmaDirection,
     ram_address: u32,
     sp_address: u32,
-    length: u32,
+    length: u32, // TODO just pass reg? instead of dir+length
 }
 
 #[derive(Clone)]
@@ -159,7 +62,7 @@ pub struct Sp {
     pub mem: Vec<u8>, // TODO vis
 
     /// Control registers
-    pub cregs: [u32; 8], // TODO vis
+    pub control_regs: specs::rsp::Registers, // TODO vis
 
     /// Scalar registers
     pub sregs: Registers, //TODO vis
@@ -193,13 +96,12 @@ pub struct Sp {
 
 impl Default for Sp {
     fn default() -> Self {
-        let mut regs = [0; 8];
-
-        regs[Register::Status as usize] = 0x0000_0001; // starts halted
+        let mut control_regs = specs::rsp::Registers::default();
+        control_regs.status.set_halted(true);
 
         Self {
             mem: vec![0; 0x2000],
-            cregs: regs,
+            control_regs,
             sregs: Registers([0; 32]),
             vregs: [i16x8::splat(0); 32],
             vacc: i64x8::splat(0),
@@ -224,7 +126,7 @@ impl Sp {
 
         // log::debug!("SP: step @ {:08X}", s.sp.pc);
 
-        let instruction = u32::read_mem(&s.sp.mem, 0x1000u32 + u32::from(s.sp.pc));
+        let instruction = u32::read_mem(&s.sp.mem, 0x1000 | u32::from(s.sp.pc));
 
         let opcode = Opcode::new_with_raw_value(instruction);
 
@@ -248,19 +150,19 @@ impl Sp {
     }
 
     pub fn halted(&self) -> bool {
-        self.cregs[Register::Status as usize] & 1 != 0
+        self.control_regs.status.halted()
     }
 
     pub fn interrupt_on_break(&self) -> bool {
-        self.cregs[Register::Status as usize] & 0x40 != 0
+        self.control_regs.status.interrupt_on_break()
     }
 
     pub fn read_mem<T: Value>(&self, addr: SpMemLocation) -> T {
-        T::read_mem(&self.mem, addr.relative() & MEM_MASK)
+        T::read_mem(&self.mem, addr.relative() & specs::rsp::MEMORY_MASK)
     }
 
     pub fn write_mem<T: Value>(s: &mut System, addr: SpMemLocation, data: T) {
-        data.write_mem(&mut s.sp.mem, addr.relative() & MEM_MASK);
+        data.write_mem(&mut s.sp.mem, addr.relative() & specs::rsp::MEMORY_MASK);
     }
 
     pub fn read_block(&self, addr: SpMemLocation, length: usize, callback: impl FnMut(&[u8])) {
@@ -271,92 +173,132 @@ impl Sp {
         read_block(bank, offset_in_bank, length, callback);
     }
 
+    // TODO hardware-test mirroring
     pub fn read_reg<T: Value>(&mut self, addr: SpRegsLocation) -> T {
-        //log::warn!("read SP reg @ {:08X}", addr.relative());
+        assert!(T::BYTES == 4, "RSP: read with invalid size {}", T::BYTES);
 
-        // TODO possible to write mult regs??? what about reading?
-        debug_assert!(T::BYTES <= 4, "Writing to multiple SP registers");
+        let offset = addr.relative() & specs::rsp::REGISTERS_MASK;
+
+        assert!(
+            offset & 3 == 0,
+            "RSP: read from unaligned address {:08X}",
+            offset
+        );
 
         // TODO clean up mess
 
         if addr.relative() < 0x4_0000 {
-            let data = T::read_reg(&self.cregs, addr.relative() & REG_MASK);
+            let regs_slice = bytemuck::cast_slice(bytemuck::bytes_of(&self.control_regs));
+            let data = T::read_reg(regs_slice, offset);
 
             // Reading the semaphore returns the current value and set it to 1
 
-            if addr.relative() == ((Register::Semaphore as u32) << 2) {
-                self.cregs[Register::Semaphore as usize] = 1;
+            if offset == specs::rsp::Register::Semaphore.offset() {
+                self.control_regs.semaphore.set_value(true);
             }
 
             data
         } else if addr.relative() == 0x4_0000 {
+            // TODO bad addr?
             if (addr.relative() & 3) != 0 {
                 panic!("Unaligned SP PC read: {:08X}", addr.relative());
             }
 
             let pc = [u32::from(self.pc)];
             T::read_reg(&pc, addr.relative() & 0x0000_0003)
+
+            // TODO use PC reg or not?
         } else {
             panic!("Read SP reg @ {:08X}", addr.relative());
         }
     }
 
     pub fn write_reg<T: Value>(s: &mut System, addr: SpRegsLocation, data: T) {
+        assert!(T::BYTES == 4, "RSP: write with invalid size {}", T::BYTES);
+
+        let offset = addr.relative() & specs::rsp::REGISTERS_MASK;
+
+        assert!(
+            offset & 3 == 0,
+            "RSP: write to unaligned address {:08X}",
+            offset
+        );
+
         //log::warn!("write SP reg @ {:08X} {:X}", addr.relative(), data);
 
-        if addr.relative() < 0x4_0000 {
-            let reg = ((addr.relative() & REG_MASK) >> 2) as usize;
+        // TODO clean up mess, simplify if always aligned
 
-            match reg {
-                0 => {
+        if addr.relative() < 0x4_0000 {
+            //let reg = ((addr.relative() & n64_specs::rsp::REGISTERS_MASK) >> 2) as u32;
+
+            match offset {
+                specs::rsp::DmaRspAddress::OFFSET => {
                     // 11-bit SP address.
                     // Bits 0-2 cannot be written to so the address is always aligned to 8 bytes.
-                    // Bit 12 is the "bank" (O = DMEM, 1 = IMEM).
+                    // Bit 12 is the "bank" (0 = DMEM, 1 = IMEM).
 
-                    data.write_reg(&mut s.sp.cregs, addr.relative() & REG_MASK);
+                    let regs_slice =
+                        bytemuck::cast_slice_mut(bytemuck::bytes_of_mut(&mut s.sp.control_regs));
+                    data.write_reg(regs_slice, offset);
 
-                    s.sp.cregs[Register::DmaSpAddr as usize] &= 0x0000_1FF8;
+                    // TODO can't i just write the unmasked part?
+
+                    s.sp.control_regs
+                        .dma_rsp_address
+                        .set_value(s.sp.control_regs.dma_rsp_address.value() & u13::new(0x1FF8u16));
                 }
-                1 => {
+                specs::rsp::DmaRamAddress::OFFSET => {
                     // 24-bit RAM address.
                     // Bits 0-2 cannot be written to so the address is always aligned to 8 bytes.
 
                     // TODO reads should return the previous value until DMA starts?
 
-                    data.write_reg(&mut s.sp.cregs, addr.relative() & REG_MASK);
+                    let regs_slice =
+                        bytemuck::cast_slice_mut(bytemuck::bytes_of_mut(&mut s.sp.control_regs));
+                    data.write_reg(regs_slice, offset);
 
-                    s.sp.cregs[Register::DmaRamAddr as usize] &= 0x00FF_FFF8;
+                    s.sp.control_regs.dma_ram_address.set_value(
+                        s.sp.control_regs.dma_ram_address.value() & u24::new(0x00FF_FFF8),
+                    );
                 }
-                2 => {
+                specs::rsp::DmaReadLength::OFFSET => {
                     // TODO only write on completion if pending? (should read back the ongoing or last DMA)
-                    data.write_reg(&mut s.sp.cregs, addr.relative() & REG_MASK);
+
+                    let regs_slice =
+                        bytemuck::cast_slice_mut(bytemuck::bytes_of_mut(&mut s.sp.control_regs));
+                    data.write_reg(regs_slice, offset);
 
                     Self::push_dma(
                         s,
                         DmaSlot {
                             direction: DmaDirection::RamToSp,
-                            ram_address: s.sp.cregs[Register::DmaRamAddr as usize],
-                            sp_address: s.sp.cregs[Register::DmaSpAddr as usize],
-                            length: s.sp.cregs[Register::DmaRdLen as usize],
+                            ram_address: s.sp.control_regs.dma_ram_address.raw_value(),
+                            sp_address: s.sp.control_regs.dma_rsp_address.raw_value(),
+                            length: s.sp.control_regs.dma_read_length.raw_value(),
                         },
                     );
                 }
-                3 => {
+                specs::rsp::DmaWriteLength::OFFSET => {
                     // TODO only write on completion if pending? (should read back the ongoing or last DMA)
-                    data.write_reg(&mut s.sp.cregs, addr.relative() & REG_MASK);
+
+                    let regs_slice =
+                        bytemuck::cast_slice_mut(bytemuck::bytes_of_mut(&mut s.sp.control_regs));
+                    data.write_reg(regs_slice, offset);
 
                     Self::push_dma(
                         s,
                         DmaSlot {
                             direction: DmaDirection::SpToRam,
-                            ram_address: s.sp.cregs[Register::DmaRamAddr as usize],
-                            sp_address: s.sp.cregs[Register::DmaSpAddr as usize],
-                            length: s.sp.cregs[Register::DmaWrLen as usize],
+                            ram_address: s.sp.control_regs.dma_ram_address.raw_value(),
+                            sp_address: s.sp.control_regs.dma_rsp_address.raw_value(),
+                            length: s.sp.control_regs.dma_write_length.raw_value(),
                         },
                     );
                 }
-                4 => {
-                    let mut status = s.sp.cregs[Register::Status as usize];
+                specs::rsp::Status::OFFSET => {
+                    // TODO simplify and just use struct fields directly?
+
+                    let mut status = s.sp.control_regs.status.raw_value();
 
                     let mut trigger_bits = [0u32];
                     data.write_reg(&mut trigger_bits, addr.relative() & 3);
@@ -417,21 +359,16 @@ impl Sp {
                     clear_set!(1 << 21, 1 << 22, 1 << 13); // 6
                     clear_set!(1 << 23, 1 << 24, 1 << 14); // 7
 
-                    s.sp.cregs[Register::Status as usize] = status;
+                    s.sp.control_regs.status = specs::rsp::Status::new_with_raw_value(status);
                 }
-                5 => {
-                    log::warn!("write SP_DMA_FULL {:X}", data);
-                }
-                6 => {
-                    log::warn!("write SP_DMA_BUSY {:X}", data);
-                }
-                7 => {
+                specs::rsp::Semaphore::OFFSET => {
                     // Writes clear the semaphore
-                    s.sp.cregs[Register::Semaphore as usize] = 0;
+                    s.sp.control_regs.semaphore.set_value(false);
                 }
-                _ => panic!("Invalid SP register: {:08X}", reg),
+                _ => panic!("Invalid SP register @ {:08X}", offset),
             }
         } else if addr.relative() == 0x4_0000 {
+            // TODO bad addr?
             if (addr.relative() & 3) != 0 {
                 panic!("Unaligned SP PC write: {:08X}", addr.relative());
             }
@@ -462,7 +399,7 @@ impl Sp {
         else if s.sp.active_dma.is_some() {
             s.sp.pending_dma = Some(slot);
 
-            s.sp.set_dma_full();
+            s.sp.control_regs.set_dma_full(true);
         }
         // No active DMA transfer: execute
         else {
@@ -472,26 +409,6 @@ impl Sp {
 
             Self::start_dma(s, slot);
         }
-    }
-
-    fn set_dma_busy(&mut self) {
-        self.cregs[Register::Status as usize] |= STATUS_DMA_BUSY;
-        self.cregs[Register::DmaBusy as usize] = 1;
-    }
-
-    fn clear_dma_busy(&mut self) {
-        self.cregs[Register::Status as usize] &= !STATUS_DMA_BUSY;
-        self.cregs[Register::DmaBusy as usize] = 0;
-    }
-
-    fn set_dma_full(&mut self) {
-        self.cregs[Register::Status as usize] |= STATUS_DMA_FULL;
-        self.cregs[Register::DmaFull as usize] = 1;
-    }
-
-    fn clear_dma_full(&mut self) {
-        self.cregs[Register::Status as usize] &= !STATUS_DMA_FULL;
-        self.cregs[Register::DmaFull as usize] = 0;
     }
 
     fn start_dma(s: &mut System, slot: DmaSlot) {
@@ -573,23 +490,38 @@ impl Sp {
         // Increment the DMA registers for the next transfer
         // TODO do it on completion?
 
-        s.sp.cregs[Register::DmaSpAddr as usize] =
-            slot.sp_address.wrapping_add((bytes_per_row * rows) as u32) & 0xFFF
-                | sp_bank_offset as u32;
+        let next_sp_address = slot
+            .sp_address
+            .wrapping_add(((bytes_per_row * rows) as u32))
+            & 0xFFF
+            | (sp_bank_offset as u32);
 
-        s.sp.cregs[Register::DmaRamAddr as usize] = slot
+        s.sp.control_regs
+            .dma_rsp_address
+            .set_value(u13::new(next_sp_address as u16));
+
+        let next_ram_address = slot
             .ram_address
             .wrapping_add(((bytes_per_row + skips) * rows) as u32);
+
+        s.sp.control_regs
+            .dma_ram_address
+            .set_value(u24::new(next_ram_address & 0x00FF_FFF8));
 
         // The length registers always end up being 0xFF8 after a DMA transfer
         // TODO do it on completion?
 
-        s.sp.cregs[Register::DmaRdLen as usize] = 0xFF8;
-        s.sp.cregs[Register::DmaWrLen as usize] = 0xFF8;
+        s.sp.control_regs
+            .dma_read_length
+            .set_length(u12::new(0xFF8));
+
+        s.sp.control_regs
+            .dma_write_length
+            .set_length(u12::new(0xFF8));
 
         // Update the status
 
-        s.sp.set_dma_busy();
+        s.sp.control_regs.set_dma_busy(true);
 
         // TODO reset count to 0!
         // TODO IO busy?
@@ -614,8 +546,8 @@ impl Sp {
 
         // Update the status register
 
-        s.sp.clear_dma_busy();
-        s.sp.clear_dma_full();
+        s.sp.control_regs.set_dma_busy(false);
+        s.sp.control_regs.set_dma_full(false);
         // TODO IO busy?
 
         // Start the pending DMA, if any
@@ -629,6 +561,56 @@ impl Sp {
         // No SP interrupt! They are only triggered by the BREAK instruction
     }
 }
+
+// TODO useful for HLE?
+
+// RDP / display list opcodes
+// const G_SPNOOP: u8 = 0x00;
+// const G_MTX: u8 = 0x01;
+// const G_MOVEMEM: u8 = 0x03;
+// const G_VTX: u8 = 0x04;
+// const G_DL: u8 = 0x06;
+// const G_RDPHALF_CONT: u8 = 0xB2;
+// const G_RDPHALF_2: u8 = 0xB3;
+// const G_RDPHALF_1: u8 = 0xB4;
+// const G_CLEARGEOMETRYMODE: u8 = 0xB6;
+// const G_SETGEOMETRYMODE: u8 = 0xB7;
+// const G_ENDDL: u8 = 0xB8;
+// const G_SETOTHERMODE_L: u8 = 0xB9;
+// const G_SETOTHERMODE_H: u8 = 0xBA;
+// const G_TEXTURE: u8 = 0xBB;
+// const G_MOVEWORD: u8 = 0xBC;
+// const G_POPMTX: u8 = 0xBD;
+// const G_CULLDL: u8 = 0xBE;
+// const G_TRI1: u8 = 0xBF;
+// const G_NOOP: u8 = 0xC0;
+// const G_TEXRECT: u8 = 0xE4;
+// const G_TEXRECTFLIP: u8 = 0xE5;
+// const G_RDPLOADSYNC: u8 = 0xE6;
+// const G_RDPPIPESYNC: u8 = 0xE7;
+// const G_RDPTILESYNC: u8 = 0xE8;
+// const G_RDPFULLSYNC: u8 = 0xE9;
+// const G_SETKEYGB: u8 = 0xEA;
+// const G_SETKEYR: u8 = 0xEB;
+// const G_SETCONVERT: u8 = 0xEC;
+// const G_SETSCISSOR: u8 = 0xED;
+// const G_SETPRIMDEPTH: u8 = 0xEE;
+// const G_RDPSETOTHERMODE: u8 = 0xEF;
+// const G_LOADTLUT: u8 = 0xF0;
+// const G_SETTILESIZE: u8 = 0xF2;
+// const G_LOADBLOCK: u8 = 0xF3;
+// const G_LOADTILE: u8 = 0xF4;
+// const G_SETTILE: u8 = 0xF5;
+// const G_FILLRECT: u8 = 0xF6;
+// const G_SETFILLCOLOR: u8 = 0xF7;
+// const G_SETFOGCOLOR: u8 = 0xF8;
+// const G_SETBLENDCOLOR: u8 = 0xF9;
+// const G_SETPRIMCOLOR: u8 = 0xFA;
+// const G_SETENVCOLOR: u8 = 0xFB;
+// const G_SETCOMBINE: u8 = 0xFC;
+// const G_SETTIMG: u8 = 0xFD;
+// const G_SETZIMG: u8 = 0xFE;
+// const G_SETCIMG: u8 = 0xFF;
 
 // pub fn halt(s: &mut System) {
 //     // BROKE | HALT

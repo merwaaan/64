@@ -232,7 +232,7 @@ fn parse_messages(buffer: &mut Vec<u8>) -> Vec<Message> {
 
 /// Parses possibly-partial data and returns the first fully received message.
 /// https://github.com/Polprzewodnikowy/SummerCart64/blob/main/docs/03_usb_interface.md#sc64---pc-packets
-fn parse_partial_message<'s>(input: &mut Partial<&'s [u8]>) -> ModalResult<Message> {
+fn parse_partial_message(input: &mut Partial<&[u8]>) -> ModalResult<Message> {
     // Packet identifier
     literal("PKT").parse_next(input)?;
 
@@ -248,7 +248,7 @@ fn parse_partial_message<'s>(input: &mut Partial<&'s [u8]>) -> ModalResult<Messa
     let message_data = take(data_len).parse_next(input)?;
 
     let message: Message =
-        postcard::from_bytes(&message_data).expect("failed to deserialize message");
+        postcard::from_bytes(message_data).expect("failed to deserialize message");
 
     Ok(message)
 }

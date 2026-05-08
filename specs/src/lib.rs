@@ -17,6 +17,7 @@ pub mod mi;
 pub mod pi;
 pub mod pif;
 pub mod rdp;
+pub mod rsp;
 pub mod si;
 pub mod timing;
 pub mod vi;
@@ -41,7 +42,7 @@ macro_rules! mapped_registers {
         impl Register {
             pub const fn name(&self) -> &'static str {
                 match self {
-                    $(Register::$reg_type => stringify!($reg_name),)*
+                    $(Register::$reg_type => <$reg_type>::NAME,)*
                 }
             }
             pub const fn index(&self) -> usize {

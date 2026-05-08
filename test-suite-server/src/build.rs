@@ -83,7 +83,7 @@ fn build_test(mode: &Mode, test_path: &Path) -> Result<()> {
         bail!("no output ROM at {}", target_path.display());
     }
 
-    fs::create_dir_all(&package_dir())?;
+    fs::create_dir_all(package_dir())?;
 
     let packaged_path = package_dir().join(format!(
         "{test_name}_{}.z64",

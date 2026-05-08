@@ -290,7 +290,7 @@ impl CoreThread {
                             events.push(Event::Sp(SpUpdate {
                                 pc: system.sp.pc,
                                 instructions,
-                                regs: system.sp.cregs,
+                                regs: system.sp.control_regs,
                                 regs2: system.sp.sregs,
                                 vregs: system.sp.vregs,
                                 vacc: system.sp.vacc,

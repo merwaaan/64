@@ -2,7 +2,7 @@
 //!
 //! Findings:
 //! - Control: bits 31-17 are not writable, as specified in the docs, but bit 10 is, even though it's unused
-//! - Vertical scale: bits 27-16 and 11-0 are writable, bits 27-26 are writable even if unused
+//! - Vertical scale: bits 27-16 and 11-0 are writable, as specified in the docs, bits 27-26 are writable even if unused
 //!
 //! No surprises:
 //! - Origin: only bits 23-0 are writable

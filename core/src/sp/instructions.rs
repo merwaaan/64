@@ -14,7 +14,7 @@ use crate::{
     blocks::write_block,
     dp::{Dp, DpLocation},
     inst,
-    sp::{self, Register, Sp, SpRegsLocation, opcode::Opcode},
+    sp::{Sp, SpRegsLocation, opcode::Opcode},
     system::System,
 };
 
@@ -470,7 +470,8 @@ fn jr_disassemble(_s: &System, op: Opcode) -> String {
 }
 
 fn break_execute(s: &mut System, _op: Opcode) -> InstructionResult {
-    s.sp.cregs[Register::Status as usize] |= sp::STATUS_BROKE | sp::STATUS_HALTED;
+    s.sp.control_regs.status.set_broke(true);
+    s.sp.control_regs.status.set_halted(true);
 
     if s.sp.interrupt_on_break() {
         s.mi.set_pending_interrupt(specs::interrupt::Interrupt::Sp, &mut s.cop0);
