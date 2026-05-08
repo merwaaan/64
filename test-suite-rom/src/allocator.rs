@@ -7,7 +7,11 @@ static ALLOCATOR: LockedHeap = LockedHeap::empty();
 
 #[alloc_error_handler]
 fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
-    panic!("allocation error: {:?}", layout)
+    panic!(
+        "allocation error for {} bytes (align: {})",
+        layout.size(),
+        layout.align()
+    )
 }
 
 pub fn configure() {
@@ -19,7 +23,9 @@ pub fn configure() {
 
     let heap_start = (bss_end & 0x1FFF_FFFF) | 0x8000_0000;
 
-    // The libdragon IPL3 stores the total memory size in DMEM
+    // The libdragon IPL3 stores the total memory size at the start of DMEM
+    // https://github.com/DragonMinded/libdragon/blob/573bee1c3a1cc4a56e7940bd3912e38fc2ad5f23/boot/README.md?plain=1#L127
+
     let total_memory =
         unsafe { ptr::with_exposed_provenance::<u32>(0xA400_0000).read_volatile() } as usize;
 
@@ -28,8 +34,6 @@ pub fn configure() {
     unsafe {
         const STACK_PADDING: usize = 128 * 1024;
 
-        // Safety:
-        //
         // The allocator requires a pointer to where in memory the heap should start.
         //
         // Given the above code and the linker script, `heap_start` *should* point to the next
@@ -42,9 +46,18 @@ pub fn configure() {
         // overlaps with used heap memory.
         //
         // If this happens, try increasing the stack padding.
+
         ALLOCATOR.lock().init(
             ptr::with_exposed_provenance_mut(heap_start),
             heap_size - STACK_PADDING,
         );
     }
+}
+
+pub fn size() -> usize {
+    ALLOCATOR.lock().size()
+}
+
+pub fn used() -> usize {
+    ALLOCATOR.lock().used()
 }

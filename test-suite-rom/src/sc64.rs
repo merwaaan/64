@@ -153,6 +153,12 @@ impl Sc64 {
 
                             // TODO how to actually reboot? (various addresses don't work, bootloader must be enabled via regs?)
 
+                            // unsafe extern "C" {
+                            //     static __boot_start: u32;
+                            // }
+
+                            // let boot_start = (&raw const __boot_start).addr();
+
                             //panic!("REBOOT?");
 
                             // let reboot: extern "C" fn() -> ! =

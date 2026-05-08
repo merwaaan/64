@@ -14,6 +14,8 @@ pub mod allocator;
 pub mod framebuffer;
 pub mod sc64;
 
+pub static mut FRAMEBUFFER: *mut crate::framebuffer::Framebuffer = core::ptr::null_mut();
+
 /// Macro that defines a test implementing the `Test` trait and wires it to the entrypoint.
 #[macro_export]
 macro_rules! define_test {
@@ -26,10 +28,8 @@ macro_rules! define_test {
         use test_suite_common::*;
         use test_suite_rom::*;
 
-        static mut FRAMEBUFFER: *mut $crate::framebuffer::Framebuffer = core::ptr::null_mut();
-
         fn framebuffer() -> &'static mut $crate::framebuffer::Framebuffer {
-            unsafe { &mut *FRAMEBUFFER }
+            unsafe { &mut *$crate::FRAMEBUFFER }
         }
 
         #[panic_handler]
@@ -76,6 +76,9 @@ macro_rules! define_test {
             };
 
             framebuffer().print(&alloc::format!("{} (mode: {})\n", T::name(), mode), None)?;
+
+            framebuffer().print(&alloc::format!("Heap size: {} bytes", $crate::allocator::size()), None)?;
+            framebuffer().print(&alloc::format!("Heap used: {} bytes", $crate::allocator::used()), None)?;
 
             // Run the test
 
