@@ -32,6 +32,12 @@ macro_rules! mapped_registers {
             $(pub $reg_name: $reg_type,)*
         }
 
+        impl Registers {
+            pub const fn address() -> u32 {
+                $base
+            }
+        }
+
         mapped_registers!(@reg_impl $base, [], $($reg_type,)*);
 
         #[derive(PartialEq, Debug, strum::Display, strum::EnumIter)]

@@ -23,6 +23,8 @@ test_suite_rom::run_test! {
 
             // TODO use specs
 
+            // TODO just begin and end?
+
             for address in (specs::ai::START..specs::ai::START + 0x00_1000).step_by(4) {
                 result.push_memory(address);
             }

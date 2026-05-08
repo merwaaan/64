@@ -23,6 +23,7 @@ use crate::mapped_registers;
 pub const MEMORY_START: u32 = 0x0400_0000;
 pub const MEMORY_END: u32 = 0x0404_0000;
 pub const MEMORY_MASK: u32 = 0x1FFF; // TODO what for?
+pub const MEMORY_BANK_SIZE: u32 = 0x1000;
 
 pub const REGISTERS_START: u32 = MEMORY_END;
 pub const REGISTERS_END: u32 = 0x040C_0000;
@@ -162,6 +163,86 @@ pub struct Status {
     halted: bool,
 }
 
+/// Status register when written to.
+#[bitfield(u32, instrospect, default = 0, debug)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable)]
+pub struct StatusWrite {
+    #[bit(24, rw)]
+    set_sig7: bool,
+
+    #[bit(23, rw)]
+    clear_sig7: bool,
+
+    #[bit(22, rw)]
+    set_sig6: bool,
+
+    #[bit(21, rw)]
+    clear_sig6: bool,
+
+    #[bit(20, rw)]
+    set_sig5: bool,
+
+    #[bit(19, rw)]
+    clear_sig5: bool,
+
+    #[bit(18, rw)]
+    set_sig4: bool,
+
+    #[bit(17, rw)]
+    clear_sig4: bool,
+
+    #[bit(16, rw)]
+    set_sig3: bool,
+
+    #[bit(15, rw)]
+    clear_sig3: bool,
+
+    #[bit(14, rw)]
+    set_sig2: bool,
+
+    #[bit(13, rw)]
+    clear_sig2: bool,
+
+    #[bit(12, rw)]
+    set_sig1: bool,
+
+    #[bit(11, rw)]
+    clear_sig1: bool,
+
+    #[bit(10, rw)]
+    set_sig0: bool,
+
+    #[bit(9, rw)]
+    clear_sig0: bool,
+
+    #[bit(8, rw)]
+    set_interrupt_on_break: bool,
+
+    #[bit(7, rw)]
+    clear_interrupt_on_break: bool,
+
+    #[bit(6, rw)]
+    set_single_step: bool,
+
+    #[bit(5, rw)]
+    clear_single_step: bool,
+
+    #[bit(4, rw)]
+    set_interrupt: bool,
+
+    #[bit(3, rw)]
+    clear_interrupt: bool,
+
+    #[bit(2, rw)]
+    clear_broke: bool,
+
+    #[bit(1, rw)]
+    set_halt: bool,
+
+    #[bit(0, rw)]
+    clear_halt: bool,
+}
+
 /// Indicates that the DMA queue is full (ie. there's a DMA in progress and another one pending).
 /// Mirrors the corresponding bit in the Status register.
 #[bitfield(u32, instrospect, default = 0, debug)]
@@ -180,9 +261,9 @@ pub struct DmaBusy {
     value: bool,
 }
 
-/// Special mutex-like register.
+/// Semaphore for synchronizing CPU and RSP programs.
 /// Reads return the current value and automatically set the register to 1 for future reads.
-/// So by writing 0, CPU/RSP programs can signal to the other side that the semaphore is not locked anymore.
+/// So by writing 0, CPU/RSP programs can signal to the other side that the semaphore is now free to use.
 #[bitfield(u32, instrospect, default = 0, debug)]
 #[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Semaphore {

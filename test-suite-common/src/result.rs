@@ -105,6 +105,20 @@ impl TestCaseResult {
 
         self.states.push(State::Memory { address, value });
     }
+
+    pub fn push_memory_region(&mut self, address: u32, length: u32) {
+        let mut values = Vec::with_capacity(length as usize);
+
+        let base = (n64_specs::map::Segment::KSEG1 as u32 | address) as *mut u8;
+
+        for i in 0..length as usize {
+            let value = unsafe { base.add(i).read_volatile() };
+
+            values.push(value);
+        }
+
+        self.states.push(State::MemoryRegion { address, values });
+    }
 }
 
 /// Piece of state in a test case
@@ -118,4 +132,6 @@ pub enum State {
     Pc(u32),
     /// Memory read
     Memory { address: u32, value: u32 },
+    /// Memory region read
+    MemoryRegion { address: u32, values: Vec<u8> },
 }

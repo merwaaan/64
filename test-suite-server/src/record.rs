@@ -176,7 +176,7 @@ fn listen_for_test_result() -> Result<TestResult> {
                 let messages = parse_messages(&mut acc_buffer);
 
                 for message in messages {
-                    log::debug!("Received: {:0X?}", message);
+                    //log::debug!("Received message: {:0X?}", message);
 
                     match message {
                         Message::TestResult(result) => {
