@@ -16,7 +16,7 @@ use n64_specs::{
     vi,
 };
 
-use crate::reg_mut_ptr;
+use crate::io;
 
 pub const WIDTH: u32 = 320;
 pub const HEIGHT: u32 = 240;
@@ -29,20 +29,22 @@ pub const SUCCESS: RGBA5551 = RGBA5551::from_rgba(0x4C, 0xAF, 0x50, 0xFF);
 pub const WARNING: RGBA5551 = RGBA5551::from_rgba(0xFF, 0x98, 0x00, 0xFF);
 pub const ERROR: RGBA5551 = RGBA5551::from_rgba(0xEF, 0x53, 0x50, 0xFF);
 
-pub struct Framebuffer {
+pub struct Display {
     // We use a 16-bit framebuffer to save memory
     buffer: Vec<u16>,
     text_cursor_y: u32,
 }
 
-impl Framebuffer {
-    pub fn new() -> Self {
+impl Default for Display {
+    fn default() -> Self {
         let buffer = alloc::vec![WHITE.raw_value(); PIXELS];
 
         // TODO use specific reg for each write instead of base + offset
         // TODO does the IPL do that?
 
-        let vi_reg_base = reg_mut_ptr(vi::START);
+        let vi_reg_base = io::uncached_ptr(vi::START);
+
+        // TODO a bit glitchy, was better before tweaking the settings
 
         unsafe {
             vi_reg_base.add(vi::Control::INDEX).write_volatile(
@@ -105,9 +107,11 @@ impl Framebuffer {
             text_cursor_y: MARGIN,
         }
     }
+}
 
+impl Display {
     pub fn fill(&mut self, color: RGBA5551) {
-        let buffer_uncached = self.buffer_ptr();
+        let buffer_uncached = self.uncached_buffer_ptr();
 
         unsafe {
             for i in 0..PIXELS {
@@ -162,20 +166,20 @@ impl Framebuffer {
         Ok(())
     }
 
-    fn buffer_ptr(&self) -> *mut u16 {
-        // Must be accessed via the uncached segment to avoid caching glitches
+    fn uncached_buffer_ptr(&self) -> *mut u16 {
+        // The framebuffer must be accessed via the uncached segment to avoid caching glitches
 
         (n64_specs::map::Segment::KSEG1 as u32 | self.buffer.as_ptr() as u32) as *mut u16
     }
 }
 
-impl OriginDimensions for Framebuffer {
+impl OriginDimensions for Display {
     fn size(&self) -> Size {
         Size::new(WIDTH, HEIGHT)
     }
 }
 
-impl DrawTarget for Framebuffer {
+impl DrawTarget for Display {
     type Color = Rgb888;
     type Error = core::convert::Infallible;
 
@@ -183,7 +187,7 @@ impl DrawTarget for Framebuffer {
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        let buffer_uncached = self.buffer_ptr();
+        let buffer_uncached = self.uncached_buffer_ptr();
 
         for Pixel(coord, color) in pixels.into_iter() {
             if let Ok((x @ 0..=WIDTH, y @ 0..=HEIGHT)) = coord.try_into() {

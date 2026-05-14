@@ -8,7 +8,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use duct::cmd;
 use similar::{ChangeTag, TextDiff};
-use test_suite_common::{Message, result::TestResult};
+use test_suite_common::{Message, Step};
 use winnow::{
     Parser as WinnowParser, Partial,
     binary::{be_u8, be_u24, be_u32},
@@ -17,29 +17,40 @@ use winnow::{
     token::{literal, take},
 };
 
-use crate::{list_tests, package_dir};
+use crate::{list_tests, release_dir};
+
+struct TestContext {
+    name: String,
+    path: PathBuf,
+}
 
 pub fn run(test_name: &Option<String>) -> Result<()> {
     // Use the provided test or list all the available tests
 
-    let test_paths = if let Some(test_name) = test_name {
-        let path = package_dir().join(format!("{test_name}_record.z64"));
+    let tests = if let Some(test_name) = test_name {
+        let rom_path = release_dir().join(format!("{test_name}_record.z64"));
 
-        if !path.is_file() {
-            bail!("no record-mode ROM at {}", path.display());
+        if !rom_path.is_file() {
+            bail!("no record-mode ROM at {}", rom_path.display());
         }
 
-        vec![path]
+        vec![TestContext {
+            name: test_name.clone(),
+            path: rom_path,
+        }]
     } else {
         let mut paths = Vec::new();
 
         for test_path in list_tests()? {
             let test_name = test_path.file_stem().and_then(|s| s.to_str()).unwrap();
 
-            let path = package_dir().join(format!("{}_record.z64", test_name));
+            let rom_path = release_dir().join(format!("{}_record.z64", test_name));
 
-            if path.is_file() {
-                paths.push(path);
+            if rom_path.is_file() {
+                paths.push(TestContext {
+                    name: test_name.to_string(),
+                    path: rom_path,
+                });
             } else {
                 log::warn!("no record-mode ROM for {}", test_name);
             }
@@ -50,19 +61,19 @@ pub fn run(test_name: &Option<String>) -> Result<()> {
 
     // Record the test results for each ROM
 
-    for path in test_paths {
-        record_test(&path)?;
+    for test in tests {
+        record_test(&test)?;
     }
 
     Ok(())
 }
 
-fn record_test(path: &PathBuf) -> Result<()> {
-    log::info!("Recording {}...", path.display());
+fn record_test(test: &TestContext) -> Result<()> {
+    log::info!("Recording \"{}\"...", test.name);
 
     // Upload the ROM to the SC64
 
-    upload_rom_to_sc64(path).with_context(|| "failed to upload ROM to SC64")?;
+    upload_rom_to_sc64(&test.path).with_context(|| "failed to upload ROM to SC64")?;
 
     log::warn!(
         "Reboot the console manually to start the test (automatic reboot not supported yet!)"
@@ -82,16 +93,16 @@ fn record_test(path: &PathBuf) -> Result<()> {
 
     // Save the test result
 
-    save_test_result(&result).with_context(|| "failed to save test result")
+    save_test_result(test, &result).with_context(|| "failed to save test result")
 }
 
-fn check_determinism(result: &TestResult, repetitions: usize) -> Result<()> {
+fn check_determinism(steps: &Vec<Step>, repetitions: usize) -> Result<()> {
     log::info!(
         "Checking recording determinism for {} repetitions...",
         repetitions
     );
 
-    let result_text = serde_json::to_string_pretty(&result)?;
+    let steps_text = serde_json::to_string_pretty(&steps)?;
 
     for i in 0..repetitions {
         log::info!("Recording repetition {}/{}...", i + 1, repetitions);
@@ -100,7 +111,7 @@ fn check_determinism(result: &TestResult, repetitions: usize) -> Result<()> {
 
         let repeat_text = serde_json::to_string_pretty(&repeat)?;
 
-        let diff = TextDiff::from_lines(&result_text, &repeat_text);
+        let diff = TextDiff::from_lines(&steps_text, &repeat_text);
 
         if diff.ratio() < 1.0 {
             log::error!("Received different test result");
@@ -120,6 +131,7 @@ fn check_determinism(result: &TestResult, repetitions: usize) -> Result<()> {
 
     Ok(())
 }
+
 fn sc64deployer_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../sc64deployer.exe")
 }
@@ -146,7 +158,7 @@ pub fn upload_rom_to_sc64(path: &PathBuf) -> Result<()> {
 }
 
 /// Listens on the serial port until a `TestResult` is received and saved.
-fn listen_for_test_result() -> Result<TestResult> {
+fn listen_for_test_result() -> Result<Vec<Step>> {
     const SERIAL_PORT: &str = "COM3";
 
     let mut port = serialport::new(SERIAL_PORT, 115_200)
@@ -160,34 +172,55 @@ fn listen_for_test_result() -> Result<TestResult> {
 
     log::info!("Listening for test result on {SERIAL_PORT}...");
 
-    let mut port_buffer = [0u8; 512];
-    let mut acc_buffer = Vec::new();
+    // Reception buffer
+    let mut reception_buffer = [0u8; 512];
+
+    // Raw packet data accumulated from the reception buffer but not decoded yet
+    // (large packets might be split across multiple reads)
+    let mut raw_packets_buffer = Vec::new();
+
+    // Raw message data extracted from packets but not decoded yet
+    // (the test ROMs stream data in chunks so a single message can be split across multiple packets)
+    let mut raw_messages_buffer = Vec::new();
+
+    let mut steps = Vec::new();
 
     loop {
-        match port.read(&mut port_buffer) {
+        match port.read(&mut reception_buffer) {
             Ok(0) => {
                 // timeout or EOF depending on OS
             }
             Ok(n) => {
-                //log::debug!("Received {} bytes: {:02X?}", n, &port_buffer[..n]);
+                //log::debug!("Received {} bytes: {:02X?}", n, &reception_buffer[..n]);
 
-                acc_buffer.extend_from_slice(&port_buffer[..n]);
+                raw_packets_buffer.extend_from_slice(&reception_buffer[..n]);
 
-                let messages = parse_messages(&mut acc_buffer);
+                // log::debug!(
+                //     "{} pending bytes: {:02X?}",
+                //     raw_packets_buffer.len(),
+                //     &raw_packets_buffer
+                // );
+
+                let messages = parse_messages(&mut raw_packets_buffer, &mut raw_messages_buffer);
 
                 for message in messages {
                     //log::debug!("Received message: {:0X?}", message);
 
                     match message {
-                        Message::TestResult(result) => {
-                            log::info!("Received test result");
+                        Message::TestStarted => {
+                            log::info!("Test started");
+                        }
+                        Message::TestStep(step) => {
+                            steps.push(step);
+                        }
+                        Message::TestCompleted => {
+                            log::info!("Test completed");
 
-                            return Ok(result);
+                            return Ok(steps);
                         }
                         Message::Panic => {
                             bail!("ROM panicked");
                         }
-                        _ => {}
                     }
                 }
             }
@@ -202,27 +235,54 @@ fn listen_for_test_result() -> Result<TestResult> {
     }
 }
 
-/// Processes possibly-partial data and returns all the fully received messages.
-fn parse_messages(buffer: &mut Vec<u8>) -> Vec<Message> {
+/// Processes pending data and returns the fully received messages.
+fn parse_messages(
+    raw_packets_buffer: &mut Vec<u8>,
+    raw_messages_buffer: &mut Vec<u8>,
+) -> Vec<Message> {
     let mut messages = Vec::new();
 
+    // As long as there are packets to parse...
+
     loop {
-        if buffer.is_empty() {
+        if raw_packets_buffer.is_empty() {
             break;
         }
 
-        let mut cursor = Partial::new(buffer.as_slice());
+        let mut cursor = Partial::new(raw_packets_buffer.as_slice());
 
-        match parse_partial_message(&mut cursor) {
-            Ok(message) => {
-                messages.push(message);
+        // Parse the first packet
 
-                let consumed = buffer.len() - cursor.len();
-                buffer.drain(..consumed);
+        match parse_packet(&mut cursor) {
+            Ok(data) => {
+                // We got a full packet, buffer its data
+
+                raw_messages_buffer.extend_from_slice(&data);
+
+                let consumed = raw_packets_buffer.len() - cursor.len();
+                raw_packets_buffer.drain(..consumed);
+
+                //println!("raw_messages_buffer: {:02X?}", raw_messages_buffer);
+
+                // Try to deserialize the message, but it might be incomplete if split across multiple packets
+
+                match postcard::from_bytes(raw_messages_buffer) {
+                    Ok(message) => {
+                        messages.push(message);
+
+                        raw_messages_buffer.clear();
+                    }
+                    Err(postcard::Error::DeserializeUnexpectedEnd) => {
+                        //log::debug!("incomplete message, waiting for more packets");
+                    }
+                    Err(e) => {
+                        panic!("failed to deserialize message: {:?}", e);
+                    }
+                }
             }
             Err(ErrMode::Incomplete(_)) => break,
             Err(e) => {
-                panic!("Error parsing packet: {:?}", e); // TODO bail!
+                panic!("failed to parse packet: {:?}", e); // TODO bail!
             }
         }
     }
@@ -230,40 +290,31 @@ fn parse_messages(buffer: &mut Vec<u8>) -> Vec<Message> {
     messages
 }
 
-/// Parses possibly-partial data and returns the first fully received message.
-/// https://github.com/Polprzewodnikowy/SummerCart64/blob/main/docs/03_usb_interface.md#sc64---pc-packets
-fn parse_partial_message(input: &mut Partial<&[u8]>) -> ModalResult<Message> {
-    // Packet identifier
+/// Parses a possibly-partial packet and returns the raw message data that it contains.
+// https://github.com/Polprzewodnikowy/SummerCart64/blob/main/docs/03_usb_interface.md#sc64---pc-packets
+fn parse_packet(input: &mut Partial<&[u8]>) -> ModalResult<Vec<u8>> {
     literal("PKT").parse_next(input)?;
-
-    // Packet type = data
-    literal("U").parse_next(input)?;
-
+    literal("U").parse_next(input)?; // type = data
     let _packet_data_len = be_u32.parse_next(input)?;
-
     let _data_type = be_u8.parse_next(input)?; // TODO literal?
 
     let data_len: u32 = be_u24.parse_next(input)?;
+    let data = take(data_len).parse_next(input)?.to_vec();
 
-    let message_data = take(data_len).parse_next(input)?;
-
-    let message: Message =
-        postcard::from_bytes(message_data).expect("failed to deserialize message");
-
-    Ok(message)
+    Ok(data)
 }
 
 /// Saves test results.
-fn save_test_result(result: &TestResult) -> Result<()> {
-    save_json_test_result(result).with_context(|| "failed to save JSON test result")?;
-    save_binary_test_result(result).with_context(|| "failed to save binary test result")
+fn save_test_result(test: &TestContext, result: &Vec<Step>) -> Result<()> {
+    save_json_test_result(&test.name, result).with_context(|| "failed to save JSON test result")?;
+    save_binary_test_result(&test.name, result).with_context(|| "failed to save binary test result")
 }
 
 /// Saves test results as JSON.
-fn save_json_test_result(result: &TestResult) -> Result<()> {
-    fs::create_dir_all(package_dir())?;
+fn save_json_test_result(test_name: &str, result: &Vec<Step>) -> Result<()> {
+    fs::create_dir_all(release_dir())?;
 
-    let path = package_dir().join(format!("{}.json", result.name));
+    let path = release_dir().join(format!("{test_name}.json"));
 
     let json = serde_json::to_string_pretty(result)?;
 
@@ -277,10 +328,10 @@ fn save_json_test_result(result: &TestResult) -> Result<()> {
 }
 
 /// Saves test results as binary data.
-fn save_binary_test_result(result: &TestResult) -> Result<()> {
-    fs::create_dir_all(package_dir())?;
+fn save_binary_test_result(test_name: &str, result: &Vec<Step>) -> Result<()> {
+    fs::create_dir_all(release_dir())?;
 
-    let path = package_dir().join(format!("{}.bin", result.name));
+    let path = release_dir().join(format!("{test_name}.bin"));
 
     let bytes = postcard::to_allocvec(result)?;
 

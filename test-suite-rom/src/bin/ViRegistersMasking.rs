@@ -24,38 +24,36 @@
 
 use strum::IntoEnumIterator;
 
-test_suite_rom::run_test! {
-    TestWithParams ViRegistersMasking {
-        type Params = specs::vi::Register;
+test_suite_rom::run_test!(ViRegistersMasking);
 
-        fn cases() -> Vec<Self::Params> {
-            specs::vi::Register::iter()
-                // Ignore the current line register as it's constantly updated by the video timing circuitry
-                .filter(|reg| reg != &specs::vi::Register::CurrentLine)
-                .collect()
-        }
+impl Test for ViRegistersMasking {
+    type Params = specs::vi::Register;
 
-        fn case_name(params: &Self::Params) -> String {
-            format!("{:?}", *params)
-        }
+    fn cases() -> Vec<Self::Params> {
+        specs::vi::Register::iter()
+            // Ignore the Current line register as it's constantly updated by the video timing circuitry
+            .filter(|reg| reg != &specs::vi::Register::CurrentLine)
+            .collect()
+    }
 
-        fn run(reg: &specs::vi::Register, result: &mut TestCaseResult) {
-            unsafe {
-                let reg_ptr = reg_mut_ptr(reg.address());
+    fn case_name(params: &Self::Params) -> String {
+        format!("{:?}", *params)
+    }
 
-                // Save/Restore the register value so as not to break display
-                let saved = reg_ptr.read_volatile();
+    fn run(reg: &specs::vi::Register, app: &mut App) -> Result<()> {
+        // Save/Restore the register value so as not to break display
+        let saved = io::read_uncached(reg.address());
 
-                result.push_comment("Clear");
-                reg_ptr.write_volatile(0x0000_0000);
-                result.push_value(reg_ptr.read_volatile());
+        app.push_comment("Clear")?;
+        io::write_uncached(reg.address(), 0x0000_0000);
+        app.push_value(io::read_uncached(reg.address()))?;
 
-                result.push_comment("Set");
-                reg_ptr.write_volatile(0xFFFF_FFFF);
-                result.push_value(reg_ptr.read_volatile());
+        app.push_comment("Set")?;
+        io::write_uncached(reg.address(), 0xFFFF_FFFF);
+        app.push_value(io::read_uncached(reg.address()))?;
 
-                reg_ptr.write_volatile(saved);
-            };
-        }
+        io::write_uncached(reg.address(), saved);
+
+        Ok(())
     }
 }

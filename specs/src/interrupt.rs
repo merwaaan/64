@@ -1,5 +1,5 @@
 // TODO doc
-#[derive(Debug, Clone, Copy, strum::Display, strum::EnumIter)]
+#[derive(Debug, Clone, Copy, strum::Display, strum::EnumIter, strum::EnumCount)]
 #[repr(u8)]
 pub enum Interrupt {
     Sp = 1,

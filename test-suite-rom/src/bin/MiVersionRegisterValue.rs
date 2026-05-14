@@ -1,14 +1,15 @@
+//! This test record the value of the MI Version register.
+//! It might be different on different hardware revisions though.
+
 #![no_std]
 #![no_main]
 
-test_suite_rom::run_test! {
-    TestNoParams MiVersionRegisterValue {
-        fn run(result: &mut TestCaseResult) {
-            let value = unsafe {
-                reg_mut_ptr(specs::mi::Version::ADDRESS).read_volatile()
-            };
+test_suite_rom::run_test!(MiVersionRegisterValue);
 
-            result.push_value(value);
-        }
+impl Test for MiVersionRegisterValue {
+    no_params!();
+
+    fn run(_params: &Self::Params, app: &mut App) -> Result<()> {
+        app.push_value(io::read_uncached(specs::mi::Version::ADDRESS))
     }
 }

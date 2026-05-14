@@ -59,6 +59,10 @@ enum Command {
         /// Specific test name.
         /// Builds all the available tests if not specified.
         test_name: Option<String>,
+
+        /// Clears the release directory to start fresh.
+        #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
+        clear: bool,
     },
     /// Clears any previously generated files.
     Clear,
@@ -75,14 +79,10 @@ fn main() -> ExitCode {
 
     let result = match args.command {
         Command::Build { mode, test_name } => build::run(&mode, &test_name),
-
         Command::Record { test_name } => record::run(&test_name),
-
         Command::Compare { test_name: _ } => todo!("compare subcommand"),
-
-        Command::All { test_name } => run_all(&test_name),
-
-        Command::Clear => clear_package_dir(),
+        Command::All { test_name, clear } => run_all(&test_name, clear),
+        Command::Clear => clear_release_dir(),
     };
 
     match result {
@@ -94,8 +94,11 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_all(test_name: &Option<String>) -> Result<()> {
-    clear_package_dir().context("failed to clear package directory")?;
+fn run_all(test_name: &Option<String>, clear: bool) -> Result<()> {
+    if clear {
+        clear_release_dir().context("failed to clear release directory")?;
+    }
+
     build::run(&Mode::Record, test_name).context("failed to build record-mode ROMs")?;
     record::run(test_name).context("failed to record results on hardware")?;
     build::run(&Mode::Compare, test_name).context("failed to build compare-mode ROMs")
@@ -127,15 +130,15 @@ pub fn rom_target_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/mips-nintendo64-none/release")
 }
 
-pub fn package_dir() -> PathBuf {
+pub fn release_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../_test_suite_output")
 }
 
-fn clear_package_dir() -> Result<()> {
-    log::info!("Clearing package directory...");
+fn clear_release_dir() -> Result<()> {
+    log::info!("Clearing release directory...");
 
-    if package_dir().is_dir() {
-        fs::remove_dir_all(package_dir()).with_context(|| "failed to clear package directory")?;
+    if release_dir().is_dir() {
+        fs::remove_dir_all(release_dir()).with_context(|| "failed to clear release directory")?;
     }
 
     Ok(())

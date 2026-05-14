@@ -6,38 +6,41 @@
 #![no_std]
 #![no_main]
 
-test_suite_rom::run_test! {
-    TestNoParams RspRegistersMirroring {
-        fn run(result: &mut TestCaseResult) {
-            // Give known values to the registers when possible to make them a bit more recognizable in the output
+test_suite_rom::run_test!(RspRegistersMirroring);
 
-            unsafe {
-                // TODO no readback of addr regs?
+impl Test for RspRegistersMirroring {
+    no_params!();
 
-                reg_mut_ptr(specs::rsp::Status::ADDRESS).write_volatile(
-                    specs::rsp::StatusWrite::default()
-                        .with_clear_sig7(true)
-                        .with_set_sig6(true)
-                        .with_clear_sig5(true)
-                        .with_set_sig4(true)
-                        .with_clear_sig3(true)
-                        .with_set_sig2(true)
-                        .with_clear_sig1(true)
-                        .with_set_sig0(true)
-                        .with_set_interrupt_on_break(true)
-                        .with_clear_single_step(true)
-                        .with_set_halt(true)
-                        .raw_value()
-                );
+    fn run(_params: &Self::Params, app: &mut App) -> Result<()> {
+        // Give known values to the registers when possible to make them a bit more recognizable in the output
 
-                reg_mut_ptr(specs::rsp::Semaphore::ADDRESS).read_volatile(); // Switch the semaphore to 1
-            }
+        // TODO no readback of addr regs?
 
-            // TODO just begin and end?
+        io::write_uncached(
+            specs::rsp::Status::ADDRESS,
+            specs::rsp::StatusWrite::default()
+                .with_clear_sig7(true)
+                .with_set_sig6(true)
+                .with_clear_sig5(true)
+                .with_set_sig4(true)
+                .with_clear_sig3(true)
+                .with_set_sig2(true)
+                .with_clear_sig1(true)
+                .with_set_sig0(true)
+                .with_set_interrupt_on_break(true)
+                .with_clear_single_step(true)
+                .with_set_halt(true)
+                .raw_value(),
+        );
 
-            for address in (specs::rsp::REGISTERS_START..specs::rsp::REGISTERS_END).step_by(4) {
-                result.push_memory(address);
-            }
+        io::read_uncached(specs::rsp::Semaphore::ADDRESS); // Switch the semaphore to 1
+
+        // TODO region?
+
+        for address in (specs::rsp::REGISTERS_START..specs::rsp::REGISTERS_END).step_by(4) {
+            app.push_memory(address)?;
         }
+
+        Ok(())
     }
 }

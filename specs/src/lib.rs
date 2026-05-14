@@ -9,6 +9,7 @@
 pub mod ai;
 pub mod cart;
 pub mod color;
+pub mod cop0;
 pub mod dd;
 pub mod interrupt;
 pub mod isviewer;

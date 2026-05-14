@@ -7,78 +7,67 @@
 #![no_std]
 #![no_main]
 
-use strum::IntoEnumIterator;
+use strum::{EnumCount, IntoEnumIterator};
 
 const CLEAR_ALL: u32 = 0x0000_0555;
 const SET_ALL: u32 = 0x0000_0AAA;
 const UNUSED_BITS: u32 = 0xFFFF_F000;
 
-test_suite_rom::run_test! {
-    TestWithParams MiMaskRegisterClearSet {
-        type Params = u32;
+test_suite_rom::run_test!(MiMaskRegisterClearSet);
 
-        fn cases() -> Vec<Self::Params> {
-            let mut masks = Vec::with_capacity(6 * 6 + 8);
+impl Test for MiMaskRegisterClearSet {
+    type Params = u32;
 
-            // Individual interrupts
+    fn cases() -> Vec<Self::Params> {
+        let mut masks = Vec::with_capacity(specs::interrupt::Interrupt::COUNT * 6 + 8);
 
-            for interrupt in specs::interrupt::Interrupt::iter() {
-                masks.push(interrupt.clear_mask());
-                masks.push(interrupt.set_mask());
-                masks.push(interrupt.set_mask() | interrupt.clear_mask());
+        // Individual interrupts
 
-                // With unused bits set
+        for interrupt in specs::interrupt::Interrupt::iter() {
+            masks.push(interrupt.clear_mask());
+            masks.push(interrupt.set_mask());
+            masks.push(interrupt.set_mask() | interrupt.clear_mask());
 
-                masks.push(UNUSED_BITS | interrupt.clear_mask());
-                masks.push(UNUSED_BITS | interrupt.set_mask());
-                masks.push(UNUSED_BITS | interrupt.set_mask() | interrupt.clear_mask());
-            }
+            // With unused bits set
 
-            // All interrupts simultaneously
-
-            masks.push(CLEAR_ALL);
-            masks.push(SET_ALL);
-            masks.push(CLEAR_ALL | SET_ALL);
-
-            masks.push(UNUSED_BITS | CLEAR_ALL);
-            masks.push(UNUSED_BITS | SET_ALL);
-            masks.push(UNUSED_BITS | CLEAR_ALL | SET_ALL);
-
-            // Zero
-
-            masks.push(0x0000_0000);
-            masks.push(UNUSED_BITS);
-
-            masks
+            masks.push(UNUSED_BITS | interrupt.clear_mask());
+            masks.push(UNUSED_BITS | interrupt.set_mask());
+            masks.push(UNUSED_BITS | interrupt.set_mask() | interrupt.clear_mask());
         }
 
-        fn case_name(params: &Self::Params) -> String {
-            format!("{:08X}", *params)
-        }
+        // All interrupts simultaneously
 
-        fn run(params: &Self::Params, result: &mut TestCaseResult) {
+        masks.push(CLEAR_ALL);
+        masks.push(SET_ALL);
+        masks.push(CLEAR_ALL | SET_ALL);
 
-            let mask_reg = reg_mut_ptr(specs::mi::EnabledInterrupts::ADDRESS);
+        masks.push(UNUSED_BITS | CLEAR_ALL);
+        masks.push(UNUSED_BITS | SET_ALL);
+        masks.push(UNUSED_BITS | CLEAR_ALL | SET_ALL);
 
-            result.push_comment("From cleared");
+        // Zero
 
-            let value = unsafe {
-                mask_reg.write_volatile(CLEAR_ALL);
-                mask_reg.write_volatile(*params);
-                mask_reg.read_volatile()
-            };
+        masks.push(0x0000_0000);
+        masks.push(UNUSED_BITS);
 
-            result.push_value(value);
+        masks
+    }
 
-            result.push_comment("From set");
+    fn case_name(params: &Self::Params) -> String {
+        format!("{:08X}", *params)
+    }
 
-            let value = unsafe {
-                mask_reg.write_volatile(SET_ALL);
-                mask_reg.write_volatile(*params);
-                mask_reg.read_volatile()
-            };
+    fn run(params: &Self::Params, app: &mut App) -> Result<()> {
+        let mask_reg = specs::mi::EnabledInterrupts::ADDRESS;
 
-            result.push_value(value);
-        }
+        app.push_comment("From cleared")?;
+        io::write_uncached(mask_reg, CLEAR_ALL);
+        io::write_uncached(mask_reg, *params);
+        app.push_value(io::read_uncached(mask_reg))?;
+
+        app.push_comment("From set")?;
+        io::write_uncached(mask_reg, SET_ALL);
+        io::write_uncached(mask_reg, *params);
+        app.push_value(io::read_uncached(mask_reg))
     }
 }

@@ -1,4 +1,4 @@
-//! TODO
+//! This test records the masking applied to the RSP registesr when written to.
 //!
 //! Findings:
 //! - The DMA address registers do not read back the written value ??? TODO until DMA starts?
@@ -9,47 +9,50 @@
 #![no_std]
 #![no_main]
 
-test_suite_rom::run_test! {
-    TestWithParams RspRegistersMasking {
-        type Params = specs::rsp::Register;
+test_suite_rom::run_test!(RspRegistersMasking);
 
-        fn cases() -> Vec<Self::Params> {
-            vec![
-                specs::rsp::Register::DmaRspAddress,
-                specs::rsp::Register::DmaRamAddress,
-                //specs::rsp::Register::DmaReadLength, // TODO setup DMA? possible to have empty DMA?
-                // specs::rsp::Register::DmaWriteLength,
-                specs::rsp::Register::DmaFull,
-                specs::rsp::Register::DmaBusy,
-            ]
+impl Test for RspRegistersMasking {
+    type Params = specs::rsp::Register;
 
-            // TODO PC?
-            // TODO test DMA regs?
+    fn cases() -> Vec<Self::Params> {
+        Vec::from([
+            specs::rsp::Register::DmaRspAddress,
+            specs::rsp::Register::DmaRamAddress,
+            //specs::rsp::Register::DmaReadLength, // TODO setup DMA? possible to have empty DMA?
+            // specs::rsp::Register::DmaWriteLength,
+            specs::rsp::Register::DmaFull,
+            specs::rsp::Register::DmaBusy,
+        ])
 
-            // We don't test the Status register as it has different read/write interfaces.
-            // We don't test the Semaphore register as it has its own exotic behavior.
-        }
+        // TODO PC?
+        // TODO test DMA regs?
 
-        fn case_name(params: &Self::Params) -> String {
-            format!("{:?}", *params)
-        }
+        // We don't test the Status register as it has different read and write interfaces.
+        // We don't test the Semaphore register as it has its own exotic behavior.
+    }
 
-        fn run(reg: &specs::rsp::Register, result: &mut TestCaseResult) {
-            unsafe {
-                let reg_ptr = reg_mut_ptr(reg.address());
+    fn case_name(params: &Self::Params) -> String {
+        format!("{:?}", *params)
+    }
 
-                result.push_comment("Clear");
-                reg_ptr.write_volatile(0x0000_0000);
-                result.push_value(reg_ptr.read_volatile());
+    fn run(reg: &specs::rsp::Register, app: &mut App) -> Result<()> {
+        // TODO io uncached helpers
+        unsafe {
+            let reg_ptr = io::uncached_ptr(reg.address());
 
-                result.push_comment("Set");
-                reg_ptr.write_volatile(0xFFFF_FFFF);
-                result.push_value(reg_ptr.read_volatile());
+            app.push_comment("Clear")?;
+            reg_ptr.write_volatile(0x0000_0000);
+            app.push_value(reg_ptr.read_volatile())?;
 
-                result.push_comment("Set");
-                reg_ptr.write_volatile(0x1234_5678);
-                result.push_value(reg_ptr.read_volatile());
-            };
-        }
+            app.push_comment("Set")?;
+            reg_ptr.write_volatile(0xFFFF_FFFF);
+            app.push_value(reg_ptr.read_volatile())?;
+
+            app.push_comment("Set")?;
+            reg_ptr.write_volatile(0x1234_5678);
+            app.push_value(reg_ptr.read_volatile())?;
+        };
+
+        Ok(())
     }
 }

@@ -1,33 +1,42 @@
+//! This tests records how the AI registers are mirrored over the whole range they're accessible from.
+//!
+//! Findings:
+//! - The 6 registers are mirrored every 8 words
+//! - Writing to the 2 unused slots has no effect
+
 #![no_std]
 #![no_main]
 
-// TODO DOC
-// TODO what if writing to empty slots?
+test_suite_rom::run_test!(AiRegistersMirroring);
 
-test_suite_rom::run_test! {
-    TestNoParams AiRegistersMirroring {
-        fn run(result: &mut TestCaseResult) {
-            // TODO write length/status
+impl Test for AiRegistersMirroring {
+    no_params!();
 
-            //let mut regs = n64_specs::ai::Registers::default();
+    fn run(_params: &Self::Params, app: &mut App) -> Result<()> {
+        app.push_comment(
+            format!(
+                "Read from {:08X} to {:08X}",
+                specs::ai::START,
+                specs::ai::END
+            )
+            .as_str(),
+        )?;
 
-            // TODO pick values
-            // regs.dma_length.set_value(100);
-            // regs.dma_ram_address.set_value(0x10000000);
-            // regs.control.set_value(1);
-            // regs.status.set_value(0);
-            // regs.dac_rate.set_value(1000);
-            // regs.bit_rate.set_value(1000);
+        app.push_memory_region(
+            io::uncached_ptr(specs::ai::START) as u32,
+            specs::ai::END - specs::ai::START,
+        )?;
 
-            // TODO to end (but it freezes right now, uses too much mem?)
+        for reg in [6, 7] {
+            for value in [0, u32::MAX] {
+                app.push_comment(format!("Write {} to unused slot #{}", value, reg).as_str())?;
 
-            // TODO use specs
+                io::write_uncached(specs::ai::START + reg * 4, value);
 
-            // TODO just begin and end?
-
-            for address in (specs::ai::START..specs::ai::START + 0x00_1000).step_by(4) {
-                result.push_memory(address);
+                app.push_memory_region(io::uncached_ptr(specs::ai::START) as u32, 8 * 4)?;
             }
         }
+
+        Ok(())
     }
 }

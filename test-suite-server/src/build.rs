@@ -2,7 +2,7 @@ use std::{fs, path::Path, process::Command};
 
 use anyhow::{Result, anyhow, bail};
 
-use crate::{Mode, list_tests, package_dir, rom_bin_dir, rom_crate_dir, rom_target_dir};
+use crate::{Mode, list_tests, release_dir, rom_bin_dir, rom_crate_dir, rom_target_dir};
 
 pub fn run(mode: &Mode, test_name: &Option<String>) -> Result<()> {
     log::info!("Building tests in {mode:?} mode...");
@@ -41,7 +41,7 @@ fn build_test(mode: &Mode, test_path: &Path) -> Result<()> {
     // Compare mode: check that results have been recorded beforehand
 
     if matches!(mode, Mode::Compare) {
-        let results_path = package_dir().join(format!("{test_name}.json"));
+        let results_path = release_dir().join(format!("{test_name}.json"));
 
         if !results_path.is_file() {
             bail!(
@@ -83,16 +83,16 @@ fn build_test(mode: &Mode, test_path: &Path) -> Result<()> {
         bail!("no output ROM at {}", target_path.display());
     }
 
-    fs::create_dir_all(package_dir())?;
+    fs::create_dir_all(release_dir())?;
 
-    let packaged_path = package_dir().join(format!(
+    let release_dir_path = release_dir().join(format!(
         "{test_name}_{}.z64",
         mode.to_string().to_lowercase()
     ));
 
-    fs::copy(&target_path, &packaged_path)?;
+    fs::copy(&target_path, &release_dir_path)?;
 
-    log::info!("  -> {}", packaged_path.display());
+    log::info!("  -> {}", release_dir_path.display());
 
     Ok(())
 }
