@@ -28,28 +28,28 @@ impl Test for RspDmaLatching {
 
         io::wait_until(|| io::read_uncached(n64_specs::rsp::DmaBusy::ADDRESS) == 0);
 
-        app.push_comment("State after initial DMA")?;
-        app.push_value(io::read_uncached(specs::rsp::DmaBusy::ADDRESS))?;
-        app.push_value(io::read_uncached(specs::rsp::DmaRspAddress::ADDRESS))?;
-        app.push_value(io::read_uncached(specs::rsp::DmaRamAddress::ADDRESS))?;
-        app.push_value(io::read_uncached(specs::rsp::DmaReadLength::ADDRESS))?;
+        app.comment("State after initial DMA")?;
+        app.value(io::read_uncached(specs::rsp::DmaBusy::ADDRESS))?;
+        app.value(io::read_uncached(specs::rsp::DmaRspAddress::ADDRESS))?;
+        app.value(io::read_uncached(specs::rsp::DmaRamAddress::ADDRESS))?;
+        app.value(io::read_uncached(specs::rsp::DmaReadLength::ADDRESS))?;
         //app.push_value(io::read_uncached(specs::rsp::DmaWriteLength::ADDRESS))?;
 
         // Setup another DMA transfer without starting it
 
         io::write_uncached(n64_specs::rsp::DmaRspAddress::ADDRESS, 0);
-        app.push_comment("Set RSP address")?;
-        app.push_value(io::read_uncached(specs::rsp::DmaRspAddress::ADDRESS))?;
-        app.push_value(io::read_uncached(specs::rsp::DmaRamAddress::ADDRESS))?;
+        app.comment("Set RSP address")?;
+        app.value(io::read_uncached(specs::rsp::DmaRspAddress::ADDRESS))?;
+        app.value(io::read_uncached(specs::rsp::DmaRamAddress::ADDRESS))?;
 
         io::write_uncached(n64_specs::rsp::DmaRamAddress::ADDRESS, 0);
-        app.push_comment("Set RAM address")?;
-        app.push_value(io::read_uncached(specs::rsp::DmaRspAddress::ADDRESS))?;
-        app.push_value(io::read_uncached(specs::rsp::DmaRamAddress::ADDRESS))?;
+        app.comment("Set RAM address")?;
+        app.value(io::read_uncached(specs::rsp::DmaRspAddress::ADDRESS))?;
+        app.value(io::read_uncached(specs::rsp::DmaRamAddress::ADDRESS))?;
 
         // Start the transfer
 
-        app.push_comment("Start DMA")?;
+        app.comment("Start DMA")?;
         io::write_uncached(
             n64_specs::rsp::DmaReadLength::ADDRESS,
             n64_specs::rsp::DmaReadLength::default()
@@ -70,10 +70,10 @@ impl Test for RspDmaLatching {
 
         io::wait_until(|| io::read_uncached(n64_specs::rsp::DmaBusy::ADDRESS) == 0);
 
-        app.push_comment("Dma completed")?;
-        app.push_value(io::read_uncached(specs::rsp::DmaRspAddress::ADDRESS))?;
-        app.push_value(io::read_uncached(specs::rsp::DmaRamAddress::ADDRESS))?;
-        app.push_value(io::read_uncached(specs::rsp::DmaReadLength::ADDRESS))
+        app.comment("Dma completed")?;
+        app.value(io::read_uncached(specs::rsp::DmaRspAddress::ADDRESS))?;
+        app.value(io::read_uncached(specs::rsp::DmaRamAddress::ADDRESS))?;
+        app.value(io::read_uncached(specs::rsp::DmaReadLength::ADDRESS))
         //app.push_value(io::read_uncached(specs::rsp::DmaWriteLength::ADDRESS))?;
     }
 }

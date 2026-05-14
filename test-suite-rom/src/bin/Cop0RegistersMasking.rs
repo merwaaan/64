@@ -132,8 +132,8 @@ impl Test for Cop0RegistersMasking {
 
             let writable = maxed & !zeroed;
 
-            app.push_comment(&format!("{:?}", reg))?;
-            app.push_value(writable)?;
+            app.comment(&format!("{:?}", reg))?;
+            app.value(writable)?;
         }
 
         Ok(())

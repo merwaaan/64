@@ -94,7 +94,7 @@ impl Test for RspDmaFromRam {
 
         // DMA
 
-        app.push_value(io::read_uncached(specs::rsp::DmaBusy::ADDRESS))?;
+        app.value(io::read_uncached(specs::rsp::DmaBusy::ADDRESS))?;
 
         io::write_uncached(specs::rsp::DmaRspAddress::ADDRESS, dma.rsp_destination);
 
@@ -110,7 +110,7 @@ impl Test for RspDmaFromRam {
         );
 
         for _ in 0..3 {
-            app.push_value(io::read_uncached(specs::rsp::DmaBusy::ADDRESS))?;
+            app.value(io::read_uncached(specs::rsp::DmaBusy::ADDRESS))?;
         }
 
         // TODO wait till it's over
@@ -121,6 +121,6 @@ impl Test for RspDmaFromRam {
 
         // Record the whole RSP memory
 
-        app.push_memory_region(specs::rsp::MEMORY_START, 0x2000)
+        app.memory_region(specs::rsp::MEMORY_START, 0x2000)
     }
 }

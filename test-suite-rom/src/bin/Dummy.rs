@@ -17,19 +17,18 @@ impl Test for Dummy {
     }
 
     fn run(params: &Self::Params, app: &mut App) -> Result<()> {
-        app.push_comment("A helpful comment")?;
-        app.push_value(if *params { u32::MAX } else { 0 })?;
-        app.push_pc()?;
+        app.comment("A helpful comment")?;
+        app.value(if *params { u32::MAX } else { 0 })?;
 
         let some_ram_data = (0..1000).map(|i| i as u32).collect::<Vec<_>>();
 
-        app.push_memory_region(
+        app.memory_region(
             some_ram_data.as_ptr() as u32,
             some_ram_data.len() as u32 * 4,
         )?;
 
         for i in 100..110 {
-            app.push_memory(unsafe { some_ram_data.as_ptr().add(i) as u32 })?;
+            app.memory(unsafe { some_ram_data.as_ptr().add(i) as u32 })?;
         }
 
         Ok(())

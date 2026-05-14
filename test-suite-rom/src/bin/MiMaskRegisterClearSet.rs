@@ -60,14 +60,14 @@ impl Test for MiMaskRegisterClearSet {
     fn run(params: &Self::Params, app: &mut App) -> Result<()> {
         let mask_reg = specs::mi::EnabledInterrupts::ADDRESS;
 
-        app.push_comment("From cleared")?;
+        app.comment("From cleared")?;
         io::write_uncached(mask_reg, CLEAR_ALL);
         io::write_uncached(mask_reg, *params);
-        app.push_value(io::read_uncached(mask_reg))?;
+        app.value(io::read_uncached(mask_reg))?;
 
-        app.push_comment("From set")?;
+        app.comment("From set")?;
         io::write_uncached(mask_reg, SET_ALL);
         io::write_uncached(mask_reg, *params);
-        app.push_value(io::read_uncached(mask_reg))
+        app.value(io::read_uncached(mask_reg))
     }
 }

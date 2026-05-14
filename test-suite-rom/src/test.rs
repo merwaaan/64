@@ -30,7 +30,7 @@ pub trait Test {
         app.send(Message::TestStarted)?;
 
         for params in Self::cases() {
-            app.push_test_case(Self::case_name(&params))?;
+            app.test_case(Self::case_name(&params))?;
 
             Self::run(&params, app)?;
         }

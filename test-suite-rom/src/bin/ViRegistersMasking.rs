@@ -44,13 +44,13 @@ impl Test for ViRegistersMasking {
         // Save/Restore the register value so as not to break display
         let saved = io::read_uncached(reg.address());
 
-        app.push_comment("Clear")?;
+        app.comment("Clear")?;
         io::write_uncached(reg.address(), 0x0000_0000);
-        app.push_value(io::read_uncached(reg.address()))?;
+        app.value(io::read_uncached(reg.address()))?;
 
-        app.push_comment("Set")?;
+        app.comment("Set")?;
         io::write_uncached(reg.address(), 0xFFFF_FFFF);
-        app.push_value(io::read_uncached(reg.address()))?;
+        app.value(io::read_uncached(reg.address()))?;
 
         io::write_uncached(reg.address(), saved);
 

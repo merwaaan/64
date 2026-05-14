@@ -1,4 +1,4 @@
-use alloc::{string::String, vec::Vec};
+use alloc::string::String;
 use anyhow::Result;
 use test_suite_common::{Message, Step};
 
@@ -19,35 +19,31 @@ impl Default for App {
 }
 
 impl App {
+    /// Sends a message to the server.
     pub fn send(&self, message: Message) -> Result<()> {
         self.sc64.send(message)
     }
 
+    /// Indefinitely waits for the SC64 to reboot.
     pub fn wait_for_reboot(&self) -> ! {
         self.sc64.wait_for_reboot()
     }
 
-    // Test steps
-    // TODO just push_step + helpers in step?
+    // Helpers to push test steps
 
-    // TODO make a message?
-    pub fn push_test_case(&mut self, name: String) -> Result<()> {
-        self.send(Message::TestStep(Step::TestCase { name }))
+    pub fn test_case(&mut self, name: String) -> Result<()> {
+        self.process_step(Step::TestCase { name })
     }
 
-    pub fn push_comment(&mut self, comment: &str) -> Result<()> {
-        self.send(Message::TestStep(Step::Comment(String::from(comment))))
+    pub fn comment(&mut self, comment: &str) -> Result<()> {
+        self.process_step(Step::Comment(String::from(comment)))
     }
 
-    pub fn push_value(&mut self, value: u32) -> Result<()> {
-        self.send(Message::TestStep(Step::Value(value)))
+    pub fn value(&mut self, value: u32) -> Result<()> {
+        self.process_step(Step::Value(value))
     }
 
-    pub fn push_pc(&mut self) -> Result<()> {
-        self.send(Message::TestStep(Step::Pc(0)))
-    }
-
-    pub fn push_memory(&mut self, address: u32) -> Result<()> {
+    pub fn memory(&mut self, address: u32) -> Result<()> {
         assert!(
             address & 3 == 0,
             "Memory address ({:08X}) must be aligned to 4 bytes",
@@ -56,10 +52,10 @@ impl App {
 
         let value = unsafe { (address as *const u32).read_volatile() };
 
-        self.send(Message::TestStep(Step::Memory { address, value }))
+        self.process_step(Step::Memory { address, value })
     }
 
-    pub fn push_memory_region(&mut self, address: u32, byte_length: u32) -> Result<()> {
+    pub fn memory_region(&mut self, address: u32, byte_length: u32) -> Result<()> {
         assert!(
             address & 3 == 0,
             "Memory address ({:08X}) must be aligned to 4 bytes",
@@ -81,6 +77,20 @@ impl App {
             }
         };
 
-        self.send(Message::TestStep(Step::MemoryRegion { address, values }))
+        self.process_step(Step::MemoryRegion { address, values })
+    }
+
+    /// "Processes" a step.
+    ///
+    /// - Record mode: send it to the server.
+    /// - Compare mode: compare against the embedded recorded steps.
+    fn process_step(&mut self, step: Step) -> Result<()> {
+        if cfg!(feature = "record") {
+            self.send(Message::TestStep(step))?;
+        } else {
+            // TODO
+        }
+
+        Ok(())
     }
 }

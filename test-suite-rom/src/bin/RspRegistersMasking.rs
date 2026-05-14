@@ -40,17 +40,17 @@ impl Test for RspRegistersMasking {
         unsafe {
             let reg_ptr = io::uncached_ptr(reg.address());
 
-            app.push_comment("Clear")?;
+            app.comment("Clear")?;
             reg_ptr.write_volatile(0x0000_0000);
-            app.push_value(reg_ptr.read_volatile())?;
+            app.value(reg_ptr.read_volatile())?;
 
-            app.push_comment("Set")?;
+            app.comment("Set")?;
             reg_ptr.write_volatile(0xFFFF_FFFF);
-            app.push_value(reg_ptr.read_volatile())?;
+            app.value(reg_ptr.read_volatile())?;
 
-            app.push_comment("Set")?;
+            app.comment("Set")?;
             reg_ptr.write_volatile(0x1234_5678);
-            app.push_value(reg_ptr.read_volatile())?;
+            app.value(reg_ptr.read_volatile())?;
         };
 
         Ok(())

@@ -38,7 +38,7 @@ impl Test for RspRegistersMirroring {
         // TODO region?
 
         for address in (specs::rsp::REGISTERS_START..specs::rsp::REGISTERS_END).step_by(4) {
-            app.push_memory(address)?;
+            app.memory(address)?;
         }
 
         Ok(())

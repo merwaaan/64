@@ -100,8 +100,6 @@ pub enum Step {
     Comment(String),
     /// Some arbitrary value relevant to the test
     Value(u32),
-    /// Program counter. TODO use it?
-    Pc(u32),
     /// Memory read.
     Memory {
         address: u32,

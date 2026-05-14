@@ -13,7 +13,7 @@ impl Test for AiRegistersMirroring {
     no_params!();
 
     fn run(_params: &Self::Params, app: &mut App) -> Result<()> {
-        app.push_comment(
+        app.comment(
             format!(
                 "Read from {:08X} to {:08X}",
                 specs::ai::START,
@@ -22,18 +22,18 @@ impl Test for AiRegistersMirroring {
             .as_str(),
         )?;
 
-        app.push_memory_region(
+        app.memory_region(
             io::uncached_ptr(specs::ai::START) as u32,
             specs::ai::END - specs::ai::START,
         )?;
 
         for reg in [6, 7] {
             for value in [0, u32::MAX] {
-                app.push_comment(format!("Write {} to unused slot #{}", value, reg).as_str())?;
+                app.comment(format!("Write {} to unused slot #{}", value, reg).as_str())?;
 
                 io::write_uncached(specs::ai::START + reg * 4, value);
 
-                app.push_memory_region(io::uncached_ptr(specs::ai::START) as u32, 8 * 4)?;
+                app.memory_region(io::uncached_ptr(specs::ai::START) as u32, 8 * 4)?;
             }
         }
 

@@ -26,34 +26,34 @@ impl Test for RspSemaphoreRegister {
     fn run(value: &u32, app: &mut App) -> Result<()> {
         let semaphore_reg = specs::rsp::Semaphore::ADDRESS;
 
-        app.push_comment("Clear")?;
+        app.comment("Clear")?;
         io::write_uncached(semaphore_reg, 0);
 
-        app.push_comment("Read a few times")?;
-        app.push_value(io::read_uncached(semaphore_reg))?;
-        app.push_value(io::read_uncached(semaphore_reg))?;
-        app.push_value(io::read_uncached(semaphore_reg))?;
+        app.comment("Read a few times")?;
+        app.value(io::read_uncached(semaphore_reg))?;
+        app.value(io::read_uncached(semaphore_reg))?;
+        app.value(io::read_uncached(semaphore_reg))?;
 
-        app.push_comment("Write the value and read a few times")?;
+        app.comment("Write the value and read a few times")?;
         io::write_uncached(semaphore_reg, *value);
-        app.push_value(io::read_uncached(semaphore_reg))?;
-        app.push_value(io::read_uncached(semaphore_reg))?;
-        app.push_value(io::read_uncached(semaphore_reg))?;
+        app.value(io::read_uncached(semaphore_reg))?;
+        app.value(io::read_uncached(semaphore_reg))?;
+        app.value(io::read_uncached(semaphore_reg))?;
 
-        app.push_comment("Write the value multiple times before reading again");
+        app.comment("Write the value multiple times before reading again");
         io::write_uncached(semaphore_reg, *value);
         io::write_uncached(semaphore_reg, *value);
         io::write_uncached(semaphore_reg, *value);
-        app.push_value(io::read_uncached(semaphore_reg))?;
-        app.push_value(io::read_uncached(semaphore_reg))?;
-        app.push_value(io::read_uncached(semaphore_reg))?;
+        app.value(io::read_uncached(semaphore_reg))?;
+        app.value(io::read_uncached(semaphore_reg))?;
+        app.value(io::read_uncached(semaphore_reg))?;
 
-        app.push_comment("Write different values before reading again");
+        app.comment("Write different values before reading again");
         io::write_uncached(semaphore_reg, 0xAAAA_AAAA);
         io::write_uncached(semaphore_reg, *value);
         io::write_uncached(semaphore_reg, 0xBBBB_BBBB);
-        app.push_value(io::read_uncached(semaphore_reg))?;
-        app.push_value(io::read_uncached(semaphore_reg))?;
-        app.push_value(io::read_uncached(semaphore_reg))
+        app.value(io::read_uncached(semaphore_reg))?;
+        app.value(io::read_uncached(semaphore_reg))?;
+        app.value(io::read_uncached(semaphore_reg))
     }
 }

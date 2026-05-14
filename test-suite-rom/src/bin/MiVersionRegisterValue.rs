@@ -10,6 +10,6 @@ impl Test for MiVersionRegisterValue {
     no_params!();
 
     fn run(_params: &Self::Params, app: &mut App) -> Result<()> {
-        app.push_value(io::read_uncached(specs::mi::Version::ADDRESS))
+        app.value(io::read_uncached(specs::mi::Version::ADDRESS))
     }
 }

@@ -29,13 +29,13 @@ impl Test for AiLengthRegisterMasking {
         let length_reg = io::uncached_ptr(specs::ai::DmaLength::ADDRESS);
 
         unsafe {
-            app.push_comment("Write 0x0000_0000 to the AI DMA length register")?;
+            app.comment("Write 0x0000_0000 to the AI DMA length register")?;
             length_reg.write_volatile(0x0000_0000); // TODO write_uncached
-            app.push_memory(length_reg as u32)?;
+            app.memory(length_reg as u32)?;
 
-            app.push_comment("Write 0xFFFF_FFFF to the AI DMA length register")?;
+            app.comment("Write 0xFFFF_FFFF to the AI DMA length register")?;
             length_reg.write_volatile(0xFFFF_FFFF); // TODO write_uncached
-            app.push_memory(length_reg as u32)?;
+            app.memory(length_reg as u32)?;
         }
 
         Ok(())

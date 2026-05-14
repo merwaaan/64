@@ -54,7 +54,7 @@ impl Test for RspDmaBuffering {
         // for i in 0..ram_size {
         //     app.push_value(unsafe { uncached_ptr.add(i).read_volatile() as u32 })?;
         // }
-        app.push_memory_region(uncached_ptr as u32, ram_size as u32)
+        app.memory_region(uncached_ptr as u32, ram_size as u32)
 
         //app.push_memory_region(ram_data.as_ptr() as u32, ram_data.len() as u32)
 
