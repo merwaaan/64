@@ -9,7 +9,7 @@ use crate::app::App;
 /// Tests must implement this trait.
 pub trait Test {
     /// The parameters passed to each test case.
-    type Params: core::fmt::Debug = ();
+    type Params: core::fmt::Debug;
 
     /// The name of the test.
     fn name() -> &'static str {
@@ -42,7 +42,7 @@ pub trait Test {
     fn run(params: &Self::Params, app: &mut App) -> Result<()>;
 }
 
-/// Helper to avoid having to implement empty boilerplate for tests without parameters.
+/// Helper to avoid having to specify empty boilerplate for tests without parameters.
 #[macro_export]
 macro_rules! no_params {
     () => {

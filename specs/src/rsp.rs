@@ -149,7 +149,7 @@ pub struct Status {
     #[bit(3, rw)]
     dma_full: bool,
 
-    /// Indicates that there's a DMA transfer in progress.
+    /// Indicates that a DMA transfer is in progress.
     /// Mirrors the Dma busy register.
     #[bit(2, rw)]
     dma_busy: bool,
@@ -163,7 +163,7 @@ pub struct Status {
     halted: bool,
 }
 
-/// Status register when written to.
+/// Status register, when written to.
 #[bitfield(u32, instrospect, default = 0, debug)]
 #[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct StatusWrite {
@@ -252,7 +252,7 @@ pub struct DmaFull {
     value: bool,
 }
 
-/// Indicates that there's a DMA transfer in progress.
+/// Indicates that a DMA transfer is in progress.
 /// Mirrors the corresponding bit in the Status register.
 #[bitfield(u32, instrospect, default = 0, debug)]
 #[derive(bytemuck::Pod, bytemuck::Zeroable)]

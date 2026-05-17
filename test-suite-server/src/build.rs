@@ -1,47 +1,44 @@
-use std::{fs, path::Path, process::Command};
+use std::fs;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
+use object::{Object, ObjectSymbol};
+use test_suite_common::{Step, strip_descriptions};
 
-use crate::{Mode, list_tests, release_dir, rom_bin_dir, rom_crate_dir, rom_target_dir};
+use crate::{Mode, TestContext, list_tests, release_dir, rom_bin_dir, rom_crate_dir};
 
+/// Builds either a specific test ROM of all of them in either record or compare mode.
 pub fn run(mode: &Mode, test_name: &Option<String>) -> Result<()> {
     log::info!("Building tests in {mode:?} mode...");
 
-    // Use the provided test or list all the available tests
+    let tests = if let Some(test_name) = test_name {
+        let source_path = rom_bin_dir().join(format!("{test_name}.rs"));
 
-    let test_paths = if let Some(test_name) = test_name {
-        let path = rom_bin_dir().join(format!("{test_name}.rs"));
-
-        if !path.is_file() {
+        if !source_path.is_file() {
             bail!("no test source for {test_name}");
         }
 
-        vec![path]
+        vec![TestContext {
+            name: test_name.clone(),
+            path: source_path,
+        }]
     } else {
         list_tests()?
     };
 
-    // Build each test
-
-    for path in test_paths {
-        build_test(mode, &path)?;
+    for test in tests {
+        build_test(mode, &test)?;
     }
 
     Ok(())
 }
 
-fn build_test(mode: &Mode, test_path: &Path) -> Result<()> {
-    let test_name = test_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| anyhow!("test path has no file name: {}", test_path.display()))?;
-
-    log::info!("Building test \"{test_name}\" in {mode:?} mode...");
+fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
+    log::info!("Building test \"{}\" in {mode:?} mode...", test.name);
 
     // Compare mode: check that results have been recorded beforehand
 
     if matches!(mode, Mode::Compare) {
-        let results_path = release_dir().join(format!("{test_name}.json"));
+        let results_path = release_dir().join(format!("{}.json", test.name));
 
         if !results_path.is_file() {
             bail!(
@@ -51,48 +48,185 @@ fn build_test(mode: &Mode, test_path: &Path) -> Result<()> {
         }
     }
 
-    // Build
+    // We're going to make a bootable N64 ROM out of our rust program
+    //
+    // To do so, we simply concatenate a few parts:
+    // 1 - the Libdragon IPL, which initializes the system
+    // 2 - our compiled rust binary, which actually is an ELF file that will be parsed by the IPL to copy its contents into RAM
+    // 3 - for compare-mode ROMs only: the recorded test results that the program will compare to its own results
+    //
+    // This is adapted from https://github.com/rust-n64/nust64
 
-    // TODO use duct
-    let output = Command::new("cargo")
-        .arg("run")
-        .arg("--release")
-        .arg("--bin")
-        .arg(test_name)
-        .arg("--no-default-features")
-        .arg("--features")
-        .arg(match mode {
+    let mut z64 = Vec::new();
+
+    // Build the test
+
+    log::debug!("  Building test...");
+
+    let build_result = duct::cmd!(
+        "cargo",
+        "build",
+        "--release",
+        "--bin",
+        &test.name,
+        "--no-default-features",
+        "--features",
+        match mode {
             Mode::Record => "record",
             Mode::Compare => "compare",
-        })
-        .arg("--message-format=short") // Shorter errors
-        .env_remove("RUSTUP_TOOLCHAIN") // Scrub the current crate's toolchain
-        .current_dir(rom_crate_dir())
-        .output()?;
+        },
+    )
+    .env_remove("RUSTUP_TOOLCHAIN") // Scrub the current crate's toolchain
+    .dir(rom_crate_dir())
+    .stderr_capture()
+    .unchecked()
+    .run()?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if !build_result.status.success() {
+        let stderr = String::from_utf8_lossy(&build_result.stderr);
         bail!("build failed: {stderr}");
     }
 
-    // Copy to the output directory
+    // Add the Libdragon IPL
+    // TODO download helper
 
-    let target_path = rom_target_dir().join(format!("{test_name}.z64"));
+    const IPL: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../ipl3_prod.z64"));
 
-    if !target_path.is_file() {
-        bail!("no output ROM at {}", target_path.display());
+    log::debug!("  Adding Libdragon IPL to ROM ({:0X?} bytes)...", IPL.len());
+
+    z64.extend(IPL);
+
+    // Add some padding
+
+    let pad = |z64: &mut Vec<u8>, alignment: usize| {
+        let misalignment = (alignment - (z64.len() % alignment)) % alignment;
+
+        if misalignment > 0 {
+            z64.extend(&vec![0x00; misalignment]);
+
+            log::debug!(
+                "    Aligned to {:0X?} with {:0X?} padding bytes (total size: {:0X?})",
+                alignment,
+                misalignment,
+                z64.len()
+            );
+        }
+    };
+
+    pad(&mut z64, 256);
+
+    // Add the test binary
+
+    let program_offset = z64.len();
+
+    let program_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../target/mips-nintendo64-none/release/Dummy"
+    ); // TODO dyn name
+
+    let program = fs::read(program_path)?;
+
+    log::debug!("  Adding test ELF to ROM ({:0X?} bytes)...", program.len());
+
+    z64.extend(&program);
+
+    // Add some padding
+
+    pad(&mut z64, 16);
+
+    // Add the embedded test results
+
+    if matches!(mode, Mode::Compare) {
+        log::debug!("  Adding embedded test results to ROM...");
+
+        // Load the JSON steps
+
+        let results_path = release_dir().join(format!("{}.json", test.name));
+
+        let results_string = fs::read_to_string(&results_path).with_context(|| {
+            format!(
+                "failed to read test results from {}",
+                results_path.display()
+            )
+        })?;
+
+        let steps: Vec<Step> = serde_json::from_str(&results_string).with_context(|| {
+            format!(
+                "failed to parse JSON test results from {}",
+                results_path.display()
+            )
+        })?;
+
+        // Strip the descriptions to save memory
+
+        let steps = strip_descriptions(&steps);
+
+        // Serialize the steps to a binary buffer
+        // (each step one after another, not the vector, to allow streaming without loading the whole vector in the program)
+
+        let embedded_data_offset = z64.len() as u32;
+
+        let mut steps_data = Vec::new();
+
+        for step in &steps {
+            steps_data.extend(postcard::to_allocvec(&step)?);
+        }
+
+        log::debug!(
+            "    Serialized {} steps to {:0X?} bytes",
+            steps.len(),
+            steps_data.len()
+        );
+
+        z64.extend_from_slice(&steps_data);
+
+        // Add some padding
+
+        pad(&mut z64, 16);
+
+        // For the program to be able to access the embedded data, it needs to know the offset and size of that data in the final ROM.
+        // There are symbols exposed in the ELF file for those, we're going to patch them with the actual values.
+
+        let program_elf = object::File::parse(program.as_slice())?;
+
+        for (symbol_name, patch_value) in [
+            ("EMBEDDED_DATA_ROM_OFFSET", embedded_data_offset),
+            ("EMBEDDED_DATA_ROM_SIZE", steps_data.len() as u32),
+        ] {
+            let patch_rom_offset = program_elf
+                .symbols()
+                .find(|s| s.name() == Ok(symbol_name))
+                .ok_or_else(|| anyhow!("{symbol_name} symbol not found"))?
+                .address() as usize
+                & 0x1FFF_FFFF; // linked as in KSEG0 but we need a base offset
+
+            let z64_patch_offset = program_offset + patch_rom_offset;
+
+            z64[z64_patch_offset..z64_patch_offset + 4].copy_from_slice(&patch_value.to_be_bytes());
+
+            log::debug!(
+                "    Patched {symbol_name} at {:08X?} to {:08X?}",
+                z64_patch_offset,
+                patch_value
+            );
+        }
     }
 
-    fs::create_dir_all(release_dir())?;
+    // Output the ROM to the release directory
 
     let release_dir_path = release_dir().join(format!(
-        "{test_name}_{}.z64",
+        "{}_{}.z64",
+        test.name,
         mode.to_string().to_lowercase()
     ));
 
-    fs::copy(&target_path, &release_dir_path)?;
+    fs::write(&release_dir_path, &z64)?;
 
-    log::info!("  -> {}", release_dir_path.display());
+    log::info!(
+        "  -> {} ({:0X?} bytes)",
+        release_dir_path.display(),
+        z64.len()
+    );
 
     Ok(())
 }

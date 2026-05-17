@@ -8,7 +8,7 @@ build-std = ["core", "alloc"]
 rustflags = ["-Clto", "-Cembed-bitcode"]
 
 # Cargo appends the argument list with the path to the compiled ELF file which nust64 requires for building the ROM
-runner = [
-    "nust64",
-    "--elf"
-]
+#runner = [
+#    "nust64",
+#    "--elf"
+#]

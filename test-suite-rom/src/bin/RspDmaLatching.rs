@@ -17,7 +17,7 @@ impl Test for RspDmaLatching {
     fn run(_params: &Self::Params, app: &mut App) -> Result<()> {
         // Execute a first DMA transfer to get a predictable starting state
 
-        io::dma_ram_to_rsp(&io::RspDma {
+        io::rsp_dma(&io::RspDma {
             direction: io::RspDmaDirection::RamToRsp,
             source_address: 0,
             destination_address: 0,

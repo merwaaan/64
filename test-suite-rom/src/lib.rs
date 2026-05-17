@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(alloc_error_handler)]
-#![feature(associated_type_defaults)]
+#![feature(used_with_arg)]
 
 #[cfg(not(any(feature = "record", feature = "compare")))]
 compile_error!("must enable either feature \"record\" or \"compare\"");
@@ -15,6 +15,9 @@ pub mod display;
 pub mod io;
 pub mod sc64;
 pub mod test;
+
+//#[cfg(feature = "compare")]
+pub mod comparator;
 
 extern crate alloc;
 
@@ -54,6 +57,8 @@ macro_rules! run_test {
         use test_suite_rom::*;
         use crate::{app::App, test::Test};
 
+        // Setup the panic handler
+
         #[panic_handler]
         fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
             $crate::app().display.print(&alloc::format!("{}", info), Some($crate::display::ERROR)).ok();
@@ -64,7 +69,11 @@ macro_rules! run_test {
             $crate::app().wait_for_reboot()
         }
 
+        // Define the test struct so that each test only requires an `impl Test`
+
         struct $test;
+
+        // Define the entry point
 
         #[unsafe(no_mangle)]
         extern "C" fn _entrypoint() -> ! {
@@ -72,7 +81,7 @@ macro_rules! run_test {
 
             let mut app = $crate::init_app();
 
-            // Run the test
+            // Display a title
 
             let (mode, verb) = if cfg!(feature = "record") {
                 ("record", "Recording")
@@ -82,13 +91,17 @@ macro_rules! run_test {
 
             app.display.print(&format!("{} (mode: {})\n", <$test as Test>::name(), mode), None).unwrap();
 
+            let cases = <$test as Test>::cases();
+
             app.display.print(&format!("{} {} test case{}...",
                 verb,
-                <$test as Test>::cases().len(),
-                if <$test as Test>::cases().len() == 1 { "" } else { "s" }), None
+                cases.len(),
+                if cases.len() == 1 { "" } else { "s" }), None
             ).unwrap();
 
-            let result = <$test as Test>::run_all(app);
+            // Run the test
+
+            <$test as Test>::run_all(app).expect("failed to run test");
 
             app.display.print("\nDone!\n", Some($crate::display::SUCCESS)).unwrap();
             app.display.frame(true).unwrap();

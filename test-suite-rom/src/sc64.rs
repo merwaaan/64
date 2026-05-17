@@ -20,7 +20,7 @@ const AUX_REBOOT_VALUE: u32 = 0xFF00_0002;
 
 const ID: *const u32 = 0xBFFF_000C as *const u32;
 
-// TODO use __rom_end to find an appropriate staging area?
+// TODO use rom end/size to find an appropriate staging area?
 const CART_STAGING_PHYSICAL: u32 = 0x1380_0000;
 const CART_STAGING: *mut u32 =
     (n64_specs::map::Segment::KSEG1 as u32 | CART_STAGING_PHYSICAL) as *mut u32;
@@ -100,6 +100,7 @@ impl Sc64 {
     }
 
     /// Sends a message over USB.
+    /// TODO reword, acc in buffer, send less often, rename queue, add flush
     pub fn send(&self, message: Message) -> Result<()> {
         postcard::serialize_with_flavor(&message, ChunkedTransfer::new(self))
             .map_err(|e| anyhow!("failed to serialize message: {e}"))?;

@@ -6,7 +6,6 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use duct::cmd;
 use similar::{ChangeTag, TextDiff};
 use test_suite_common::{Message, Step};
 use winnow::{
@@ -17,16 +16,10 @@ use winnow::{
     token::{literal, take},
 };
 
-use crate::{list_tests, release_dir};
+use crate::{TestContext, list_tests, release_dir};
 
-struct TestContext {
-    name: String,
-    path: PathBuf,
-}
-
+/// Records the results of either a specific test ROM of all of them by executing them on hardware.
 pub fn run(test_name: &Option<String>) -> Result<()> {
-    // Use the provided test or list all the available tests
-
     let tests = if let Some(test_name) = test_name {
         let rom_path = release_dir().join(format!("{test_name}_record.z64"));
 
@@ -39,27 +32,8 @@ pub fn run(test_name: &Option<String>) -> Result<()> {
             path: rom_path,
         }]
     } else {
-        let mut paths = Vec::new();
-
-        for test_path in list_tests()? {
-            let test_name = test_path.file_stem().and_then(|s| s.to_str()).unwrap();
-
-            let rom_path = release_dir().join(format!("{}_record.z64", test_name));
-
-            if rom_path.is_file() {
-                paths.push(TestContext {
-                    name: test_name.to_string(),
-                    path: rom_path,
-                });
-            } else {
-                log::warn!("no record-mode ROM for {}", test_name);
-            }
-        }
-
-        paths
+        list_tests()?
     };
-
-    // Record the test results for each ROM
 
     for test in tests {
         record_test(&test)?;
@@ -76,7 +50,7 @@ fn record_test(test: &TestContext) -> Result<()> {
     upload_rom_to_sc64(&test.path).with_context(|| "failed to upload ROM to SC64")?;
 
     log::warn!(
-        "Reboot the console manually to start the test (automatic reboot not supported yet!)"
+        "  Reboot the console manually to start the test (automatic reboot not supported yet!)"
     );
 
     // Wait for the result to be sent back
@@ -98,14 +72,14 @@ fn record_test(test: &TestContext) -> Result<()> {
 
 fn check_determinism(steps: &Vec<Step>, repetitions: usize) -> Result<()> {
     log::info!(
-        "Checking recording determinism for {} repetitions...",
+        "  Checking recording determinism for {} repetitions...",
         repetitions
     );
 
     let steps_text = serde_json::to_string_pretty(&steps)?;
 
     for i in 0..repetitions {
-        log::info!("Recording repetition {}/{}...", i + 1, repetitions);
+        log::info!("    Recording repetition {}/{}...", i + 1, repetitions);
 
         let repeat = listen_for_test_result()?;
 
@@ -114,7 +88,7 @@ fn check_determinism(steps: &Vec<Step>, repetitions: usize) -> Result<()> {
         let diff = TextDiff::from_lines(&steps_text, &repeat_text);
 
         if diff.ratio() < 1.0 {
-            log::error!("Received different test result");
+            log::error!("      Received different test result");
 
             for change in diff
                 .iter_all_changes()
@@ -125,7 +99,7 @@ fn check_determinism(steps: &Vec<Step>, repetitions: usize) -> Result<()> {
 
             bail!("recording is not deterministic");
         } else {
-            log::info!("Received the same test result");
+            log::info!("      Received the same test result");
         }
     }
 
@@ -136,10 +110,10 @@ fn sc64deployer_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../sc64deployer.exe")
 }
 
-pub fn upload_rom_to_sc64(path: &PathBuf) -> Result<()> {
-    log::info!("Uploading \"{}\" to SC64...", path.display());
+fn upload_rom_to_sc64(path: &PathBuf) -> Result<()> {
+    log::info!("  Uploading \"{}\" to SC64...", path.display());
 
-    let result = cmd!(
+    let result = duct::cmd!(
         sc64deployer_path(),
         "upload",
         path /* TODO , "--reboot" */
@@ -170,7 +144,7 @@ fn listen_for_test_result() -> Result<Vec<Step>> {
         .open()
         .with_context(|| format!("failed to open serial port {SERIAL_PORT}"))?;
 
-    log::info!("Listening for test result on {SERIAL_PORT}...");
+    log::info!("  Listening for test result on {SERIAL_PORT}...");
 
     // Reception buffer
     let mut reception_buffer = [0u8; 512];
@@ -208,13 +182,13 @@ fn listen_for_test_result() -> Result<Vec<Step>> {
 
                     match message {
                         Message::TestStarted => {
-                            log::info!("Test started");
+                            log::info!("    Test started");
                         }
                         Message::TestStep(step) => {
                             steps.push(step);
                         }
                         Message::TestCompleted => {
-                            log::info!("Test completed");
+                            log::info!("    Test completed");
 
                             return Ok(steps);
                         }
@@ -276,13 +250,13 @@ fn parse_messages(
                         //log::debug!("incomplete message, waiting for more packets");
                     }
                     Err(e) => {
-                        panic!("failed to deserialize message: {:?}", e);
+                        panic!("failed to deserialize message, {:?}", e);
                     }
                 }
             }
             Err(ErrMode::Incomplete(_)) => break,
             Err(e) => {
-                panic!("failed to parse packet: {:?}", e); // TODO bail!
+                panic!("failed to parse packet, {:?}", e); // TODO bail!
             }
         }
     }
@@ -304,17 +278,11 @@ fn parse_packet(input: &mut Partial<&[u8]>) -> ModalResult<Vec<u8>> {
     Ok(data)
 }
 
-/// Saves test results.
-fn save_test_result(test: &TestContext, result: &Vec<Step>) -> Result<()> {
-    save_json_test_result(&test.name, result).with_context(|| "failed to save JSON test result")?;
-    save_binary_test_result(&test.name, result).with_context(|| "failed to save binary test result")
-}
-
 /// Saves test results as JSON.
-fn save_json_test_result(test_name: &str, result: &Vec<Step>) -> Result<()> {
+fn save_test_result(test: &TestContext, result: &Vec<Step>) -> Result<()> {
     fs::create_dir_all(release_dir())?;
 
-    let path = release_dir().join(format!("{test_name}.json"));
+    let path = release_dir().join(format!("{}.json", test.name));
 
     let json = serde_json::to_string_pretty(result)?;
 
@@ -322,24 +290,7 @@ fn save_json_test_result(test_name: &str, result: &Vec<Step>) -> Result<()> {
     f.write_all(json.as_bytes())?;
     f.sync_all()?;
 
-    log::info!("Saved JSON test result to {}", path.display());
-
-    Ok(())
-}
-
-/// Saves test results as binary data.
-fn save_binary_test_result(test_name: &str, result: &Vec<Step>) -> Result<()> {
-    fs::create_dir_all(release_dir())?;
-
-    let path = release_dir().join(format!("{test_name}.bin"));
-
-    let bytes = postcard::to_allocvec(result)?;
-
-    let mut f = File::create(&path)?;
-    f.write_all(&bytes)?;
-    f.sync_all()?;
-
-    log::info!("Saved binary test result to {}", path.display());
+    log::info!("  Saved JSON test result to {}", path.display());
 
     Ok(())
 }

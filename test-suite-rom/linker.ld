@@ -1,7 +1,10 @@
 ENTRY(_entrypoint)
 
 SECTIONS {
+    /* Start in KSEG0, skip the first 0x400 bytes as legacy data can lie there according to Libdragon */
     . = 0x80000400;
+
+    /* TODO can we use this for the soft reboot? */
     __boot_start = .;
 
     .boot : {
@@ -25,13 +28,13 @@ SECTIONS {
     }
 
     .bss : {
-        __bss_start = .;
         *(.bss .bss.*)
         . = ALIGN(16);
         __bss_end = .;
     }
 
-    __rom_end = . - __boot_start + 0xB0001000;
+    /* We'll configure the allocator to start the heap from here */
+    __heap_start = .; /* TODO use it istead of bss end */
 
     /DISCARD/ : {
         *(.MIPS.*)
@@ -39,12 +42,8 @@ SECTIONS {
         *(.mdebug.*)
         *(.pdr)
         *(.reginfo)
-		
-        /*
-         * We may need the global offset table some day.
-         * Our target is currently set with a static relocation-model, so this
-         * might not be needed after all.
-         */
         *(.got)
+        *(.eh_frame)
+        *(.eh_frame_hdr)
     }
 }

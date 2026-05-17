@@ -104,18 +104,30 @@ fn run_all(test_name: &Option<String>, clear: bool) -> Result<()> {
     build::run(&Mode::Compare, test_name).context("failed to build compare-mode ROMs")
 }
 
-pub fn list_tests() -> Result<Vec<PathBuf>> {
-    let mut paths = Vec::new();
+pub struct TestContext {
+    name: String,
+    path: PathBuf,
+}
+
+pub fn list_tests() -> Result<Vec<TestContext>> {
+    let mut tests = Vec::new();
 
     for entry in fs::read_dir(rom_bin_dir())? {
         let path = entry?.path();
 
         if path.extension().is_some_and(|ext| ext == "rs") {
-            paths.push(path);
+            tests.push(TestContext {
+                name: path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap()
+                    .to_string(),
+                path,
+            });
         }
     }
 
-    Ok(paths)
+    Ok(tests)
 }
 
 pub fn rom_crate_dir() -> PathBuf {
@@ -124,10 +136,6 @@ pub fn rom_crate_dir() -> PathBuf {
 
 pub fn rom_bin_dir() -> PathBuf {
     rom_crate_dir().join("src/bin")
-}
-
-pub fn rom_target_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/mips-nintendo64-none/release")
 }
 
 pub fn release_dir() -> PathBuf {
