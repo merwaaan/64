@@ -17,11 +17,9 @@ impl Test for RspDmaBuffering {
         Vec::from([2 /* , 3, 4, 10, 100*/])
     }
 
-    fn case_name(params: &Self::Params) -> String {
-        format!("Queue {} DMA transfers", params)
-    }
+    fn run(transfers: &Self::Params, app: &mut App) -> Result<(), TestError> {
+        app.comment(&format!("Queue {} DMA transfers", transfers))?;
 
-    fn run(transfers: &Self::Params, app: &mut App) -> Result<()> {
         // Fill the RAM with sequences of unique values.
         // Each transfer will be assigned a different sequence so that we can identify which one copied what.
 

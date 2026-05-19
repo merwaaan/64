@@ -12,7 +12,7 @@ test_suite_rom::run_test!(AiRegistersMirroring);
 impl Test for AiRegistersMirroring {
     no_params!();
 
-    fn run(_params: &Self::Params, app: &mut App) -> Result<()> {
+    fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
         app.comment(
             format!(
                 "Read from {:08X} to {:08X}",

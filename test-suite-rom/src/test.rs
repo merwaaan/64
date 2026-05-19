@@ -2,7 +2,7 @@ extern crate alloc;
 
 use alloc::{string::String, vec::Vec};
 use anyhow::Result;
-use test_suite_common::Message;
+use test_suite_common::Step;
 
 use crate::app::App;
 
@@ -11,7 +11,7 @@ pub trait Test {
     /// The parameters passed to each test case.
     type Params: core::fmt::Debug;
 
-    /// The name of the test.
+    /// The name of the test (its type name).
     fn name() -> &'static str {
         core::any::type_name::<Self>()
             .rfind("::")
@@ -22,24 +22,8 @@ pub trait Test {
     /// Defines a parameter set for each test case.
     fn cases() -> Vec<Self::Params>;
 
-    /// Generates a name for a test case from its parameters.
-    fn case_name(params: &Self::Params) -> String;
-
-    /// Runs all the test cases.
-    fn run_all(app: &mut App) -> Result<()> {
-        app.send(Message::TestStarted)?;
-
-        for params in Self::cases() {
-            app.test_case(Self::case_name(&params))?;
-
-            Self::run(&params, app)?;
-        }
-
-        app.send(Message::TestCompleted)
-    }
-
     /// Runs a single test case.
-    fn run(params: &Self::Params, app: &mut App) -> Result<()>;
+    fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError>;
 }
 
 /// Helper to avoid having to specify empty boilerplate for tests without parameters.
@@ -51,9 +35,45 @@ macro_rules! no_params {
         fn cases() -> Vec<Self::Params> {
             Vec::from([()])
         }
-
-        fn case_name(params: &Self::Params) -> String {
-            "".to_string()
-        }
     };
+}
+
+/// Errors that can occur when running a test.
+///
+/// Either a true error with `Other`, or a comparison mismatch with `ComparisonMismatch`.
+///
+/// It's convenient to model a mismatch as an error as it can then interrupt failed tests immediately.
+pub enum TestError {
+    Mismatch(Mismatch),
+    Other(anyhow::Error),
+}
+
+impl From<anyhow::Error> for TestError {
+    fn from(e: anyhow::Error) -> Self {
+        TestError::Other(e)
+    }
+}
+
+impl From<TestError> for anyhow::Error {
+    fn from(err: TestError) -> Self {
+        match err {
+            TestError::Mismatch(mismatch) => {
+                anyhow::anyhow!("comparison mismatch {:?}", mismatch)
+            }
+            TestError::Other(err) => err,
+        }
+    }
+}
+
+#[derive(Debug, strum::Display)]
+pub enum Mismatch {
+    /// The recorded values are different from the runtime values.
+    DifferentStep {
+        expected_step: Step,
+        step_index: u32,
+    },
+    /// The runtime test emitted extra steps after all the recorded steps have been compared.
+    ExcessSteps { step_index: u32 },
+    /// The runtime test has completed without comparing all the recorded steps.
+    MissingSteps { step_index: u32 },
 }

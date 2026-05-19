@@ -31,11 +31,9 @@ impl Test for RspRegistersMasking {
         // We don't test the Semaphore register as it has its own exotic behavior.
     }
 
-    fn case_name(params: &Self::Params) -> String {
-        format!("{:?}", *params)
-    }
+    fn run(reg: &specs::rsp::Register, app: &mut App) -> Result<(), TestError> {
+        app.comment(&format!("Test masking of RSP {} register", reg))?;
 
-    fn run(reg: &specs::rsp::Register, app: &mut App) -> Result<()> {
         // TODO io uncached helpers
         unsafe {
             let reg_ptr = io::uncached_ptr(reg.address());

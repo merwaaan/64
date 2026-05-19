@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(alloc_error_handler)]
 #![feature(used_with_arg)]
+#![feature(let_chains)]
 
 #[cfg(not(any(feature = "record", feature = "compare")))]
 compile_error!("must enable either feature \"record\" or \"compare\"");
@@ -49,13 +50,14 @@ macro_rules! run_test {
 
         // Import useful types
         use alloc::{format, string::*, vec::Vec};
+        use anyhow::Context;
         use arbitrary_int::prelude::*;
         use anyhow::Result;
         use core::arch::asm;
         use n64_specs as specs;
         use test_suite_common::*;
         use test_suite_rom::*;
-        use crate::{app::App, test::Test};
+        use crate::{app::App, test::{Test, TestError}};
 
         // Setup the panic handler
 
@@ -77,36 +79,9 @@ macro_rules! run_test {
 
         #[unsafe(no_mangle)]
         extern "C" fn _entrypoint() -> ! {
-            // Initialize the app
-
             let mut app = $crate::init_app();
 
-            // Display a title
-
-            let (mode, verb) = if cfg!(feature = "record") {
-                ("record", "Recording")
-            } else {
-                ("compare", "Comparing")
-            };
-
-            app.display.print(&format!("{} (mode: {})\n", <$test as Test>::name(), mode), None).unwrap();
-
-            let cases = <$test as Test>::cases();
-
-            app.display.print(&format!("{} {} test case{}...",
-                verb,
-                cases.len(),
-                if cases.len() == 1 { "" } else { "s" }), None
-            ).unwrap();
-
-            // Run the test
-
-            <$test as Test>::run_all(app).expect("failed to run test");
-
-            app.display.print("\nDone!\n", Some($crate::display::SUCCESS)).unwrap();
-            app.display.frame(true).unwrap();
-
-            // Wait for reboot
+            app.run::<$test>().expect("failed to run test");
 
             app.wait_for_reboot();
         }

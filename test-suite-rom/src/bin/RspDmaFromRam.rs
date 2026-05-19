@@ -59,14 +59,12 @@ impl Test for RspDmaFromRam {
         cases
     }
 
-    fn case_name(params: &Self::Params) -> String {
-        format!(
+    fn run(dma: &Dma, app: &mut App) -> Result<(), TestError> {
+        app.comment(&format!(
             "DMA transfer to {:08X}, {} bytes x {} rows, skip {}",
-            params.rsp_destination, params.length, params.rows, params.skip
-        )
-    }
+            dma.rsp_destination, dma.length, dma.rows, dma.skip
+        ))?;
 
-    fn run(dma: &Dma, app: &mut App) -> Result<()> {
         // Clear the RSP memory
 
         let rsp_mem = io::uncached_ptr(specs::rsp::MEMORY_START);

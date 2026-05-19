@@ -9,7 +9,7 @@ test_suite_rom::run_test!(MiVersionRegisterValue);
 impl Test for MiVersionRegisterValue {
     no_params!();
 
-    fn run(_params: &Self::Params, app: &mut App) -> Result<()> {
+    fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
         app.value(io::read_uncached(specs::mi::Version::ADDRESS))
     }
 }

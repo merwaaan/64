@@ -110,7 +110,7 @@ impl Test for Cop0RegistersMasking {
     // TODO 64bits
     // TODO status/config without side effects bits
 
-    fn run(_params: &Self::Params, app: &mut App) -> Result<()> {
+    fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
         let regs = Register::iter().filter(|reg| {
             !matches!(
                 reg,

@@ -53,11 +53,9 @@ impl Test for MiMaskRegisterClearSet {
         masks
     }
 
-    fn case_name(params: &Self::Params) -> String {
-        format!("{:08X}", *params)
-    }
+    fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
+        app.comment(&format!("Write {:08X} to the MI Mask register", params))?;
 
-    fn run(params: &Self::Params, app: &mut App) -> Result<()> {
         let mask_reg = specs::mi::EnabledInterrupts::ADDRESS;
 
         app.comment("From cleared")?;

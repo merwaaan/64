@@ -16,7 +16,7 @@ test_suite_rom::run_test!(AiLengthRegisterMasking);
 impl Test for AiLengthRegisterMasking {
     no_params!();
 
-    fn run(_params: &Self::Params, app: &mut App) -> Result<()> {
+    fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
         // Disable DMA
 
         io::write_uncached(

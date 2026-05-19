@@ -15,30 +15,22 @@ use serde::{Deserialize, Serialize};
 )]
 pub enum Step {
     // Start of a test case.
-    TestCase {
-        name: String,
-    },
+    StartTestCase,
     /// A descriptive comment.
     Comment(String),
     /// Some value relevant to the test
     Value(u32),
 }
 
-/// Strips the descriptive data from a list of steps.
+/// Strips the comments from a list of steps.
 /// This reduces the size of the embedded data and we still have comments in the human-readable JSON files produced by the server.
-pub fn strip_descriptions(steps: &[Step]) -> Vec<Step> {
+pub fn strip_comments(steps: &[Step]) -> Vec<Step> {
     steps
         .iter()
         .cloned()
         .filter_map(|step| match step {
-            // Remove test case names
-            Step::TestCase { .. } => Some(Step::TestCase {
-                name: String::new(),
-            }),
-            // Remove comments
             Step::Comment(_) => None,
-            // Keep the rest
-            step => Some(step),
+            _ => Some(step),
         })
         .collect()
 }

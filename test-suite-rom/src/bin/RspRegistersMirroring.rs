@@ -11,7 +11,7 @@ test_suite_rom::run_test!(RspRegistersMirroring);
 impl Test for RspRegistersMirroring {
     no_params!();
 
-    fn run(_params: &Self::Params, app: &mut App) -> Result<()> {
+    fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
         // Give known values to the registers when possible to make them a bit more recognizable in the output
 
         // TODO no readback of addr regs?

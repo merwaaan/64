@@ -226,7 +226,7 @@ impl Command {
         match self {
             Command::ConfigSet { .. } => 'C' as u32,
             Command::UsbWrite { .. } => 'M' as u32,
-            Command::UsbWriteStatus { .. } => 'U' as u32,
+            Command::UsbWriteStatus => 'U' as u32,
         }
     }
 
@@ -263,7 +263,7 @@ impl<'a> ChunkedTransfer<'a> {
     }
 
     fn flush(&mut self) -> Result<()> {
-        if self.buffer.len() > 0 {
+        if !self.buffer.is_empty() {
             self.sc64.send_raw(&self.buffer)?;
             self.buffer.clear();
         }

@@ -1,9 +1,12 @@
 use alloc::vec::Vec;
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use arbitrary_int::prelude::*;
 use test_suite_common::Step;
 
-use crate::io;
+use crate::{
+    io,
+    test::{Mismatch, TestError},
+};
 
 /// The offset in ROM of the embedded data produced by the corresponding record-mode test.
 ///
@@ -19,11 +22,11 @@ static EMBEDDED_DATA_ROM_SIZE: u32 = 0x0BAD_0BAD;
 
 fn embedded_data_rom_offset() -> u32 {
     // Get the value from a runtime memory read to prevent the compiler from const-folding the value and breaking patching
-    unsafe { (&raw const EMBEDDED_DATA_ROM_OFFSET as *const u32).read_volatile() }
+    unsafe { (&raw const EMBEDDED_DATA_ROM_OFFSET).read_volatile() }
 }
 
 fn embedded_data_rom_size() -> u32 {
-    unsafe { (&raw const EMBEDDED_DATA_ROM_SIZE as *const u32).read_volatile() }
+    unsafe { (&raw const EMBEDDED_DATA_ROM_SIZE).read_volatile() }
 }
 
 /// Compares steps emitted by the program against the embedded recorded steps.
@@ -31,8 +34,8 @@ fn embedded_data_rom_size() -> u32 {
 /// This copies the embedded steps from ROM to RAM via a basic streaming mechanism to avoid filling the memory with all the steps at once,
 /// which has been shown to cause out-of-memory situations for tests that record a lot of data, like large memory regions.
 pub struct Comparator {
-    /// Raw step data copied from ROM and ready to be deserialized into steps.
-    /// Refilled with the next chunk of step data from ROM when it's exhausted.
+    /// Raw step data copied from ROM and ready to be deserialized.
+    /// Refilled with the next chunk of raw data from ROM when it's exhausted.
     deserialization_buffer: Vec<u8>,
 
     /// Current position in the buffer, increases as we deserialize steps.
@@ -41,95 +44,170 @@ pub struct Comparator {
     /// Reception buffer for the DMA transfers.
     /// We use a secondary buffer to deal with the alignment requirements of the DMA transfers that might not match the current state of the deserialization buffer
     /// (eg. the destination address might not be aligned to 8 bytes, the source address might not be aligned to 2 bytes).
-    dma_buffer: Vec<u8>, // TODO align for the DMA???
+    dma_buffer: io::Buffer<u8>,
 
     /// Current address used as the DMA source, increases as we transfer data from ROM to RAM.
     dma_source_address: usize,
+
+    /// Whether the comparator has been kickstarted by validating the first recorded step.
+    started: bool,
+
+    /// Current step in the current test case.
+    test_case_step_index: u32,
 }
 
-const BUFFER_SIZE: usize = 10; //0x1000;
+const BUFFER_SIZE: usize = 100; //0x1000; TODO
 
 impl Default for Comparator {
     fn default() -> Self {
-        let mut comparator = Self {
+        Self {
             deserialization_buffer: alloc::vec![0; BUFFER_SIZE],
-            deserialization_buffer_offset: 0,
-            dma_buffer: alloc::vec![0; BUFFER_SIZE],
+            deserialization_buffer_offset: BUFFER_SIZE,
+            dma_buffer: io::Buffer::<u8>::with_alignment(
+                BUFFER_SIZE,
+                n64_specs::pi::DMA_RAM_ALIGNMENT,
+            ),
             dma_source_address: 0x1000_0000 + embedded_data_rom_offset() as usize,
-        };
-
-        // Initial transfer
-        //TODO
-        // comparator
-        //     .refill()
-        //     .expect("failed to refill the comparator buffer");
-
-        comparator
+            test_case_step_index: 0,
+            started: false,
+        }
     }
 }
 
 impl Comparator {
-    // TODO doc
-    // TODO return bool
-    pub fn compare(&mut self, step: &Step) -> Result<Step> {
+    // Compares a runtime step against the next expected step.
+    pub fn compare(&mut self, step: &Step) -> Result<(), TestError> {
+        // Kickstart the comparator by checking that the first recorded step is indeed the start of a test case
+
+        if !self.started {
+            let step = self.take()?;
+
+            if step != Step::StartTestCase {
+                return Err(anyhow!("recorded steps start with unexpected {:?}", step).into());
+            }
+
+            self.started = true;
+        }
+
         // Ignore comments as they have been stripped from the embedded steps
 
         if matches!(step, Step::Comment(_)) {
-            return Ok(step.clone());
+            self.test_case_step_index += 1;
+
+            return Ok(());
         }
 
-        // The comparison relies on the next expected step getting deserialized.
-        //
-        // Because embedded steps are "streamed" in chunks from ROM via DMA transfers, all the data of that next step might not have been buffered yet.
-        // So we try to deserialize the step once, which might work, but if the buffer is exhausted, we refill it and try again.
-        // The second time, we're guaranteed to have the whole step buffered.
-        //
-        // Our steps are tiny (basically a discriminant and a number value) so a single retry will be enough.
-        // If we wanted to support streaming steps with varying lengths, we would need a more sophisticated solution,
-        // but since we stripped the string descriptions from the embedded steps, this is not required :)
+        // Retrieve the next expected step
 
-        let mut expected_step = self.next()?;
+        let expected_step = self.take()?;
 
-        if expected_step.is_none() {
-            self.refill()?;
+        // Compare the runtime step against the expected step
 
-            expected_step = self.next()?;
-        }
+        if *step == expected_step {
+            self.test_case_step_index += 1;
 
-        match expected_step {
-            None => {
-                bail!("the comparator buffer is exhausted");
-            }
+            Ok(())
+        } else {
+            // The compare-mode test does not emit StartTestCase, so if we get one, it emitted more steps than expected
 
-            // Compare the runtime step against the expected step
-            Some(expected_step) => {
-                if *step == expected_step {}
-
-                return Ok(expected_step);
-                // panic!("Comparison result: {:?} {:?}", step, expected_step);
+            if expected_step == Step::StartTestCase {
+                Err(TestError::Mismatch(Mismatch::ExcessSteps {
+                    step_index: self.test_case_step_index,
+                }))
+            } else {
+                Err(TestError::Mismatch(Mismatch::DifferentStep {
+                    expected_step,
+                    step_index: self.test_case_step_index,
+                }))
             }
         }
     }
 
-    /// Tries to return the next embedded step.
-    /// Returns the step if successful.
-    /// Returns None if the buffer is exhausted and needs to be refilled.
-    fn next(&mut self) -> Result<Option<Step>> {
-        match postcard::take_from_bytes::<Step>(
-            &self.deserialization_buffer[self.deserialization_buffer_offset..],
-        ) {
-            Ok((expected_step, rest)) => {
-                self.deserialization_buffer_offset = self.deserialization_buffer.len() - rest.len();
+    /// Finalizes a test case comparison by checking that all the recorded steps have been compared.
+    pub fn finalize_case(&mut self) -> Result<(), TestError> {
+        // TODO max size
 
-                return Ok(Some(expected_step.clone()));
-            }
+        // If everything went well, the next step should be the start of the next test case
 
-            Err(postcard::Error::DeserializeUnexpectedEnd) => Ok(None),
+        let step = self.take()?;
 
-            Err(e) => {
-                bail!("failed to deserialize step: {:?}", e);
+        if step != Step::StartTestCase {
+            Err(TestError::Mismatch(Mismatch::MissingSteps {
+                step_index: self.test_case_step_index,
+            }))
+        } else {
+            self.test_case_step_index = 0;
+
+            Ok(())
+        }
+    }
+
+    /// Skips the current test case remaining steps.
+    pub fn skip_case(&mut self) -> Result<()> {
+        // TODO max size
+
+        let mut i = 0;
+        loop {
+            let step = self.take()?;
+            i += 1;
+            if step == Step::StartTestCase {
+                panic!("skipped to {:?}", i);
+                self.test_case_step_index = 0;
+
+                return Ok(());
             }
         }
+    }
+
+    /// Returns the next embedded step and advances the buffer.
+    fn take(&mut self) -> Result<Step> {
+        self.next(true)
+    }
+
+    /// Returns the next embedded step without advancing the buffer.
+    fn peek(&mut self) -> Result<Step> {
+        self.next(false)
+    }
+
+    fn next(&mut self, advance: bool) -> Result<Step> {
+        // The comparison relies on the next expected step getting deserialized.
+        //
+        // Because embedded steps are "streamed" in chunks from ROM via DMA transfers, all the data of that next step might not have been buffered yet.
+        // So we try to deserialize the step once, which might work, but if the buffer is exhausted, we refill it and try again.
+        //
+        // Our steps are tiny (basically a discriminant and a number value) so a single retry will be enough.
+        // If we wanted to support streaming steps with varying lengths, we would need a more sophisticated solution,
+        // but since we stripped the comments from the embedded steps, this is not required :)
+        //
+        // So the second time, we're guaranteed to have the whole step buffered.
+
+        for attempt in 0..2 {
+            match postcard::take_from_bytes::<Step>(
+                &self.deserialization_buffer[self.deserialization_buffer_offset..],
+            ) {
+                Ok((expected_step, rest)) => {
+                    if advance {
+                        self.deserialization_buffer_offset =
+                            self.deserialization_buffer.len() - rest.len();
+                    }
+
+                    return Ok(expected_step);
+                }
+
+                Err(postcard::Error::DeserializeUnexpectedEnd) => {
+                    if attempt == 0 {
+                        // Refill and try again
+                        self.refill()?;
+                    }
+                }
+
+                Err(e) => {
+                    bail!("failed to deserialize step: {:?}", e);
+                }
+            }
+        }
+
+        bail!("the comparator buffer is exhausted");
     }
 
     /// Refills the buffer so that the remaining data moves to the front, followed by new data from ROM.
@@ -150,6 +228,11 @@ impl Comparator {
 
         let dma_source_address_misalignment = self.dma_source_address & 1;
 
+        // panic!(
+        //     "dma_source_address: {:0X?} {:0X?} {:0X?}",
+        //     self.dma_source_address, dma_source_address_misalignment, bytes_to_transfer
+        // );
+
         io::pi_dma(&io::PiDma {
             direction: io::PiDmaDirection::PiToRam,
             ram_address: u24::from_u32(io::physical(self.dma_buffer.as_ptr() as u32)),
@@ -164,38 +247,15 @@ impl Comparator {
         // Copy the new data from the DMA buffer to the deserialization buffer,
         // discarding the possibly redundant byte transferred for alignment reasons
 
-        let dma_buffer_uncached = io::uncached_ptr(self.dma_buffer.as_ptr() as u32) as *mut u8;
-
         let copy_start = self.deserialization_buffer.len() - self.deserialization_buffer_offset;
 
         for i in 0..bytes_to_transfer {
-            self.deserialization_buffer[copy_start + i] = unsafe {
-                dma_buffer_uncached
-                    .add(i + dma_source_address_misalignment)
-                    .read_volatile()
-            };
+            self.deserialization_buffer[copy_start + i] =
+                self.dma_buffer.get(i + dma_source_address_misalignment);
         }
 
         self.deserialization_buffer_offset = 0;
         self.dma_source_address += bytes_to_transfer;
-
-        unsafe {
-            panic!(
-                "dma res: {:0X?} {:0X?} {:0X?} {:0X?} {:0X?} {:0X?} {:0X?} {:0X?} {:0X?} {:0X?}",
-                dma_buffer_uncached.add(0).read_volatile(),
-                dma_buffer_uncached.add(1).read_volatile(),
-                dma_buffer_uncached.add(2).read_volatile(),
-                dma_buffer_uncached.add(3).read_volatile(),
-                dma_buffer_uncached.add(4).read_volatile(),
-                dma_buffer_uncached.add(5).read_volatile(),
-                dma_buffer_uncached.add(6).read_volatile(),
-                dma_buffer_uncached.add(7).read_volatile(),
-                dma_buffer_uncached.add(8).read_volatile(),
-                dma_buffer_uncached.add(9).read_volatile(),
-            );
-        }
-
-        panic!("buff: {:0X?}", self.deserialization_buffer);
 
         Ok(())
     }

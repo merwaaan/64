@@ -14,7 +14,7 @@ test_suite_rom::run_test!(RspDmaLatching);
 impl Test for RspDmaLatching {
     no_params!();
 
-    fn run(_params: &Self::Params, app: &mut App) -> Result<()> {
+    fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
         // Execute a first DMA transfer to get a predictable starting state
 
         io::rsp_dma(&io::RspDma {

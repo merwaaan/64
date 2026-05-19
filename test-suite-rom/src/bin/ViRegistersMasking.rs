@@ -36,11 +36,9 @@ impl Test for ViRegistersMasking {
             .collect()
     }
 
-    fn case_name(params: &Self::Params) -> String {
-        format!("{:?}", *params)
-    }
+    fn run(reg: &specs::vi::Register, app: &mut App) -> Result<(), TestError> {
+        app.comment(&format!("Test masking of VI {} register", reg))?;
 
-    fn run(reg: &specs::vi::Register, app: &mut App) -> Result<()> {
         // Save/Restore the register value so as not to break display
         let saved = io::read_uncached(reg.address());
 

@@ -2,7 +2,7 @@ use std::fs;
 
 use anyhow::{Context, Result, anyhow, bail};
 use object::{Object, ObjectSymbol};
-use test_suite_common::{Step, strip_descriptions};
+use test_suite_common::{Step, strip_comments};
 
 use crate::{Mode, TestContext, list_tests, release_dir, rom_bin_dir, rom_crate_dir};
 
@@ -157,9 +157,9 @@ fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
             )
         })?;
 
-        // Strip the descriptions to save memory
+        // Strip the comments to save memory
 
-        let steps = strip_descriptions(&steps);
+        let steps = strip_comments(&steps);
 
         // Serialize the steps to a binary buffer
         // (each step one after another, not the vector, to allow streaming without loading the whole vector in the program)

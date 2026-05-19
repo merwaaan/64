@@ -19,11 +19,12 @@ impl Test for RspSemaphoreRegister {
         Vec::from([0, 1, 0x1234_5678, 0x8000_0000, 0xFFFF_FFFF])
     }
 
-    fn case_name(value: &u32) -> String {
-        format!("Write {:08X}", value)
-    }
+    fn run(value: &u32, app: &mut App) -> Result<(), TestError> {
+        app.comment(&format!(
+            "Write {:08X} to the RSP semaphore register",
+            value
+        ))?;
 
-    fn run(value: &u32, app: &mut App) -> Result<()> {
         let semaphore_reg = specs::rsp::Semaphore::ADDRESS;
 
         app.comment("Clear")?;
