@@ -17,7 +17,7 @@ impl Program {
         }
     }
 
-    pub fn push(&mut self, instruction: &dyn Instruction) -> &mut Self {
+    pub fn push(&mut self, instruction: Instruction) -> &mut Self {
         self.instructions.push(instruction.encode());
         self
     }
@@ -53,10 +53,12 @@ impl Program {
                 *opcode,
             );
         }
+
         io::write_uncached(
             n64_specs::rsp::MEMORY_START + 0x1000 + (self.instructions.len() as u32 * 4),
-            Jr::default().with_rs(u5::from_u8(31)).encode(),
+            Jr::default().with_rs(u5::from_u8(31)).raw_value(),
         );
+
         let entry = io::uncached_ptr(n64_specs::rsp::MEMORY_START + 0x1000) as u32;
 
         unsafe {
@@ -158,46 +160,51 @@ impl Program {
     // Loads a value into a register (LUI + ORI).
     pub fn load_reg(&mut self, reg: Register, value: u32) -> &mut Self {
         self.push(
-            &Lui::default()
+            Lui::default()
                 .with_rt(reg.into())
-                .with_immediate((value >> 16) as u16),
+                .with_imm((value >> 16) as u16)
+                .into(),
         )
         .push(
-            &Ori::default()
+            Ori::default()
                 .with_rt(reg.into())
                 .with_rs(reg.into())
-                .with_immediate(value as u16),
+                .with_imm(value as u16)
+                .into(),
         )
     }
 
     pub fn and(&mut self, rd: Register, rs: Register, rt: Register) -> &mut Self {
         self.push(
-            &And::default()
+            And::default()
                 .with_rs(rs.into())
                 .with_rt(rt.into())
-                .with_rd(rd.into()),
+                .with_rd(rd.into())
+                .into(),
         )
     }
 
     pub fn lui(&mut self, rt: Register, immediate: u16) -> &mut Self {
-        self.push(&Lui::default().with_rt(rt.into()).with_immediate(immediate))
+        self.push(Lui::default().with_rt(rt.into()).with_imm(immediate).into())
     }
 
     pub fn ori(&mut self, rt: Register, rs: Register, immediate: u16) -> &mut Self {
         self.push(
-            &Ori::default()
+            Ori::default()
                 .with_rt(rt.into())
                 .with_rs(rs.into())
-                .with_immediate(immediate),
+                .with_imm(immediate)
+                .into(),
         )
     }
 
     pub fn sw(&mut self, rt: Register, base: Register, offset: u16) -> &mut Self {
         self.push(
-            &Sw::default()
+            Sw::default()
                 .with_rt(rt.into())
                 .with_base(base.into())
-                .with_offset(offset),
+                .with_offset(offset)
+                .into(),
         )
     }
 }

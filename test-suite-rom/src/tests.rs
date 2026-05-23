@@ -6,7 +6,7 @@
 mod AiLengthRegisterMasking;
 mod AiRegistersMirroring;
 mod Cop0RegistersMasking;
-mod CpuInstructionAnd;
+mod CpuInstructionsLogical;
 mod Dummy;
 mod MiMaskRegisterClearSet;
 mod MiVersionRegisterValue;

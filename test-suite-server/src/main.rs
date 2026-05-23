@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use regex::Regex;
 
 #[derive(Clone, Debug, strum::Display, clap::ValueEnum)]
 pub enum Mode {
@@ -107,25 +108,6 @@ fn run_all(test_name: &Option<String>, clean: bool) -> Result<()> {
     build::run(&Mode::Replay, test_name).context("failed to build replay-mode ROMs")
 }
 
-pub fn list_tests() -> Result<Vec<String>> {
-    let mut tests = Vec::new();
-
-    for entry in fs::read_dir(rom_tests_dir())? {
-        let path = entry?.path();
-
-        if path.extension().is_some_and(|ext| ext == "rs") {
-            tests.push(
-                path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap() // TODO unwrap
-                    .to_string(),
-            );
-        }
-    }
-
-    Ok(tests)
-}
-
 pub fn rom_crate_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-suite-rom")
 }
@@ -148,12 +130,55 @@ fn clean_release_dir() -> Result<()> {
     Ok(())
 }
 
-fn test_rom_name(test: &str, mode: Mode) -> String {
-    format!("{}_{}.z64", test, mode.to_string().to_lowercase())
+fn test_rom_name(test_name: &str, mode: Mode) -> String {
+    format!("{}_{}.z64", test_name, mode.to_string().to_lowercase())
 }
 
-pub fn find_test_rom(test: &str, mode: Mode) -> Option<PathBuf> {
-    let path = release_dir().join(test_rom_name(test, mode));
+#[derive(Clone, Debug)]
+pub struct Test {
+    name: String,
+    module: String,
+}
+
+pub fn list_tests() -> Result<Vec<Test>> {
+    let mut tests = Vec::new();
+
+    let register_test_regex = Regex::new(r"register_test!\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")?;
+
+    for entry in fs::read_dir(rom_tests_dir())? {
+        let path = entry?.path();
+
+        if path.extension().is_some_and(|ext| ext == "rs") {
+            let module = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .context("non-utf8 test file name")?
+                .to_string();
+
+            let source = fs::read_to_string(&path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+
+            for cap in register_test_regex.captures_iter(&source) {
+                tests.push(Test {
+                    name: cap[1].to_string(),
+                    module: module.clone(),
+                });
+            }
+        }
+    }
+
+    Ok(tests)
+}
+
+pub fn find_test(test_name: &str) -> Result<Option<Test>> {
+    Ok(list_tests()?
+        .iter()
+        .find(|test| test.name == test_name)
+        .cloned())
+}
+
+pub fn find_test_rom(test_name: &str, mode: Mode) -> Option<PathBuf> {
+    let path = release_dir().join(test_rom_name(test_name, mode));
 
     if !path.is_file() { None } else { Some(path) }
 }

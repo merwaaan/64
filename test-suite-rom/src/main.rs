@@ -73,3 +73,10 @@ extern "C" fn _entrypoint() -> ! {
 
     app.wait_for_reboot()
 }
+
+#[macro_export]
+macro_rules! register_test {
+    ($test:ident) => {
+        pub struct $test;
+    };
+}

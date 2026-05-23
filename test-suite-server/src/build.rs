@@ -4,20 +4,14 @@ use anyhow::{Context, Result, anyhow, bail};
 use object::{Object, ObjectSymbol};
 use test_suite_common::{Step, strip_comments};
 
-use crate::{Mode, list_tests, release_dir, rom_crate_dir, rom_tests_dir};
+use crate::{Mode, Test, find_test, list_tests, release_dir, rom_crate_dir};
 
-/// Builds either a specific test ROM of all of them in either record or replay mode.
-pub fn run(mode: &Mode, test: &Option<String>) -> Result<()> {
+/// Builds either a specific test ROM of all of them, in either record or replay mode.
+pub fn run(mode: &Mode, test_name: &Option<String>) -> Result<()> {
     log::info!("Building tests in {mode:?} mode...");
 
-    let tests = if let Some(test) = test {
-        let source_path = rom_tests_dir().join(format!("{test}.rs"));
-
-        if !source_path.is_file() {
-            bail!("no test named {test} in {}", rom_tests_dir().display());
-        } else {
-            vec![test.clone()]
-        }
+    let tests = if let Some(test_name) = test_name {
+        vec![find_test(test_name)?.ok_or_else(|| anyhow::anyhow!("no test named {test_name}"))?]
     } else {
         list_tests()?
     };
@@ -29,13 +23,13 @@ pub fn run(mode: &Mode, test: &Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn build_test(test: &str, mode: &Mode) -> Result<()> {
-    log::info!("Building test \"{}\" in {mode:?} mode...", test);
+fn build_test(test: &Test, mode: &Mode) -> Result<()> {
+    log::info!("Building test \"{}\" in {mode:?} mode...", test.name);
 
     // Replay mode: check that results have been recorded beforehand
 
     if matches!(mode, Mode::Replay) {
-        let results_path = release_dir().join(format!("{}.json", test));
+        let results_path = release_dir().join(format!("{}.json", test.name));
 
         if !results_path.is_file() {
             bail!(
@@ -71,7 +65,8 @@ fn build_test(test: &str, mode: &Mode) -> Result<()> {
             Mode::Replay => "replay",
         },
     )
-    .env("TEST_NAME", test)
+    .env("TEST_MODULE", &test.module)
+    .env("TEST_NAME", &test.name)
     .env_remove("RUSTUP_TOOLCHAIN") // Scrub the current crate's toolchain TODO not needed if separate proj?
     .dir(rom_crate_dir())
     .stderr_capture()
@@ -137,7 +132,7 @@ fn build_test(test: &str, mode: &Mode) -> Result<()> {
 
         // Load the JSON steps
 
-        let results_path = release_dir().join(format!("{}.json", test));
+        let results_path = release_dir().join(format!("{}.json", test.name));
 
         let results_string = fs::read_to_string(&results_path).with_context(|| {
             format!(
@@ -212,8 +207,11 @@ fn build_test(test: &str, mode: &Mode) -> Result<()> {
 
     fs::create_dir_all(release_dir())?;
 
-    let release_dir_path =
-        release_dir().join(format!("{}_{}.z64", test, mode.to_string().to_lowercase()));
+    let release_dir_path = release_dir().join(format!(
+        "{}_{}.z64",
+        test.name,
+        mode.to_string().to_lowercase()
+    ));
 
     fs::write(&release_dir_path, &z64)?;
 

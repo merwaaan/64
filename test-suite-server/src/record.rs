@@ -19,8 +19,8 @@ use winnow::{
 use crate::{Mode, find_test_rom, list_tests, release_dir};
 
 /// Records the results of either a specific test ROM of all the built record-mode ROMs by executing them on hardware.
-pub fn run(test: &Option<String>) -> Result<()> {
-    let tests = if let Some(test_name) = test {
+pub fn run(test_name: &Option<String>) -> Result<()> {
+    let tests = if let Some(test_name) = test_name {
         let path = find_test_rom(&test_name, Mode::Record);
 
         if let Some(path) = path {
@@ -29,15 +29,19 @@ pub fn run(test: &Option<String>) -> Result<()> {
             bail!("no record-mode ROM for {test_name}");
         }
     } else {
-        list_tests()?
+        let tests: Vec<_> = list_tests()?
             .into_iter()
-            .filter_map(|test| find_test_rom(&test, Mode::Record).map(|path| (test, path)))
-            .collect()
-    };
+            .filter_map(|test| {
+                find_test_rom(&test.name, Mode::Record).map(|path| (test.name.clone(), path))
+            })
+            .collect();
 
-    if tests.is_empty() {
-        bail!("no tests to record in {}", release_dir().display());
-    }
+        if tests.is_empty() {
+            bail!("no tests to record in {}", release_dir().display());
+        }
+
+        tests
+    };
 
     for (test, test_rom_path) in tests {
         record_test(&test, &test_rom_path)?;
@@ -46,8 +50,8 @@ pub fn run(test: &Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn record_test(test: &str, test_rom_path: &PathBuf) -> Result<()> {
-    log::info!("Recording \"{}\"...", test);
+fn record_test(test_name: &str, test_rom_path: &PathBuf) -> Result<()> {
+    log::info!("Recording \"{}\"...", test_name);
 
     // Upload the ROM to the SC64
 
@@ -71,7 +75,7 @@ fn record_test(test: &str, test_rom_path: &PathBuf) -> Result<()> {
 
     // Save the test result
 
-    save_test_result(test, &result).with_context(|| "failed to save test result")
+    save_test_result(&test_name, &result).with_context(|| "failed to save test result")
 }
 
 fn check_determinism(steps: &Vec<Step>, repetitions: usize) -> Result<()> {
@@ -298,10 +302,10 @@ fn parse_packet(input: &mut Partial<&[u8]>) -> ModalResult<Vec<u8>> {
 }
 
 /// Saves test results as JSON.
-fn save_test_result(test: &str, result: &Vec<Step>) -> Result<()> {
+fn save_test_result(test_name: &str, result: &Vec<Step>) -> Result<()> {
     fs::create_dir_all(release_dir())?;
 
-    let path = release_dir().join(format!("{}.json", test));
+    let path = release_dir().join(format!("{}.json", test_name));
 
     let json = serde_json::to_string_pretty(result)?;
 
