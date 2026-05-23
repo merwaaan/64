@@ -116,6 +116,7 @@ impl Comparator {
                 }))
             } else {
                 Err(TestError::Mismatch(Mismatch::DifferentStep {
+                    runtime_step: step.clone(),
                     expected_step,
                     step_index: self.test_case_step_index,
                 }))
@@ -146,12 +147,10 @@ impl Comparator {
     pub fn skip_case(&mut self) -> Result<()> {
         // TODO max size
 
-        let mut i = 0;
         loop {
             let step = self.take()?;
-            i += 1;
+
             if step == Step::StartTestCase {
-                panic!("skipped to {:?}", i);
                 self.test_case_step_index = 0;
 
                 return Ok(());
@@ -233,16 +232,17 @@ impl Comparator {
         //     self.dma_source_address, dma_source_address_misalignment, bytes_to_transfer
         // );
 
-        io::pi_dma(&io::PiDma {
-            direction: io::PiDmaDirection::PiToRam,
-            ram_address: u24::from_u32(io::physical(self.dma_buffer.as_ptr() as u32)),
-            pi_address: (self.dma_source_address - dma_source_address_misalignment) as u32,
-            length: u24::from_u32(
-                bytes_to_transfer as u32 + dma_source_address_misalignment as u32 - 1,
-            ),
-        });
-
-        io::wait_until(|| io::read_uncached(n64_specs::pi::Status::ADDRESS) & 0x1 == 0);
+        io::pi_dma(
+            &io::PiDma {
+                direction: io::PiDmaDirection::PiToRam,
+                ram_address: u24::from_u32(io::physical(self.dma_buffer.as_ptr() as u32)),
+                pi_address: (self.dma_source_address - dma_source_address_misalignment) as u32,
+                length: u24::from_u32(
+                    bytes_to_transfer as u32 + dma_source_address_misalignment as u32 - 1,
+                ),
+            },
+            true,
+        );
 
         // Copy the new data from the DMA buffer to the deserialization buffer,
         // discarding the possibly redundant byte transferred for alignment reasons

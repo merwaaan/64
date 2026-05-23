@@ -15,7 +15,7 @@ pub enum Mode {
     /// The ROM runs its test and sends back results.
     Record,
     /// The ROM runs its test and compares its own results to embedded results recorded on hardware.
-    Compare,
+    Replay,
 }
 
 #[derive(Parser, Debug)]
@@ -30,8 +30,8 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Builds the test ROMs in either record or compare mode.
-    /// Compare mode requires the test data to have been recorded beforehand.
+    /// Builds the test ROMs in either record or replay mode.
+    /// Replay mode requires the test data to have been recorded beforehand.
     Build {
         #[arg(value_enum)]
         mode: Mode,
@@ -40,7 +40,7 @@ enum Command {
         /// Builds all the available tests if not specified.
         test_name: Option<String>,
     },
-    /// Records the test results by executing the test ROMs
+    /// Records test results by executing the record-mode test ROMs
     Record {
         /// Specific test name.
         /// Records all the available tests if not specified.
@@ -48,13 +48,13 @@ enum Command {
         // TODO repetitions to validate determinism?
         // TODO run recorded on the same hardware to validate determinism?
     },
-    /// Compares the test results by executing the compare-mode ROMs
-    Compare {
+    /// Replays test results by executing the replay-mode test ROMs
+    Replay {
         /// Specific test name.
         /// Records all the available tests if not specified.
         test_name: Option<String>,
     },
-    /// Builds the record-mode ROMs, executes them to collect results and builds the compare-mode ROMs.
+    /// Builds the record-mode ROMs, executes them to collect results and builds the replay-mode ROMs.
     All {
         /// Specific test name.
         /// Builds all the available tests if not specified.
@@ -80,7 +80,7 @@ fn main() -> ExitCode {
     let result = match args.command {
         Command::Build { mode, test_name } => build::run(&mode, &test_name),
         Command::Record { test_name } => record::run(&test_name),
-        Command::Compare { test_name: _ } => todo!("compare subcommand"),
+        Command::Replay { test_name: _ } => todo!("replay subcommand"),
         Command::All { test_name, clear } => run_all(&test_name, clear),
         Command::Clear => clear_release_dir(),
     };
@@ -101,7 +101,7 @@ fn run_all(test_name: &Option<String>, clear: bool) -> Result<()> {
 
     build::run(&Mode::Record, test_name).context("failed to build record-mode ROMs")?;
     record::run(test_name).context("failed to record results on hardware")?;
-    build::run(&Mode::Compare, test_name).context("failed to build compare-mode ROMs")
+    build::run(&Mode::Replay, test_name).context("failed to build replay-mode ROMs")
 }
 
 pub struct TestContext {

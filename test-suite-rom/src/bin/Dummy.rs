@@ -31,14 +31,15 @@ impl Test for Dummy {
 
         let ram_data = io::Buffer::<u8>::with_alignment(0x40, n64_specs::pi::DMA_RAM_ALIGNMENT);
 
-        io::pi_dma(&io::PiDma {
-            direction: io::PiDmaDirection::PiToRam,
-            ram_address: u24::from_u32(io::physical(ram_data.as_ptr() as u32)),
-            pi_address: 0x1000_0000,
-            length: u24::from_u8(0x40 - 1),
-        });
-
-        io::wait_until(|| io::read_uncached(n64_specs::pi::Status::ADDRESS) & 0x1 == 0);
+        io::pi_dma(
+            &io::PiDma {
+                direction: io::PiDmaDirection::PiToRam,
+                ram_address: u24::from_u32(io::physical(ram_data.as_ptr() as u32)),
+                pi_address: 0x1000_0000,
+                length: u24::from_u8(0x40 - 1),
+            },
+            true,
+        );
 
         app.memory_region(ram_data.as_ptr() as u32, ram_data.len() as u32)?;
 

@@ -1,123 +1,116 @@
-use alloc::vec::Vec;
 use anyhow::{Result, anyhow, bail};
+use arbitrary_int::prelude::*;
 use postcard::ser_flavors::Flavor;
 use test_suite_common::Message;
 
 use crate::io;
 
-const SCR: *mut u32 = 0xBFFF_0000 as *mut u32;
+const SCR: u32 = 0x1FFF_0000;
 const SCR_CMD_BUSY_BIT: u32 = 1 << 31;
 const SCR_CMD_ERROR_BIT: u32 = 1 << 30;
 
-const DATA0: *mut u32 = 0xBFFF_0004 as *mut u32;
-const DATA1: *mut u32 = 0xBFFF_0008 as *mut u32;
+const DATA0: u32 = 0x1FFF_0004;
+const DATA1: u32 = 0x1FFF_0008;
 
-const KEY: *mut u32 = 0xBFFF_0010 as *mut u32;
+const KEY: u32 = 0x1FFF_0010;
 
-const AUX: *mut u32 = 0xBFFF_0018 as *mut u32;
+const AUX: u32 = 0x1FFF_0018;
 const AUX_HALT_VALUE: u32 = 0xFF00_0001;
 const AUX_REBOOT_VALUE: u32 = 0xFF00_0002;
 
-const ID: *const u32 = 0xBFFF_000C as *const u32;
+const ID: u32 = 0x1FFF_000C;
 
-// TODO use rom end/size to find an appropriate staging area?
+// TODO use rom end/size to find an appropriate staging area? not sure what we're overwriting here
+//const CART_STAGING: u32 = 0x1380_0000;
 const CART_STAGING_PHYSICAL: u32 = 0x1380_0000;
 const CART_STAGING: *mut u32 =
     (n64_specs::map::Segment::KSEG1 as u32 | CART_STAGING_PHYSICAL) as *mut u32;
 
-pub struct Sc64;
+const MESSAGE_BUFFER_SIZE: usize = 0x1_0000; // ~ 0,065 MB
 
-impl Default for Sc64 {
-    fn default() -> Self {
-        unsafe {
-            // Unlock the SC registers
+/// SummerCart64 interface for communicating with the server.
+pub struct Sc64 {
+    /// Buffered data to be sent over USB.
+    buffer: io::Buffer<u8>,
+}
 
-            KEY.write_volatile(0x00000000); // reset the sequencer
-            io::wait_for_pi();
-            KEY.write_volatile(0x5F554E4C); // _UNL
-            io::wait_for_pi();
-            KEY.write_volatile(0x4F434B5F); // OCK_
-            io::wait_for_pi();
+impl Sc64 {
+    /// Creates a new SummerCart64 interface.
+    ///
+    /// The program might not be running on a SummerCart, in which case this will return `None`.
+    pub fn try_new() -> Result<Option<Self>> {
+        // Unlock the SC registers
 
-            // Verify that the unlock succeeded by reading the IDENTIFIER which should be "SCv2" (0x53437632).
-            // If still locked, we'll get 0x000C_000C (open bus).
+        io::write_uncached(KEY, 0x00000000); // reset the sequencer
+        io::wait_for_pi();
+        io::write_uncached(KEY, 0x5F554E4C); // _UNL
+        io::wait_for_pi();
+        io::write_uncached(KEY, 0x4F434B5F); // OCK_
+        io::wait_for_pi();
 
-            let id = ID.read_volatile();
+        // Verify that the unlock succeeded by reading the IDENTIFIER which should be "SCv2" (0x53437632).
+        // If still locked or if we're not on a SummerCart, we'll get 0x000C_000C (open bus).
 
-            if id != 0x53437632 {
-                panic!("failed to unlock SC64 (ID={:08X})", id);
-            }
+        let id = io::read_uncached(ID);
+
+        if id != 0x53437632 {
+            return Ok(None);
         }
 
         // Enable writes to the cart so that we can stage data for USB transfers
 
-        Self::run_command(Command::ConfigSet {
+        Command::ConfigSet {
             config: Config::RomWriteEnable,
-        })
-        .expect("failed to enable writes to the SC64");
+        }
+        .run()?;
 
-        Self
+        Ok(Some(Self {
+            buffer: io::Buffer::<u8>::with_alignment(MESSAGE_BUFFER_SIZE, 4),
+        }))
     }
-}
 
-impl Sc64 {
-    // TODO move to command and return res?
-    fn run_command(command: Command) -> Result<()> {
-        unsafe {
-            // Send the command
+    /// Sends a message over USB (buffered).
+    pub fn send(&mut self, message: Message, flush: bool) -> Result<()> {
+        postcard::serialize_with_flavor(&message, BufferedTransfer::new(self))
+            .map_err(|e| anyhow!("failed to serialize message: {e}"))?;
 
-            let (data0, data1) = command.args();
-
-            DATA0.write_volatile(data0);
-            io::wait_for_pi();
-
-            DATA1.write_volatile(data1);
-            io::wait_for_pi();
-
-            SCR.write_volatile(command.id());
-            io::wait_for_pi();
-
-            // Wait until the command completes
-
-            let mut timeout = 0u32;
-
-            io::wait_for_pi();
-
-            while (SCR.read_volatile() & SCR_CMD_BUSY_BIT) != 0 {
-                timeout = timeout.wrapping_add(1);
-
-                if timeout == 0xFFFF_FFFF {
-                    bail!("SC64 command {:?} timed out", command);
-                }
-            }
-
-            if (SCR.read_volatile() & SCR_CMD_ERROR_BIT) != 0 {
-                bail!("SC64 command {:?} failed", command);
-            }
+        if flush {
+            self.flush()?;
         }
 
         Ok(())
     }
 
-    /// Sends a message over USB.
-    /// TODO reword, acc in buffer, send less often, rename queue, add flush
-    pub fn send(&self, message: Message) -> Result<()> {
-        postcard::serialize_with_flavor(&message, ChunkedTransfer::new(self))
-            .map_err(|e| anyhow!("failed to serialize message: {e}"))?;
+    /// Flushes the buffered data over USB.
+    pub fn flush(&mut self) -> Result<()> {
+        if !self.buffer.is_empty() {
+            self.send_raw(self.buffer.as_slice())?;
+            self.buffer.clear();
+        }
 
         Ok(())
     }
 
+    /// Sends raw data over USB.
     fn send_raw(&self, data: &[u8]) -> Result<()> {
-        // The buffer must be aligned to 4 bytes or we'll get errors
-
         let aligned_length = data.len().next_multiple_of(4) as u32;
+
+        // TODO DMA faster but sometimes doesn't work???
+        // io::pi_dma(
+        //     &io::PiDma {
+        //         direction: io::PiDmaDirection::RamToPi,
+        //         ram_address: u24::from_u32(io::physical(data.as_ptr() as u32)),
+        //         pi_address: CART_STAGING,
+        //         length: u24::from_u32(aligned_length - 1),
+        //     },
+        //     true,
+        // );
 
         unsafe {
             // Copy the buffer to the cart's staging area, as u32 since u8 writes seem buggy on hardware
 
             for (i, chunk_bytes) in data.chunks(4).enumerate() {
-                // Pad with 0 if not aligned on 4 bytes, the deserialization will ignore the extra bytes
+                // Pad with 0 if not exactly aligned on 4 bytes, the deserialization will ignore the extra bytes
 
                 let word = u32::from_be_bytes([
                     *chunk_bytes.get(0).unwrap_or(&0),
@@ -133,17 +126,18 @@ impl Sc64 {
 
         // Send the data
 
-        Self::run_command(Command::UsbWrite {
+        Command::UsbWrite {
             address: CART_STAGING_PHYSICAL,
             length: aligned_length,
-        })?;
+        }
+        .run()?;
 
         // Wait until the transfer completes
 
         loop {
-            Self::run_command(Command::UsbWriteStatus)?;
+            let (res0, _res1) = Command::UsbWriteStatus.run()?;
 
-            let completed = unsafe { DATA0.read_volatile() } & (1 << 31) == 0;
+            let completed = res0 & (1 << 31) == 0;
 
             if completed {
                 break;
@@ -157,56 +151,53 @@ impl Sc64 {
 
     /// Waits for the SC64 to receive a reboot request and jumps to the bootloader to start fresh.
     pub fn wait_for_reboot(&self) -> ! {
-        unsafe {
-            loop {
-                // When uploading a ROM with the --reboot flag, the SC64 will send a HALT event via AUX.
-                // It expects the same value to be written back to AUX to acknowledge the event.
+        loop {
+            // When uploading a ROM with the --reboot flag, the SC64 will send a HALT event via AUX.
+            // It expects the same value to be written back to AUX to acknowledge the event.
 
-                let event = AUX.read_volatile();
+            let event = io::read_uncached(AUX);
+            io::wait_for_pi();
+
+            if event == AUX_HALT_VALUE {
+                io::write_uncached(AUX, AUX_HALT_VALUE);
                 io::wait_for_pi();
 
-                if event == AUX_HALT_VALUE {
-                    AUX.write_volatile(AUX_HALT_VALUE);
+                // The new ROM is then uploaded and a REBOOT event is sent via AUX.
+                // Same logic, write it back.
+
+                loop {
+                    let event = io::read_uncached(AUX);
                     io::wait_for_pi();
 
-                    // The new ROM is then uploaded and a REBOOT event is sent via AUX.
-                    // Same logic, write it back.
-
-                    loop {
-                        let event = AUX.read_volatile();
+                    if event == AUX_REBOOT_VALUE {
+                        io::write_uncached(AUX, AUX_REBOOT_VALUE);
                         io::wait_for_pi();
 
-                        if event == AUX_REBOOT_VALUE {
-                            AUX.write_volatile(AUX_REBOOT_VALUE);
-                            io::wait_for_pi();
+                        // TODO how to actually reboot? (various addresses don't work, bootloader must be enabled via regs?)
+                        // TODO BOOTLOADER_SWITCH useful here?
 
-                            // TODO how to actually reboot? (various addresses don't work, bootloader must be enabled via regs?)
+                        // unsafe extern "C" {
+                        //     static __boot_start: u32;
+                        // }
 
-                            // unsafe extern "C" {
-                            //     static __boot_start: u32;
-                            // }
+                        // let boot_start = (&raw const __boot_start).addr();
 
-                            // let boot_start = (&raw const __boot_start).addr();
+                        //panic!("REBOOT?");
 
-                            //panic!("REBOOT?");
+                        // let reboot: extern "C" fn() -> ! =
+                        //     core::mem::transmute(0xBFC0_0000usize);
+                        // reboot()
 
-                            // let reboot: extern "C" fn() -> ! =
-                            //     core::mem::transmute(0xBFC0_0000usize);
-                            // reboot()
+                        // let reboot: extern "C" fn() -> ! =
+                        //     core::mem::transmute(0xA4001000usize);
+                        // reboot();
 
-                            // TODO BOOTLOADER_SWITCH????
+                        // #define IPL3_ENTRY          0xA4000040
+                        // #define REBOOT_ADDRESS      0xA4001000
+                        //self.cpu.regs.pc = 0xA4000040;
 
-                            // let reboot: extern "C" fn() -> ! =
-                            //     core::mem::transmute(0xA4001000usize);
-                            // reboot();
-
-                            // #define IPL3_ENTRY          0xA4000040
-                            // #define REBOOT_ADDRESS      0xA4001000
-                            //self.cpu.regs.pc = 0xA4000040;
-
-                            // let boot_vector = 0xA400_0040 as *const extern "C" fn();
-                            // (*boot_vector)();
-                        }
+                        // let boot_vector = 0xA400_0040 as *const extern "C" fn();
+                        // (*boot_vector)();
                     }
                 }
             }
@@ -221,6 +212,11 @@ enum Command {
     UsbWriteStatus,
 }
 
+#[derive(Debug)]
+enum Config {
+    RomWriteEnable,
+}
+
 impl Command {
     fn id(&self) -> u32 {
         match self {
@@ -230,6 +226,7 @@ impl Command {
         }
     }
 
+    /// Returns the raw DATA0 and DATA1 command arguments.
     fn args(&self) -> (u32, u32) {
         match self {
             Command::ConfigSet { config } => match config {
@@ -239,61 +236,82 @@ impl Command {
             Command::UsbWriteStatus => (0, 0),
         }
     }
-}
 
-#[derive(Debug)]
-enum Config {
-    RomWriteEnable,
-}
+    fn run(&self) -> Result<(u32, u32)> {
+        // Send the command
 
-/// Postcard serialization flavor for chunked USB transfers.
-/// Serializing large events (eg. MemoryRegion) to a complete buffer might exceed the available memory.
-/// This flavor serializes the data in chunks and streams them.
-struct ChunkedTransfer<'a> {
-    sc64: &'a Sc64,
-    buffer: Vec<u8>,
-}
+        let (data0, data1) = self.args();
 
-impl<'a> ChunkedTransfer<'a> {
-    fn new(sc64: &'a Sc64) -> Self {
-        Self {
-            sc64,
-            buffer: Vec::with_capacity(1024),
+        io::write_uncached(DATA0, data0);
+        io::wait_for_pi();
+
+        io::write_uncached(DATA1, data1);
+        io::wait_for_pi();
+
+        io::write_uncached(SCR, self.id());
+        io::wait_for_pi();
+
+        // Wait until the command completes
+
+        let mut timeout = 0u32;
+
+        io::wait_for_pi();
+
+        while (io::read_uncached(SCR) & SCR_CMD_BUSY_BIT) != 0 {
+            timeout = timeout.wrapping_add(1);
+
+            if timeout == 0xFFFF_FFFF {
+                bail!("SC64 command {:?} timed out", self);
+            }
         }
-    }
 
-    fn flush(&mut self) -> Result<()> {
-        if !self.buffer.is_empty() {
-            self.sc64.send_raw(&self.buffer)?;
-            self.buffer.clear();
+        if (io::read_uncached(SCR) & SCR_CMD_ERROR_BIT) != 0 {
+            bail!("SC64 command {:?} failed", self);
         }
 
-        Ok(())
+        Ok((io::read_uncached(DATA0), io::read_uncached(DATA1)))
     }
 }
 
-impl Flavor for ChunkedTransfer<'_> {
+/// Postcard serialization flavor for buffered USB transfers.
+///
+/// Accumulates the messages raw data in a buffer and flushes it when full.
+///
+/// This has two significant benefits:
+/// - Serializing large messages (eg. step Comments) to a complete buffer might exceed the available memory.
+///   So this "streams" such messages into multiple transfers, without allocating the whole deserialized buffer upfront.
+/// - Sending each message separately would significantly slow down execution, as we have to wait for each transfer to complete.
+///   So this flushes the buffer when full, having typically accumulated multiple messages.
+struct BufferedTransfer<'a> {
+    sc64: &'a mut Sc64,
+}
+
+impl<'a> BufferedTransfer<'a> {
+    fn new(sc64: &'a mut Sc64) -> Self {
+        Self { sc64 }
+    }
+}
+
+impl Flavor for BufferedTransfer<'_> {
     type Output = ();
 
     fn try_push(&mut self, byte: u8) -> postcard::Result<()> {
-        // Send the data if the buffer is full
-
-        if self.buffer.len() == self.buffer.capacity() {
-            self.flush().map_err(|_| postcard::Error::SerdeSerCustom)?;
-        }
-
         // Queue
 
-        self.buffer.push(byte);
+        self.sc64.buffer.push(byte);
+
+        // Send the buffered data if the buffer is full
+
+        if self.sc64.buffer.len() == self.sc64.buffer.capacity() {
+            self.sc64
+                .flush()
+                .map_err(|_| postcard::Error::SerdeSerCustom)?;
+        }
 
         Ok(())
     }
 
-    fn finalize(mut self) -> postcard::Result<()> {
-        // Send the remaining data
-
-        self.flush().map_err(|_| postcard::Error::SerdeSerCustom)?;
-
+    fn finalize(self) -> postcard::Result<()> {
         Ok(())
     }
 }

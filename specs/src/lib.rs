@@ -10,6 +10,7 @@ pub mod ai;
 pub mod cart;
 pub mod color;
 pub mod cop0;
+pub mod cpu;
 pub mod dd;
 pub mod interrupt;
 pub mod isviewer;
@@ -22,6 +23,8 @@ pub mod rsp;
 pub mod si;
 pub mod timing;
 pub mod vi;
+
+extern crate alloc;
 
 /// TODO doc with test
 #[macro_export]

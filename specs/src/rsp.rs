@@ -20,6 +20,7 @@ use bitbybit::bitfield;
 
 use crate::mapped_registers;
 
+// TODO distinguish IMEM/DMEM?
 pub const MEMORY_START: u32 = 0x0400_0000;
 pub const MEMORY_END: u32 = 0x0404_0000;
 pub const MEMORY_MASK: u32 = 0x1FFF; // TODO what for?

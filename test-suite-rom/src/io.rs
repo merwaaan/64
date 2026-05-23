@@ -28,28 +28,29 @@ pub fn write_uncached(offset: u32, value: u32) {
     unsafe { uncached_ptr(offset).write_volatile(value) }
 }
 
-//
-
+// Aligned heap buffer with a fixed capacity.
+// Reads and writes go through uncached memory, which is slower but also convenient to avoid caching issues.
 pub struct Buffer<T> {
     data: NonNull<T>,
+    capacity: usize,
     size: usize,
     layout: Layout,
 }
 
 impl<T> Buffer<T> {
-    pub fn new(size: usize) -> Self {
-        Self::with_alignment(size, 8)
+    pub fn new(capacity: usize) -> Self {
+        Self::with_alignment(capacity, 8)
     }
 
-    pub fn with_alignment(size: usize, alignment: usize) -> Self {
-        assert!(size > 0, "buffer size must be > 0");
+    pub fn with_alignment(capacity: usize, alignment: usize) -> Self {
+        assert!(capacity > 0, "buffer capacity must be > 0");
 
         assert!(
             alignment.is_power_of_two(),
             "buffer alignment must be a power of two"
         );
 
-        let layout = Layout::array::<T>(size)
+        let layout = Layout::array::<T>(capacity)
             .and_then(|l| l.align_to(alignment))
             .and_then(|l| Ok(l.pad_to_align()))
             .expect("invalid buffer layout");
@@ -62,15 +63,22 @@ impl<T> Buffer<T> {
 
         Self {
             data: unsafe { NonNull::new_unchecked(ptr.cast::<T>()) },
-            size,
+            capacity,
+            size: 0,
             layout,
         }
     }
 
-    // TODO also byte_len?
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
 
     pub fn len(&self) -> usize {
         self.size
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.size == 0
     }
 
     fn uncached_item(&self, index: usize) -> *mut T {
@@ -83,6 +91,10 @@ impl<T> Buffer<T> {
         (n64_specs::map::Segment::KSEG1 as u32 | physical) as *mut T
     }
 
+    pub fn as_slice(&self) -> &[T] {
+        unsafe { core::slice::from_raw_parts(self.as_ptr(), self.size) }
+    }
+
     pub fn as_ptr(&self) -> *mut T {
         self.uncached_item(0)
     }
@@ -93,6 +105,21 @@ impl<T> Buffer<T> {
 
     pub fn set(&mut self, index: usize, value: T) {
         unsafe { self.uncached_item(index).write_volatile(value) };
+    }
+
+    pub fn push(&mut self, value: T) {
+        assert!(
+            self.size < self.capacity,
+            "buffer capacity exceeded {}",
+            self.capacity
+        );
+
+        self.set(self.size, value);
+        self.size += 1;
+    }
+
+    pub fn clear(&mut self) {
+        self.size = 0;
     }
 }
 
@@ -120,11 +147,10 @@ pub struct PiDma {
     pub direction: PiDmaDirection,
     pub ram_address: u24,
     pub pi_address: u32,
-    pub length: u24,
+    pub length: u24, // TODO accept +1?
 }
 
-// TODO wait option?
-pub fn pi_dma(dma: &PiDma) {
+pub fn pi_dma(dma: &PiDma, wait: bool) {
     // TODO wait for other DMA
 
     write_uncached(
@@ -140,6 +166,10 @@ pub fn pi_dma(dma: &PiDma) {
     };
 
     write_uncached(start_reg_address, dma.length.value());
+
+    if wait {
+        wait_until(|| read_uncached(n64_specs::pi::Status::ADDRESS) & 0x1 == 0);
+    }
 }
 
 // RSP

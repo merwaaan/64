@@ -1,6 +1,5 @@
 extern crate alloc;
 
-use alloc::{string::String, vec::Vec};
 use anyhow::Result;
 use test_suite_common::Step;
 
@@ -20,7 +19,8 @@ pub trait Test {
     }
 
     /// Defines a parameter set for each test case.
-    fn cases() -> Vec<Self::Params>;
+    /// As an iterator to avoid allocating space for all the parameters on the heap.
+    fn cases() -> impl Iterator<Item = Self::Params>;
 
     /// Runs a single test case.
     fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError>;
@@ -69,6 +69,7 @@ impl From<TestError> for anyhow::Error {
 pub enum Mismatch {
     /// The recorded values are different from the runtime values.
     DifferentStep {
+        runtime_step: Step,
         expected_step: Step,
         step_index: u32,
     },

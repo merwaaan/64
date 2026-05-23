@@ -2,66 +2,91 @@ use alloc::string::String;
 use anyhow::{Result, anyhow, bail};
 use test_suite_common::{Message, Step};
 
-use crate::{
-    display::{Display, SUCCESS},
-    sc64::Sc64,
-    test::{Test, TestError},
-};
+use crate::{display::*, isviewer, sc64::Sc64, test::*};
 
-#[cfg(feature = "compare")]
+#[cfg(feature = "replay")]
 use crate::comparator::Comparator;
 
 pub struct App {
+    /// Graphic display.
     pub display: Display,
-    sc64: Sc64,
 
-    #[cfg(feature = "compare")]
+    /// SummerCart64 interface, if we're running on one of these.
+    sc64: Option<Sc64>,
+
+    #[cfg(feature = "replay")]
+    /// Comparator used in replay-mode ROMS.
     comparator: Comparator,
 }
 
-impl Default for App {
-    fn default() -> Self {
-        Self {
-            display: Display::default(),
-            sc64: Sc64::default(),
-
-            #[cfg(feature = "compare")]
-            comparator: Comparator::default(),
-        }
-    }
-}
-
 impl App {
-    pub fn run<T: Test>(&mut self) -> Result<()> {
-        // Display the test name and mode
+    pub fn new() -> Result<Self> {
+        let sc64 = Sc64::try_new()?;
 
-        const MODE: &str = if cfg!(feature = "record") {
-            "record"
+        Ok(Self {
+            display: Display::default(),
+            sc64,
+            #[cfg(feature = "replay")]
+            comparator: Comparator::default(),
+        })
+    }
+
+    pub fn run<T: Test>(&mut self) -> Result<()> {
+        // Display some info
+
+        let (mode, verb) = if cfg!(feature = "record") {
+            ("record", "Recording")
         } else {
-            "compare"
+            ("replay", "Replaying")
         };
 
-        self.display
-            .print(&alloc::format!("{} (mode: {})\n", T::name(), MODE), None)?;
+        self.print(&alloc::format!("{} (mode: {})\n", T::name(), mode), None)?;
+
+        if self.sc64.is_none() && cfg!(feature = "record") {
+            self.print(
+                "Not running on a SummerCart64, recording disabled\n",
+                Some(TextStyle::with_color(WARNING)),
+            )?;
+        }
 
         // Run the test
 
-        self.run_test::<T>()?;
+        self.print(
+            &alloc::format!("{} {} test cases...", verb, T::cases().count()),
+            None,
+        )?;
 
-        // Done!
+        self.run_test::<T>()
+    }
 
-        self.display.print("\nDone!\n", Some(SUCCESS))?;
-        self.display.frame(true)
+    /// Prints text to the display and the IS-Viewer.
+    pub fn print(&mut self, text: &str, style: Option<TextStyle>) -> Result<()> {
+        isviewer::write(text);
+
+        self.display.print(text, style)
     }
 
     /// Sends a message to the server.
-    pub fn send(&self, message: Message) -> Result<()> {
-        self.sc64.send(message)
+    pub fn send(&mut self, message: Message, flush: bool) -> Result<()> {
+        if let Some(sc64) = &mut self.sc64 {
+            sc64.send(message, flush)
+        } else {
+            Ok(())
+        }
     }
 
-    /// Indefinitely waits for the SC64 to reboot.
+    /// Indefinitely waits for the console to reboot.
     pub fn wait_for_reboot(&self) -> ! {
-        self.sc64.wait_for_reboot()
+        // If running on a SummerCart, this can be controlled externally
+        if let Some(sc64) = &self.sc64 {
+            sc64.wait_for_reboot()
+        }
+        // Otherwise, we're waiting for a manual reboot or shutdown
+        else {
+            loop {
+                core::hint::spin_loop();
+            }
+        }
     }
 
     // Helpers to emit steps
@@ -113,13 +138,13 @@ impl App {
     /// Runs a test.
     ///
     /// - Record mode: records the steps and sends them to the server.
-    /// - Compare mode: compares the steps against the embedded recorded steps.
+    /// - Replay mode: compares the steps against the embedded recorded steps.
     fn run_test<T: Test>(&mut self) -> Result<()> {
         #[cfg(feature = "record")]
         self.record_test::<T>()?;
 
-        #[cfg(feature = "compare")]
-        self.compare_test::<T>()?;
+        #[cfg(feature = "replay")]
+        self.replay_test::<T>()?;
 
         Ok(())
     }
@@ -128,74 +153,74 @@ impl App {
     fn record_test<T: Test>(&mut self) -> Result<()> {
         // Notify the server that the test starts
 
-        self.send(Message::TestStarted)?;
+        self.send(Message::TestStarted, false)?;
 
-        // Run all the test cases
+        // Run each test case
 
-        for (case_index, params) in T::cases().iter().enumerate() {
-            self.display
-                .print(&alloc::format!("Running case #{}...", case_index), None)?;
-
+        for (case_index, params) in T::cases().enumerate() {
             // Record a "case start" step to delimit cases
 
             self.process_step(Step::StartTestCase)?;
 
             // Run the test case
 
-            match T::run(params, self) {
+            match T::run(&params, self) {
                 Ok(()) => {}
 
-                Err(e) => bail!(
-                    "failed to run test case #{} with params {:?}, {}",
+                Err(TestError::Other(e)) => bail!(
+                    "failed to run test case {} with params {:?}, {}",
                     case_index,
                     params,
-                    123, // TODOe
+                    e
                 ),
+
+                Err(TestError::Mismatch(_)) => unreachable!(),
             }
         }
 
         // Notify the server that the test completed
+        // (and flush the remaining buffered data)
 
-        self.send(Message::TestCompleted)
+        self.send(Message::TestCompleted, true)?;
+
+        // Done!
+
+        self.print("\nDone!\n", Some(TextStyle::with_color(SUCCESS)))?;
+        self.display.frame(true)
     }
 
-    #[cfg(feature = "compare")]
-    fn compare_test<T: Test>(&mut self) -> Result<()> {
-        // Run all the test cases
+    #[cfg(feature = "replay")]
+    fn replay_test<T: Test>(&mut self) -> Result<()> {
+        // Run each test case
 
-        for (case_index, params) in T::cases().iter().enumerate() {
-            self.display
-                .print(&alloc::format!("Running case #{}...", case_index), None)?;
+        let mut successful_cases = 0;
 
+        for (case_index, params) in T::cases().enumerate() {
             match T::run(&params, self) {
                 Ok(()) => {
                     // Ensure that all the recorded steps have been compared
 
                     match self.comparator.finalize_case() {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            successful_cases += 1;
+
+                            //self.display.print("ok", None)?;
+                        }
 
                         Err(TestError::Mismatch(mismatch)) => {
-                            self.display.print(
-                                &alloc::format!("mismatch {:?}", mismatch),
-                                Some(crate::display::ERROR),
-                            )?;
+                            self.print_mismatch(&mismatch)?;
 
                             self.comparator.skip_case()?;
                         }
 
                         Err(TestError::Other(e)) => {
-                            bail!("failed to finalize test case #{}, {}", case_index, e)
+                            bail!("failed to finalize test case {}, {}", case_index, e)
                         }
                     }
-
-                    self.display.print("ok", None)?;
                 }
 
                 Err(TestError::Mismatch(mismatch)) => {
-                    self.display.print(
-                        &alloc::format!("mismatch {:?}", mismatch),
-                        Some(crate::display::ERROR),
-                    )?;
+                    self.print_mismatch(&mismatch)?;
 
                     // Skip the rest of the test case
                     // (only if the mismatch is not due to excess steps, in which case we're already at the start of the next case)
@@ -205,24 +230,70 @@ impl App {
                     }
                 }
 
-                Err(TestError::Other(e)) => bail!("failed to run test case #{}, {}", case_index, e),
+                Err(TestError::Other(e)) => bail!("failed to run test case {}, {}", case_index, e),
             }
+        }
+
+        // Done!
+
+        if successful_cases == T::cases().count() {
+            self.print("\nSuccess!\n", Some(TextStyle::with_color(SUCCESS)))?;
+            self.display.frame(true);
+        } else {
+            self.print(
+                &alloc::format!(
+                    "\n{}/{} tests failed\n",
+                    T::cases().count() - successful_cases,
+                    T::cases().count()
+                ),
+                Some(TextStyle::with_color(ERROR)),
+            )?;
+            self.display.frame(false);
         }
 
         Ok(())
     }
 
+    #[cfg(feature = "replay")]
+    fn print_mismatch(&mut self, mismatch: &crate::test::Mismatch) -> Result<()> {
+        use crate::test::Mismatch;
+
+        let message = match mismatch {
+            Mismatch::DifferentStep {
+                runtime_step,
+                expected_step,
+                step_index,
+            } => alloc::format!(
+                "Mismatch at step {}:\n  - expected {:08X?}\n  -      got {:08X?}",
+                step_index,
+                expected_step,
+                runtime_step,
+            ),
+
+            Mismatch::ExcessSteps { step_index } => {
+                alloc::format!("Emitted more steps than expected ({})", step_index)
+            }
+
+            Mismatch::MissingSteps { step_index } => {
+                alloc::format!("Emitted less steps than expected ({})", step_index)
+            }
+        };
+
+        self.display
+            .print(&message, Some(TextStyle::with_color(ERROR)))
+    }
+
     /// "Processes" a step.
     ///
     /// - Record mode: send it to the server.
-    /// - Compare mode: compare it against the embedded recorded steps.
+    /// - Replay mode: compare it against the embedded recorded steps.
     fn process_step(&mut self, step: Step) -> Result<(), TestError> {
         #[cfg(feature = "record")]
         {
-            self.send(Message::TestStep(step))?;
+            self.send(Message::TestStep(step), false)?;
         }
 
-        #[cfg(feature = "compare")]
+        #[cfg(feature = "replay")]
         {
             self.comparator.compare(&step)?;
         }

@@ -59,7 +59,7 @@ fn record_test(test: &TestContext) -> Result<()> {
 
     // If requested, repeat the recording to validate determinism
 
-    let repetitions = None; // Some(1); // TODO to arg
+    let repetitions = None; //Some(1); // TODO to arg
 
     if let Some(repetitions) = repetitions {
         check_determinism(&result, repetitions)?;
@@ -113,6 +113,8 @@ fn sc64deployer_path() -> PathBuf {
 fn upload_rom_to_sc64(path: &PathBuf) -> Result<()> {
     log::info!("  Uploading \"{}\" to SC64...", path.display());
 
+    // TODO download helper
+
     let result = duct::cmd!(
         sc64deployer_path(),
         "upload",
@@ -157,8 +159,10 @@ fn listen_for_test_result() -> Result<Vec<Step>> {
     // (the test ROMs stream data in chunks so a single message can be split across multiple packets)
     let mut raw_messages_buffer = Vec::new();
 
+    // All the decoded steps received so far
     let mut steps = Vec::new();
 
+    let mut xxx = 0; // TODO rm
     loop {
         match port.read(&mut reception_buffer) {
             Ok(0) => {
@@ -182,13 +186,20 @@ fn listen_for_test_result() -> Result<Vec<Step>> {
 
                     match message {
                         Message::TestStarted => {
-                            log::info!("    Test started");
+                            //log::debug!("    Test started");
                         }
                         Message::TestStep(step) => {
+                            if step == Step::StartTestCase {
+                                // if (xxx % 1000) == 0 {
+                                //     log::info!("{}", xxx);
+                                // }
+
+                                xxx += 1;
+                            }
                             steps.push(step);
                         }
                         Message::TestCompleted => {
-                            log::info!("    Test completed");
+                            //log::debug!("    Test completed");
 
                             return Ok(steps);
                         }
@@ -225,7 +236,7 @@ fn parse_messages(
 
         let mut cursor = Partial::new(raw_packets_buffer.as_slice());
 
-        // Parse the first packet
+        // Try to parse the first packet, which might be fully received or not
 
         match parse_packet(&mut cursor) {
             Ok(data) => {
@@ -238,23 +249,35 @@ fn parse_messages(
 
                 //println!("raw_messages_buffer: {:02X?}", raw_messages_buffer);
 
-                // Try to deserialize the message, but it might be incomplete if split across multiple packets
+                // Try to deserialize the packet messages.
+                // The last one might be incomplete if split across multiple packets.
 
-                match postcard::from_bytes(raw_messages_buffer) {
-                    Ok(message) => {
-                        messages.push(message);
+                loop {
+                    match postcard::take_from_bytes(raw_messages_buffer) {
+                        Ok((message, rest)) => {
+                            messages.push(message);
 
-                        raw_messages_buffer.clear();
-                    }
-                    Err(postcard::Error::DeserializeUnexpectedEnd) => {
-                        //log::debug!("incomplete message, waiting for more packets");
-                    }
-                    Err(e) => {
-                        panic!("failed to deserialize message, {:?}", e);
+                            let consumed = raw_messages_buffer.len() - rest.len();
+                            raw_messages_buffer.drain(..consumed);
+                        }
+                        Err(postcard::Error::DeserializeUnexpectedEnd) => {
+                            // Incomplete message, wait for more data
+
+                            //log::debug!("incomplete message, waiting for more packets");
+
+                            break;
+                        }
+                        Err(e) => {
+                            panic!("failed to deserialize message, {:?}", e);
+                        }
                     }
                 }
             }
-            Err(ErrMode::Incomplete(_)) => break,
+            Err(ErrMode::Incomplete(_)) => {
+                // Incomplete packet, wait for more data
+
+                break;
+            }
             Err(e) => {
                 panic!("failed to parse packet, {:?}", e); // TODO bail!
             }

@@ -120,14 +120,13 @@ impl Display {
         }
     }
 
-    pub fn print(&mut self, text: &str, color: Option<RGBA5551>) -> Result<()> {
-        let text_color = if let Some(color) = color {
-            rgba5551_to_eg_rgb888(color)
-        } else {
-            Rgb888::BLACK
-        };
-
-        let text_style = MonoTextStyle::new(&FONT_6X10, text_color);
+    pub fn print(&mut self, text: &str, style: Option<TextStyle>) -> Result<()> {
+        let text_style = MonoTextStyle::new(
+            &FONT_6X10,
+            style
+                .map(|s| rgba5551_to_eg_rgb888(s.color))
+                .unwrap_or(Rgb888::BLACK),
+        );
 
         let bounds = Rectangle::new(
             Point::new(MARGIN as i32, self.text_cursor_y as i32),
@@ -170,6 +169,16 @@ impl Display {
         // The framebuffer must be accessed via the uncached segment to avoid caching glitches
 
         (n64_specs::map::Segment::KSEG1 as u32 | self.buffer.as_ptr() as u32) as *mut u16
+    }
+}
+
+pub struct TextStyle {
+    pub color: RGBA5551,
+}
+
+impl TextStyle {
+    pub fn with_color(color: RGBA5551) -> Self {
+        Self { color }
     }
 }
 

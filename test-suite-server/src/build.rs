@@ -6,7 +6,7 @@ use test_suite_common::{Step, strip_comments};
 
 use crate::{Mode, TestContext, list_tests, release_dir, rom_bin_dir, rom_crate_dir};
 
-/// Builds either a specific test ROM of all of them in either record or compare mode.
+/// Builds either a specific test ROM of all of them in either record or replay mode.
 pub fn run(mode: &Mode, test_name: &Option<String>) -> Result<()> {
     log::info!("Building tests in {mode:?} mode...");
 
@@ -35,9 +35,9 @@ pub fn run(mode: &Mode, test_name: &Option<String>) -> Result<()> {
 fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
     log::info!("Building test \"{}\" in {mode:?} mode...", test.name);
 
-    // Compare mode: check that results have been recorded beforehand
+    // Replay mode: check that results have been recorded beforehand
 
-    if matches!(mode, Mode::Compare) {
+    if matches!(mode, Mode::Replay) {
         let results_path = release_dir().join(format!("{}.json", test.name));
 
         if !results_path.is_file() {
@@ -53,7 +53,7 @@ fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
     // To do so, we simply concatenate a few parts:
     // 1 - the Libdragon IPL, which initializes the system
     // 2 - our compiled rust binary, which actually is an ELF file that will be parsed by the IPL to copy its contents into RAM
-    // 3 - for compare-mode ROMs only: the recorded test results that the program will compare to its own results
+    // 3 - for replay-mode ROMs only: the recorded test results that the program will compare to its own results
     //
     // This is adapted from https://github.com/rust-n64/nust64
 
@@ -73,7 +73,7 @@ fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
         "--features",
         match mode {
             Mode::Record => "record",
-            Mode::Compare => "compare",
+            Mode::Replay => "replay",
         },
     )
     .env_remove("RUSTUP_TOOLCHAIN") // Scrub the current crate's toolchain
@@ -119,10 +119,11 @@ fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
 
     let program_offset = z64.len();
 
-    let program_path = concat!(
+    let program_path = format!(
+        "{}/../target/mips-nintendo64-none/release/{}",
         env!("CARGO_MANIFEST_DIR"),
-        "/../target/mips-nintendo64-none/release/Dummy"
-    ); // TODO dyn name
+        test.name
+    );
 
     let program = fs::read(program_path)?;
 
@@ -136,7 +137,7 @@ fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
 
     // Add the embedded test results
 
-    if matches!(mode, Mode::Compare) {
+    if matches!(mode, Mode::Replay) {
         log::debug!("  Adding embedded test results to ROM...");
 
         // Load the JSON steps
@@ -213,6 +214,8 @@ fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
     }
 
     // Output the ROM to the release directory
+
+    fs::create_dir_all(release_dir())?;
 
     let release_dir_path = release_dir().join(format!(
         "{}_{}.z64",

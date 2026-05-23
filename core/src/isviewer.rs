@@ -3,10 +3,10 @@ use n64_specs as specs;
 use crate::{location::Location, value::Value};
 
 pub type IsViewerControlLocation =
-    Location<{ specs::isviewer::CONTROL_ADDRESS }, { specs::isviewer::CONTROL_ADDRESS + 4 }>;
+    Location<{ specs::isviewer::LENGTH_ADDRESS }, { specs::isviewer::LENGTH_ADDRESS + 4 }>;
 
 pub type IsViewerBufferLocation =
-    Location<{ specs::isviewer::BUFFER_START }, { specs::isviewer::BUFFER_END }>;
+    Location<{ specs::isviewer::BUFFER_START_ADDRESS }, { specs::isviewer::BUFFER_END_ADDRESS }>;
 
 /// The IS-Viewer is a memory-mapped device connected to a PC that allows users to interact with a live program.
 ///
@@ -42,6 +42,7 @@ impl IsViewer {
     pub(crate) fn push<T: Value>(&mut self, addr: IsViewerBufferLocation, data: T) {
         data.write_mem(&mut self.buffer, addr.relative());
 
+        // TODO wrong? could have written the addr mult times
         self.buffer_size += T::BYTES;
     }
 

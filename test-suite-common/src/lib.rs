@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Each test emits a sequence of steps.
 /// In record mode, the steps are sent to the server to build a compare-mode ROM.
-/// In compare mode, the steps are compared against the embedded recorded steps.
+/// In replay mode, the steps are compared against the embedded recorded steps.
 #[derive(
     Clone, PartialEq, Debug, Serialize, Deserialize, strum::Display, strum::EnumDiscriminants,
 )]

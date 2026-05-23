@@ -1,23 +1,24 @@
 #![no_std]
 #![no_main]
 #![feature(alloc_error_handler)]
+#![feature(asm_experimental_arch)]
 #![feature(used_with_arg)]
-#![feature(let_chains)]
 
-#[cfg(not(any(feature = "record", feature = "compare")))]
-compile_error!("must enable either feature \"record\" or \"compare\"");
+#[cfg(not(any(feature = "record", feature = "replay")))]
+compile_error!("must enable either feature \"record\" or \"replay\"");
 
-#[cfg(all(feature = "record", feature = "compare"))]
-compile_error!("features \"record\" and \"compare\" are mutually exclusive");
+#[cfg(all(feature = "record", feature = "replay"))]
+compile_error!("features \"record\" and \"replay\" are mutually exclusive");
 
 pub mod allocator;
 pub mod app;
 pub mod display;
 pub mod io;
+pub mod isviewer;
+pub mod program;
 pub mod sc64;
 pub mod test;
-
-//#[cfg(feature = "compare")]
+//#[cfg(feature = "replay")]
 pub mod comparator;
 
 extern crate alloc;
@@ -31,16 +32,16 @@ pub fn app() -> &'static mut App {
     unsafe { &mut *APP }
 }
 
-pub fn init_app() -> &'static mut App {
+pub fn init_app() -> anyhow::Result<&'static mut App> {
     crate::allocator::configure();
 
-    let app_boxed = alloc::boxed::Box::new(App::default());
+    let app_boxed = alloc::boxed::Box::new(App::new()?);
 
     unsafe {
         APP = &raw mut *alloc::boxed::Box::into_raw(app_boxed);
     }
 
-    app()
+    Ok(app())
 }
 
 #[macro_export]
@@ -56,17 +57,21 @@ macro_rules! run_test {
         use core::arch::asm;
         use n64_specs as specs;
         use test_suite_common::*;
-        use test_suite_rom::*;
+        use test_suite_rom::{*, program::*};
         use crate::{app::App, test::{Test, TestError}};
 
         // Setup the panic handler
 
         #[panic_handler]
         fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
-            $crate::app().display.print(&alloc::format!("{}", info), Some($crate::display::ERROR)).ok();
+            $crate::app().print(
+                &alloc::format!("{}", info),
+                Some($crate::display::TextStyle::with_color($crate::display::ERROR))
+            ).ok();
+
             $crate::app().display.frame(false).ok();
 
-            $crate::app().send(Message::Panic).ok();
+            $crate::app().send(Message::Panic, true).ok();
 
             $crate::app().wait_for_reboot()
         }
@@ -79,7 +84,7 @@ macro_rules! run_test {
 
         #[unsafe(no_mangle)]
         extern "C" fn _entrypoint() -> ! {
-            let mut app = $crate::init_app();
+            let mut app = $crate::init_app().expect("failed to initialize app");
 
             app.run::<$test>().expect("failed to run test");
 
