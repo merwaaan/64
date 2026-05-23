@@ -1,12 +1,17 @@
-#![no_std]
-#![no_main]
-
+use alloc::format;
 use n64_specs::cpu::registers::Register;
 
-test_suite_rom::run_test!(CpuInstructionAnd);
+use crate::{
+    app::App,
+    io,
+    program::Program,
+    test::{Test, TestError},
+};
+
+pub struct CpuInstructionAnd;
 
 #[derive(Debug)]
-struct Param {
+pub struct Param {
     value1: u32,
     value2: u32,
     reg_in1: Register,

@@ -16,13 +16,18 @@
 //! No surprises:
 //! - All the used registers are masked as documented
 
-#![no_std]
-#![no_main]
-#![feature(asm_experimental_arch)]
-
-use specs::cop0::Register;
+use alloc::format;
+use core::arch::asm;
+use n64_specs::cop0::Register;
 use strum::IntoEnumIterator;
 
+use crate::{
+    app::App,
+    no_params,
+    test::{Test, TestError},
+};
+
+// TODO ugh
 macro_rules! for_cop0_reg {
     ($reg:expr, $row:ident $(, $($extra:tt)* )? ) => {
         match $reg {
@@ -102,7 +107,7 @@ macro_rules! mtc0 {
     };
 }
 
-test_suite_rom::run_test!(Cop0RegistersMasking);
+pub struct Cop0RegistersMasking;
 
 impl Test for Cop0RegistersMasking {
     no_params!();

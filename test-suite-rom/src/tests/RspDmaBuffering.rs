@@ -3,18 +3,23 @@
 //! No surprises:
 //! - ?
 
-#![no_std]
-#![no_main]
-
 // TODO params both dirs
 
-test_suite_rom::run_test!(RspDmaBuffering);
+use alloc::format;
+use n64_specs::rsp;
+
+use crate::{
+    app::App,
+    test::{Test, TestError},
+};
+
+pub struct RspDmaBuffering;
 
 impl Test for RspDmaBuffering {
     type Params = u32;
 
-    fn cases() -> Vec<Self::Params> {
-        Vec::from([2 /* , 3, 4, 10, 100*/])
+    fn cases() -> impl Iterator<Item = Self::Params> {
+        [2 /* , 3, 4, 10, 100*/].into_iter()
     }
 
     fn run(transfers: &Self::Params, app: &mut App) -> Result<(), TestError> {
@@ -23,7 +28,7 @@ impl Test for RspDmaBuffering {
         // Fill the RAM with sequences of unique values.
         // Each transfer will be assigned a different sequence so that we can identify which one copied what.
 
-        let ram_size = (specs::rsp::MEMORY_BANK_SIZE * *transfers) as usize;
+        let ram_size = (rsp::MEMORY_BANK_SIZE * *transfers) as usize;
 
         let mut ram_data = alloc::vec![1u8; ram_size];
 
@@ -32,9 +37,9 @@ impl Test for RspDmaBuffering {
 
         // unsafe {
         //     for transfer in 0..*transfers {
-        //         for i in 0..specs::rsp::MEMORY_BANK_SIZE {
+        //         for i in 0..rsp::MEMORY_BANK_SIZE {
         //             uncached_ptr
-        //                 //.add((transfer * specs::rsp::MEMORY_BANK_SIZE + i) as usize)
+        //                 //.add((transfer * rsp::MEMORY_BANK_SIZE + i) as usize)
         //                 .write_volatile(5 as u8);
         //         }
         //     }
@@ -45,7 +50,7 @@ impl Test for RspDmaBuffering {
 
         unsafe {
             uncached_ptr
-                //.add((transfer * specs::rsp::MEMORY_BANK_SIZE + i) as usize)
+                //.add((transfer * rsp::MEMORY_BANK_SIZE + i) as usize)
                 .write_volatile(5);
         }
 
@@ -56,7 +61,7 @@ impl Test for RspDmaBuffering {
 
         //app.push_memory_region(ram_data.as_ptr() as u32, ram_data.len() as u32)
 
-        // app.push_memory_region(sources[0].as_ptr() as u32, specs::rsp::MEMORY_BANK_SIZE)
+        // app.push_memory_region(sources[0].as_ptr() as u32, rsp::MEMORY_BANK_SIZE)
 
         // // Clear the last byte of the RSP memory to use it as a sentinel
 
@@ -76,13 +81,13 @@ impl Test for RspDmaBuffering {
 
         //     // Make sure that the transfers are queued while the first one is still in progress
 
-        //     assert_eq!(io::read_uncached(n64_specs::rsp::DmaBusy::ADDRESS), 1);
+        //     assert_eq!(io::read_uncached(n64_rsp::DmaBusy::ADDRESS), 1);
         // }
 
-        // io::wait_until(|| io::read_uncached(n64_specs::rsp::DmaBusy::ADDRESS) == 0);
+        // io::wait_until(|| io::read_uncached(n64_rsp::DmaBusy::ADDRESS) == 0);
 
         // // Record the final RAM address, which indicates which transfer completed last
 
-        // app.push_value(io::read_uncached(specs::rsp::DmaRamAddress::ADDRESS))
+        // app.push_value(io::read_uncached(rsp::DmaRamAddress::ADDRESS))
     }
 }

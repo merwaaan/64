@@ -1,15 +1,21 @@
 //! Dummy test to validate the recording mechanism and various helpers.
 
-#![no_std]
-#![no_main]
+use alloc::{format, vec::Vec};
+use arbitrary_int::u24;
 
-test_suite_rom::run_test!(Dummy);
+use crate::{
+    app::App,
+    io,
+    test::{Test, TestError},
+};
+
+pub struct Dummy;
 
 impl Test for Dummy {
     type Params = bool;
 
-    fn cases() -> Vec<Self::Params> {
-        Vec::from([true, false])
+    fn cases() -> impl Iterator<Item = Self::Params> {
+        [true, false].into_iter()
     }
 
     fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {

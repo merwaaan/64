@@ -8,10 +8,15 @@
 // TODO not really useful as it seems latched, test latching instead?
 // TODO test buffering
 
-#![no_std]
-#![no_main]
+use n64_specs::ai;
 
-test_suite_rom::run_test!(AiLengthRegisterMasking);
+use crate::{
+    app::App,
+    io, no_params,
+    test::{Test, TestError},
+};
+
+pub struct AiLengthRegisterMasking;
 
 impl Test for AiLengthRegisterMasking {
     no_params!();
@@ -20,13 +25,11 @@ impl Test for AiLengthRegisterMasking {
         // Disable DMA
 
         io::write_uncached(
-            specs::ai::Control::ADDRESS,
-            specs::ai::Control::default()
-                .with_dma_enabled(false)
-                .raw_value(),
+            ai::Control::ADDRESS,
+            ai::Control::default().with_dma_enabled(false).raw_value(),
         );
 
-        let length_reg = io::uncached_ptr(specs::ai::DmaLength::ADDRESS);
+        let length_reg = io::uncached_ptr(ai::DmaLength::ADDRESS);
 
         unsafe {
             app.comment("Write 0x0000_0000 to the AI DMA length register")?;

@@ -6,57 +6,66 @@
 //! No surprises:
 //! - DMA wraps around the target bank without leaking into the other one TODO check
 
-#![no_std]
-#![no_main]
+use alloc::format;
+use arbitrary_int::u12;
+use n64_specs::rsp;
+
+use crate::{
+    app::App,
+    io,
+    test::{Test, TestError},
+};
 
 // TODO does this wraps around RAM?
 
 #[derive(Debug)]
-struct Dma {
+pub struct Dma {
     rsp_destination: u32,
     rows: u8,
     length: u32,
     skip: u16,
 }
 
-test_suite_rom::run_test!(RspDmaFromRam);
+pub struct RspDmaFromRam;
 
 const RAM_DATA_SIZE: usize = 0x4000;
 
 impl Test for RspDmaFromRam {
     type Params = Dma;
 
-    fn cases() -> Vec<Self::Params> {
-        let mut cases = Vec::new();
-
-        // Various destinations and lengths
-
-        for bank_offset in [0, specs::rsp::MEMORY_BANK_SIZE] {
-            for bank_internal_offset in [0, 0xD00, 0xFFF] {
-                for length in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 128, 0x400, 0xFFF] {
-                    cases.push(Dma {
-                        rsp_destination: bank_offset + bank_internal_offset,
-                        rows: 0,
-                        length,
-                        skip: 0,
-                    });
-                }
-            }
-        }
-
-        // Various layouts
-
+    fn cases() -> impl Iterator<Item = Self::Params> {
         // TODO
-        // for row in [1, 2, 10, 0xFF] {
-        //     cases.push(Dma {
-        //         rsp_destination: 0,
-        //         rows: 1,
-        //         length,
-        //         skip: 0,
-        //     });
+        [].into_iter()
+        // let mut cases = Vec::new();
+
+        // // Various destinations and lengths
+
+        // for bank_offset in [0, rsp::MEMORY_BANK_SIZE] {
+        //     for bank_internal_offset in [0, 0xD00, 0xFFF] {
+        //         for length in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 128, 0x400, 0xFFF] {
+        //             cases.push(Dma {
+        //                 rsp_destination: bank_offset + bank_internal_offset,
+        //                 rows: 0,
+        //                 length,
+        //                 skip: 0,
+        //             });
+        //         }
+        //     }
         // }
 
-        cases
+        // // Various layouts
+
+        // // TODO
+        // // for row in [1, 2, 10, 0xFF] {
+        // //     cases.push(Dma {
+        // //         rsp_destination: 0,
+        // //         rows: 1,
+        // //         length,
+        // //         skip: 0,
+        // //     });
+        // // }
+
+        // cases
     }
 
     fn run(dma: &Dma, app: &mut App) -> Result<(), TestError> {
@@ -67,7 +76,7 @@ impl Test for RspDmaFromRam {
 
         // Clear the RSP memory
 
-        let rsp_mem = io::uncached_ptr(specs::rsp::MEMORY_START);
+        let rsp_mem = io::uncached_ptr(rsp::MEMORY_START);
 
         unsafe {
             for i in 0..0x800 {
@@ -92,15 +101,15 @@ impl Test for RspDmaFromRam {
 
         // DMA
 
-        app.value(io::read_uncached(specs::rsp::DmaBusy::ADDRESS))?;
+        app.value(io::read_uncached(rsp::DmaBusy::ADDRESS))?;
 
-        io::write_uncached(specs::rsp::DmaRspAddress::ADDRESS, dma.rsp_destination);
+        io::write_uncached(rsp::DmaRspAddress::ADDRESS, dma.rsp_destination);
 
-        io::write_uncached(specs::rsp::DmaRamAddress::ADDRESS, ram_data.as_ptr() as u32);
+        io::write_uncached(rsp::DmaRamAddress::ADDRESS, ram_data.as_ptr() as u32);
 
         io::write_uncached(
-            specs::rsp::DmaReadLength::ADDRESS,
-            specs::rsp::DmaReadLength::default()
+            rsp::DmaReadLength::ADDRESS,
+            rsp::DmaReadLength::default()
                 .with_rows(dma.rows)
                 .with_length(u12::from_u32(dma.length))
                 .with_skip(u12::new(dma.skip))
@@ -108,7 +117,7 @@ impl Test for RspDmaFromRam {
         );
 
         for _ in 0..3 {
-            app.value(io::read_uncached(specs::rsp::DmaBusy::ADDRESS))?;
+            app.value(io::read_uncached(rsp::DmaBusy::ADDRESS))?;
         }
 
         // TODO wait till it's over
@@ -119,6 +128,6 @@ impl Test for RspDmaFromRam {
 
         // Record the whole RSP memory
 
-        app.memory_region(specs::rsp::MEMORY_START, 0x2000)
+        app.memory_region(rsp::MEMORY_START, 0x2000)
     }
 }

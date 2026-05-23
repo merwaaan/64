@@ -1,5 +1,4 @@
 use anyhow::{Result, anyhow, bail};
-use arbitrary_int::prelude::*;
 use postcard::ser_flavors::Flavor;
 use test_suite_common::Message;
 

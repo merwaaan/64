@@ -4,41 +4,38 @@ use anyhow::{Context, Result, anyhow, bail};
 use object::{Object, ObjectSymbol};
 use test_suite_common::{Step, strip_comments};
 
-use crate::{Mode, TestContext, list_tests, release_dir, rom_bin_dir, rom_crate_dir};
+use crate::{Mode, list_tests, release_dir, rom_crate_dir, rom_tests_dir};
 
 /// Builds either a specific test ROM of all of them in either record or replay mode.
-pub fn run(mode: &Mode, test_name: &Option<String>) -> Result<()> {
+pub fn run(mode: &Mode, test: &Option<String>) -> Result<()> {
     log::info!("Building tests in {mode:?} mode...");
 
-    let tests = if let Some(test_name) = test_name {
-        let source_path = rom_bin_dir().join(format!("{test_name}.rs"));
+    let tests = if let Some(test) = test {
+        let source_path = rom_tests_dir().join(format!("{test}.rs"));
 
         if !source_path.is_file() {
-            bail!("no test source for {test_name}");
+            bail!("no test named {test} in {}", rom_tests_dir().display());
+        } else {
+            vec![test.clone()]
         }
-
-        vec![TestContext {
-            name: test_name.clone(),
-            path: source_path,
-        }]
     } else {
         list_tests()?
     };
 
     for test in tests {
-        build_test(mode, &test)?;
+        build_test(&test, mode)?;
     }
 
     Ok(())
 }
 
-fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
-    log::info!("Building test \"{}\" in {mode:?} mode...", test.name);
+fn build_test(test: &str, mode: &Mode) -> Result<()> {
+    log::info!("Building test \"{}\" in {mode:?} mode...", test);
 
     // Replay mode: check that results have been recorded beforehand
 
     if matches!(mode, Mode::Replay) {
-        let results_path = release_dir().join(format!("{}.json", test.name));
+        let results_path = release_dir().join(format!("{}.json", test));
 
         if !results_path.is_file() {
             bail!(
@@ -67,8 +64,6 @@ fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
         "cargo",
         "build",
         "--release",
-        "--bin",
-        &test.name,
         "--no-default-features",
         "--features",
         match mode {
@@ -76,7 +71,8 @@ fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
             Mode::Replay => "replay",
         },
     )
-    .env_remove("RUSTUP_TOOLCHAIN") // Scrub the current crate's toolchain
+    .env("TEST_NAME", test)
+    .env_remove("RUSTUP_TOOLCHAIN") // Scrub the current crate's toolchain TODO not needed if separate proj?
     .dir(rom_crate_dir())
     .stderr_capture()
     .unchecked()
@@ -120,9 +116,8 @@ fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
     let program_offset = z64.len();
 
     let program_path = format!(
-        "{}/../target/mips-nintendo64-none/release/{}",
-        env!("CARGO_MANIFEST_DIR"),
-        test.name
+        "{}/../target/mips-nintendo64-none/release/test_suite_rom",
+        env!("CARGO_MANIFEST_DIR")
     );
 
     let program = fs::read(program_path)?;
@@ -142,7 +137,7 @@ fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
 
         // Load the JSON steps
 
-        let results_path = release_dir().join(format!("{}.json", test.name));
+        let results_path = release_dir().join(format!("{}.json", test));
 
         let results_string = fs::read_to_string(&results_path).with_context(|| {
             format!(
@@ -217,11 +212,8 @@ fn build_test(mode: &Mode, test: &TestContext) -> Result<()> {
 
     fs::create_dir_all(release_dir())?;
 
-    let release_dir_path = release_dir().join(format!(
-        "{}_{}.z64",
-        test.name,
-        mode.to_string().to_lowercase()
-    ));
+    let release_dir_path =
+        release_dir().join(format!("{}_{}.z64", test, mode.to_string().to_lowercase()));
 
     fs::write(&release_dir_path, &z64)?;
 

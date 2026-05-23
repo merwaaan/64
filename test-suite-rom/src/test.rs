@@ -28,12 +28,20 @@ pub trait Test {
 
 /// Helper to avoid having to specify empty boilerplate for tests without parameters.
 #[macro_export]
+macro_rules! declare_test {
+    ($test:ident) => {
+        pub struct $test;
+    };
+}
+
+/// Helper to avoid having to specify empty boilerplate for tests without parameters.
+#[macro_export]
 macro_rules! no_params {
     () => {
         type Params = ();
 
-        fn cases() -> Vec<Self::Params> {
-            Vec::from([()])
+        fn cases() -> impl Iterator<Item = Self::Params> {
+            [()].into_iter()
         }
     };
 }

@@ -6,23 +6,30 @@
 //! No surprises:
 //! - The Dma full/busy registers are not writable
 
-#![no_std]
-#![no_main]
+use alloc::format;
+use n64_specs::rsp;
 
-test_suite_rom::run_test!(RspRegistersMasking);
+use crate::{
+    app::App,
+    io,
+    test::{Test, TestError},
+};
+
+pub struct RspRegistersMasking;
 
 impl Test for RspRegistersMasking {
-    type Params = specs::rsp::Register;
+    type Params = rsp::Register;
 
-    fn cases() -> Vec<Self::Params> {
-        Vec::from([
-            specs::rsp::Register::DmaRspAddress,
-            specs::rsp::Register::DmaRamAddress,
-            //specs::rsp::Register::DmaReadLength, // TODO setup DMA? possible to have empty DMA?
-            // specs::rsp::Register::DmaWriteLength,
-            specs::rsp::Register::DmaFull,
-            specs::rsp::Register::DmaBusy,
-        ])
+    fn cases() -> impl Iterator<Item = Self::Params> {
+        [
+            rsp::Register::DmaRspAddress,
+            rsp::Register::DmaRamAddress,
+            // rsp::Register::DmaReadLength, // TODO setup DMA? possible to have empty DMA?
+            // rsp::Register::DmaWriteLength,
+            rsp::Register::DmaFull,
+            rsp::Register::DmaBusy,
+        ]
+        .into_iter()
 
         // TODO PC?
         // TODO test DMA regs?
@@ -31,7 +38,7 @@ impl Test for RspRegistersMasking {
         // We don't test the Semaphore register as it has its own exotic behavior.
     }
 
-    fn run(reg: &specs::rsp::Register, app: &mut App) -> Result<(), TestError> {
+    fn run(reg: &rsp::Register, app: &mut App) -> Result<(), TestError> {
         app.comment(&format!("Test masking of RSP {} register", reg))?;
 
         // TODO io uncached helpers

@@ -1,0 +1,69 @@
+//! Interrupts are toggled by setting/clearing specific bits in the MI Mask register.
+//! This test records what happens when a write both sets and clears an interrupt.
+//!
+//! Findings:
+//! - Clearing and setting an interrupt mask at the same time does nothing
+
+use alloc::format;
+use n64_specs::{interrupt, mi};
+use strum::IntoEnumIterator;
+
+use crate::{
+    app::App,
+    io,
+    test::{Test, TestError},
+};
+
+const CLEAR_ALL: u32 = 0x0000_0555;
+const SET_ALL: u32 = 0x0000_0AAA;
+const UNUSED_BITS: u32 = 0xFFFF_F000;
+
+pub struct MiMaskRegisterClearSet;
+
+impl Test for MiMaskRegisterClearSet {
+    type Params = u32;
+
+    fn cases() -> impl Iterator<Item = Self::Params> {
+        interrupt::Interrupt::iter()
+            // Individual interrupts
+            .flat_map(|interrupt| {
+                [
+                    interrupt.clear_mask(),
+                    interrupt.set_mask(),
+                    interrupt.set_mask() | interrupt.clear_mask(),
+                    // With unused bits set
+                    UNUSED_BITS | interrupt.clear_mask(),
+                    UNUSED_BITS | interrupt.set_mask(),
+                    UNUSED_BITS | interrupt.set_mask() | interrupt.clear_mask(),
+                ]
+            })
+            .chain([
+                // All interrupts simultaneously
+                CLEAR_ALL,
+                SET_ALL,
+                CLEAR_ALL | SET_ALL,
+                UNUSED_BITS | CLEAR_ALL,
+                UNUSED_BITS | SET_ALL,
+                UNUSED_BITS | CLEAR_ALL | SET_ALL,
+                // Zero
+                0,
+                UNUSED_BITS,
+            ])
+    }
+
+    fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
+        app.comment(&format!("Write {:08X} to the MI Mask register", params))?;
+
+        let mask_reg = mi::EnabledInterrupts::ADDRESS;
+
+        app.comment("From cleared")?;
+        io::write_uncached(mask_reg, CLEAR_ALL);
+        io::write_uncached(mask_reg, *params);
+        app.value(io::read_uncached(mask_reg))?;
+
+        app.comment("From set")?;
+        io::write_uncached(mask_reg, SET_ALL);
+        io::write_uncached(mask_reg, *params);
+        app.value(io::read_uncached(mask_reg))
+    }
+}

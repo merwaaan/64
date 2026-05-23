@@ -1,15 +1,20 @@
 //! This test record the value of the MI Version register.
 //! It might be different on different hardware revisions though.
 
-#![no_std]
-#![no_main]
+use n64_specs::mi;
 
-test_suite_rom::run_test!(MiVersionRegisterValue);
+use crate::{
+    app::App,
+    io, no_params,
+    test::{Test, TestError},
+};
+
+pub struct MiVersionRegisterValue;
 
 impl Test for MiVersionRegisterValue {
     no_params!();
 
     fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-        app.value(io::read_uncached(specs::mi::Version::ADDRESS))
+        app.value(io::read_uncached(mi::Version::ADDRESS))
     }
 }

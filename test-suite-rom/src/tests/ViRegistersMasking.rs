@@ -19,24 +19,29 @@
 
 // TODO test writes to high bits of VI CURRENT clear int?
 
-#![no_std]
-#![no_main]
+use alloc::format;
+use n64_specs::vi;
+
+use crate::{
+    app::App,
+    io,
+    test::{Test, TestError},
+};
 
 use strum::IntoEnumIterator;
 
-test_suite_rom::run_test!(ViRegistersMasking);
+pub struct ViRegistersMasking;
 
 impl Test for ViRegistersMasking {
-    type Params = specs::vi::Register;
+    type Params = vi::Register;
 
-    fn cases() -> Vec<Self::Params> {
-        specs::vi::Register::iter()
+    fn cases() -> impl Iterator<Item = Self::Params> {
+        vi::Register::iter()
             // Ignore the Current line register as it's constantly updated by the video timing circuitry
-            .filter(|reg| reg != &specs::vi::Register::CurrentLine)
-            .collect()
+            .filter(|reg| reg != &vi::Register::CurrentLine)
     }
 
-    fn run(reg: &specs::vi::Register, app: &mut App) -> Result<(), TestError> {
+    fn run(reg: &vi::Register, app: &mut App) -> Result<(), TestError> {
         app.comment(&format!("Test masking of VI {} register", reg))?;
 
         // Save/Restore the register value so as not to break display

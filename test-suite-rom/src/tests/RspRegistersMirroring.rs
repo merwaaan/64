@@ -3,10 +3,15 @@
 //! No surprises:
 //! - the registers are mirrored every 8 words without gaps or unexpected patterns
 
-#![no_std]
-#![no_main]
+use n64_specs::rsp;
 
-test_suite_rom::run_test!(RspRegistersMirroring);
+use crate::{
+    app::App,
+    io, no_params,
+    test::{Test, TestError},
+};
+
+pub struct RspRegistersMirroring;
 
 impl Test for RspRegistersMirroring {
     no_params!();
@@ -17,8 +22,8 @@ impl Test for RspRegistersMirroring {
         // TODO no readback of addr regs?
 
         io::write_uncached(
-            specs::rsp::Status::ADDRESS,
-            specs::rsp::StatusWrite::default()
+            rsp::Status::ADDRESS,
+            rsp::StatusWrite::default()
                 .with_clear_sig7(true)
                 .with_set_sig6(true)
                 .with_clear_sig5(true)
@@ -33,11 +38,11 @@ impl Test for RspRegistersMirroring {
                 .raw_value(),
         );
 
-        io::read_uncached(specs::rsp::Semaphore::ADDRESS); // Switch the semaphore to 1
+        io::read_uncached(rsp::Semaphore::ADDRESS); // Switch the semaphore to 1
 
         // TODO region?
 
-        for address in (specs::rsp::REGISTERS_START..specs::rsp::REGISTERS_END).step_by(4) {
+        for address in (rsp::REGISTERS_START..rsp::REGISTERS_END).step_by(4) {
             app.memory(address)?;
         }
 

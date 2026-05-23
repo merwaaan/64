@@ -16,38 +16,42 @@ use winnow::{
     token::{literal, take},
 };
 
-use crate::{TestContext, list_tests, release_dir};
+use crate::{Mode, find_test_rom, list_tests, release_dir};
 
-/// Records the results of either a specific test ROM of all of them by executing them on hardware.
-pub fn run(test_name: &Option<String>) -> Result<()> {
-    let tests = if let Some(test_name) = test_name {
-        let rom_path = release_dir().join(format!("{test_name}_record.z64"));
+/// Records the results of either a specific test ROM of all the built record-mode ROMs by executing them on hardware.
+pub fn run(test: &Option<String>) -> Result<()> {
+    let tests = if let Some(test_name) = test {
+        let path = find_test_rom(&test_name, Mode::Record);
 
-        if !rom_path.is_file() {
-            bail!("no record-mode ROM at {}", rom_path.display());
+        if let Some(path) = path {
+            vec![(test_name.clone(), path)]
+        } else {
+            bail!("no record-mode ROM for {test_name}");
         }
-
-        vec![TestContext {
-            name: test_name.clone(),
-            path: rom_path,
-        }]
     } else {
         list_tests()?
+            .into_iter()
+            .filter_map(|test| find_test_rom(&test, Mode::Record).map(|path| (test, path)))
+            .collect()
     };
 
-    for test in tests {
-        record_test(&test)?;
+    if tests.is_empty() {
+        bail!("no tests to record in {}", release_dir().display());
+    }
+
+    for (test, test_rom_path) in tests {
+        record_test(&test, &test_rom_path)?;
     }
 
     Ok(())
 }
 
-fn record_test(test: &TestContext) -> Result<()> {
-    log::info!("Recording \"{}\"...", test.name);
+fn record_test(test: &str, test_rom_path: &PathBuf) -> Result<()> {
+    log::info!("Recording \"{}\"...", test);
 
     // Upload the ROM to the SC64
 
-    upload_rom_to_sc64(&test.path).with_context(|| "failed to upload ROM to SC64")?;
+    upload_rom_to_sc64(test_rom_path).with_context(|| "failed to upload ROM to SC64")?;
 
     log::warn!(
         "  Reboot the console manually to start the test (automatic reboot not supported yet!)"
@@ -162,7 +166,6 @@ fn listen_for_test_result() -> Result<Vec<Step>> {
     // All the decoded steps received so far
     let mut steps = Vec::new();
 
-    let mut xxx = 0; // TODO rm
     loop {
         match port.read(&mut reception_buffer) {
             Ok(0) => {
@@ -189,13 +192,6 @@ fn listen_for_test_result() -> Result<Vec<Step>> {
                             //log::debug!("    Test started");
                         }
                         Message::TestStep(step) => {
-                            if step == Step::StartTestCase {
-                                // if (xxx % 1000) == 0 {
-                                //     log::info!("{}", xxx);
-                                // }
-
-                                xxx += 1;
-                            }
                             steps.push(step);
                         }
                         Message::TestCompleted => {
@@ -302,10 +298,10 @@ fn parse_packet(input: &mut Partial<&[u8]>) -> ModalResult<Vec<u8>> {
 }
 
 /// Saves test results as JSON.
-fn save_test_result(test: &TestContext, result: &Vec<Step>) -> Result<()> {
+fn save_test_result(test: &str, result: &Vec<Step>) -> Result<()> {
     fs::create_dir_all(release_dir())?;
 
-    let path = release_dir().join(format!("{}.json", test.name));
+    let path = release_dir().join(format!("{}.json", test));
 
     let json = serde_json::to_string_pretty(result)?;
 

@@ -60,12 +60,12 @@ enum Command {
         /// Builds all the available tests if not specified.
         test_name: Option<String>,
 
-        /// Clears the release directory to start fresh.
+        /// Deletes the release directory to start fresh.
         #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
-        clear: bool,
+        clean: bool,
     },
-    /// Clears any previously generated files.
-    Clear,
+    /// Deletes any previously generated files.
+    Clean,
 }
 
 fn main() -> ExitCode {
@@ -81,8 +81,11 @@ fn main() -> ExitCode {
         Command::Build { mode, test_name } => build::run(&mode, &test_name),
         Command::Record { test_name } => record::run(&test_name),
         Command::Replay { test_name: _ } => todo!("replay subcommand"),
-        Command::All { test_name, clear } => run_all(&test_name, clear),
-        Command::Clear => clear_release_dir(),
+        Command::All {
+            test_name,
+            clean: clear,
+        } => run_all(&test_name, clear),
+        Command::Clean => clean_release_dir(),
     };
 
     match result {
@@ -94,9 +97,9 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_all(test_name: &Option<String>, clear: bool) -> Result<()> {
-    if clear {
-        clear_release_dir().context("failed to clear release directory")?;
+fn run_all(test_name: &Option<String>, clean: bool) -> Result<()> {
+    if clean {
+        clean_release_dir().context("failed to clear release directory")?;
     }
 
     build::run(&Mode::Record, test_name).context("failed to build record-mode ROMs")?;
@@ -104,26 +107,19 @@ fn run_all(test_name: &Option<String>, clear: bool) -> Result<()> {
     build::run(&Mode::Replay, test_name).context("failed to build replay-mode ROMs")
 }
 
-pub struct TestContext {
-    name: String,
-    path: PathBuf,
-}
-
-pub fn list_tests() -> Result<Vec<TestContext>> {
+pub fn list_tests() -> Result<Vec<String>> {
     let mut tests = Vec::new();
 
-    for entry in fs::read_dir(rom_bin_dir())? {
+    for entry in fs::read_dir(rom_tests_dir())? {
         let path = entry?.path();
 
         if path.extension().is_some_and(|ext| ext == "rs") {
-            tests.push(TestContext {
-                name: path
-                    .file_stem()
+            tests.push(
+                path.file_stem()
                     .and_then(|s| s.to_str())
-                    .unwrap()
+                    .unwrap() // TODO unwrap
                     .to_string(),
-                path,
-            });
+            );
         }
     }
 
@@ -134,15 +130,15 @@ pub fn rom_crate_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-suite-rom")
 }
 
-pub fn rom_bin_dir() -> PathBuf {
-    rom_crate_dir().join("src/bin")
+pub fn rom_tests_dir() -> PathBuf {
+    rom_crate_dir().join("src/tests")
 }
 
 pub fn release_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../_test_suite_output")
 }
 
-fn clear_release_dir() -> Result<()> {
+fn clean_release_dir() -> Result<()> {
     log::info!("Clearing release directory...");
 
     if release_dir().is_dir() {
@@ -150,4 +146,14 @@ fn clear_release_dir() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn test_rom_name(test: &str, mode: Mode) -> String {
+    format!("{}_{}.z64", test, mode.to_string().to_lowercase())
+}
+
+pub fn find_test_rom(test: &str, mode: Mode) -> Option<PathBuf> {
+    let path = release_dir().join(test_rom_name(test, mode));
+
+    if !path.is_file() { None } else { Some(path) }
 }
