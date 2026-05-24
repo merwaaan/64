@@ -18,7 +18,7 @@ impl Program {
     }
 
     pub fn push(&mut self, instruction: Instruction) -> &mut Self {
-        self.instructions.push(instruction.encode());
+        self.instructions.push(instruction.opcode());
         self
     }
 
