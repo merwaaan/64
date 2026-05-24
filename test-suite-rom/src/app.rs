@@ -2,7 +2,7 @@ use alloc::string::String;
 use anyhow::{Result, anyhow, bail};
 use test_suite_common::{Message, Step};
 
-use crate::{display::*, isviewer, sc64::Sc64, test::*};
+use crate::{display::*, io, isviewer, sc64::Sc64, test::*};
 
 #[cfg(feature = "replay")]
 use crate::comparator::Comparator;
@@ -75,20 +75,6 @@ impl App {
         }
     }
 
-    /// Indefinitely waits for the console to reboot.
-    pub fn wait_for_reboot(&self) -> ! {
-        // If running on a SummerCart, this can be controlled externally
-        if let Some(sc64) = &self.sc64 {
-            sc64.wait_for_reboot()
-        }
-        // Otherwise, we're waiting for a manual reboot or shutdown
-        else {
-            loop {
-                core::hint::spin_loop();
-            }
-        }
-    }
-
     // Helpers to emit steps
 
     pub fn comment(&mut self, comment: &str) -> Result<(), TestError> {
@@ -133,6 +119,41 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Waits for a reboot.
+    ///
+    /// If running on a SummerCart64, this can be triggered via the `upload rom.z64 --reboot` command.
+    /// Otherwise, we'll have to reboot manually.
+    pub fn wait_for_reboot(&self) -> ! {
+        if let Some(sc64) = &self.sc64 {
+            // Wait for the signal
+
+            sc64.wait_for_reboot_signal();
+
+            // To get a fresh start, we'll run IPL3 again.
+            //
+            // On the initial boot, the hardware-embedded IPL2 copied the start of the ROM to DMEM and execution started from there.
+            // The contents of DMEM has since then been cleared (IPL3 cleaned after itself after its first invocation), so we copy it back.
+
+            for i in (0..0x1000).step_by(4) {
+                io::wait_for_pi();
+                let word = io::read_uncached(n64_specs::cart::START + i);
+                io::write_uncached(n64_specs::rsp::DMEM_START + i, word);
+            }
+
+            // Jump to IPL3 (skip the 0x40 bytes of ROM header)
+
+            let reboot_address = io::uncached_ptr(n64_specs::rsp::DMEM_START + 0x40);
+
+            let reboot: extern "C" fn() -> ! = unsafe { core::mem::transmute(reboot_address) };
+
+            reboot()
+        } else {
+            loop {
+                core::hint::spin_loop();
+            }
+        }
     }
 
     /// Runs a test.

@@ -54,6 +54,22 @@ pub fn init_app() -> anyhow::Result<&'static mut App> {
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
+    // Prevent recursive panics
+
+    static mut PANICKING: bool = false;
+
+    unsafe {
+        if PANICKING {
+            loop {
+                core::hint::spin_loop();
+            }
+        }
+
+        PANICKING = true;
+    }
+
+    // Notify
+
     app()
         .print(&format!("{}", info), Some(TextStyle::with_color(ERROR)))
         .ok();
@@ -61,6 +77,8 @@ fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
     app().display.frame(false).ok();
 
     app().send(Message::Panic, true).ok();
+
+    // Wait for reboot
 
     app().wait_for_reboot()
 }

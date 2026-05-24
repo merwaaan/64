@@ -57,10 +57,6 @@ fn record_test(test_name: &str, test_rom_path: &PathBuf) -> Result<()> {
 
     upload_rom_to_sc64(test_rom_path).with_context(|| "failed to upload ROM to SC64")?;
 
-    log::warn!(
-        "  Reboot the console manually to start the test (automatic reboot not supported yet!)"
-    );
-
     // Wait for the result to be sent back
 
     let result = listen_for_test_result()?;
@@ -123,15 +119,11 @@ fn upload_rom_to_sc64(path: &PathBuf) -> Result<()> {
 
     // TODO download helper
 
-    let result = duct::cmd!(
-        sc64deployer_path(),
-        "upload",
-        path /* TODO , "--reboot" */
-    )
-    .stderr_to_stdout()
-    .stdout_capture()
-    .unchecked()
-    .run()?;
+    let result = duct::cmd!(sc64deployer_path(), "upload", path, "--reboot")
+        .stderr_to_stdout()
+        .stdout_capture()
+        .unchecked()
+        .run()?;
 
     if !result.status.success() {
         let stdout = String::from_utf8_lossy(&result.stdout);

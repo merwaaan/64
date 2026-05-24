@@ -187,7 +187,7 @@ impl System {
         self.cpu.regs.gpr[11].set(0xA4000040);
         self.cpu.regs.gpr[20].set(0x00000001);
         self.cpu.regs.gpr[22].set(0x0000003F);
-        self.cpu.regs.gpr[29].set(0xA4001FF0);
+        self.cpu.regs.gpr[29].set(0xA4001FF0); // SP at the end of IMEM
 
         // Copy the cart's boot code to RAM
 

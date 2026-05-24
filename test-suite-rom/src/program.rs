@@ -48,18 +48,15 @@ impl Program {
         // TODO to ram!
 
         for (i, opcode) in self.instructions.iter().enumerate() {
-            io::write_uncached(
-                n64_specs::rsp::MEMORY_START + 0x1000 + (i as u32 * 4),
-                *opcode,
-            );
+            io::write_uncached(n64_specs::rsp::DMEM_START + (i as u32 * 4), *opcode);
         }
 
         io::write_uncached(
-            n64_specs::rsp::MEMORY_START + 0x1000 + (self.instructions.len() as u32 * 4),
+            n64_specs::rsp::DMEM_START + (self.instructions.len() as u32 * 4),
             Jr::default().with_rs(u5::from_u8(31)).raw_value(),
         );
 
-        let entry = io::uncached_ptr(n64_specs::rsp::MEMORY_START + 0x1000) as u32;
+        let entry = io::uncached_ptr(n64_specs::rsp::DMEM_START) as u32;
 
         unsafe {
             asm!(

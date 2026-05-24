@@ -4,9 +4,6 @@ SECTIONS {
     /* Start in KSEG0, skip the first 0x400 bytes as legacy data can lie there according to Libdragon */
     . = 0x80000400;
 
-    /* TODO can we use this for the soft reboot? */
-    __boot_start = .;
-
     .boot : {
         *(.boot)
         . = ALIGN(16);

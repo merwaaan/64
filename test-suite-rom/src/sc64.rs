@@ -148,8 +148,8 @@ impl Sc64 {
         Ok(())
     }
 
-    /// Waits for the SC64 to receive a reboot request and jumps to the bootloader to start fresh.
-    pub fn wait_for_reboot(&self) -> ! {
+    /// Waits for the reboot signal.
+    pub fn wait_for_reboot_signal(&self) {
         loop {
             // When uploading a ROM with the --reboot flag, the SC64 will send a HALT event via AUX.
             // It expects the same value to be written back to AUX to acknowledge the event.
@@ -172,31 +172,7 @@ impl Sc64 {
                         io::write_uncached(AUX, AUX_REBOOT_VALUE);
                         io::wait_for_pi();
 
-                        // TODO how to actually reboot? (various addresses don't work, bootloader must be enabled via regs?)
-                        // TODO BOOTLOADER_SWITCH useful here?
-
-                        // unsafe extern "C" {
-                        //     static __boot_start: u32;
-                        // }
-
-                        // let boot_start = (&raw const __boot_start).addr();
-
-                        //panic!("REBOOT?");
-
-                        // let reboot: extern "C" fn() -> ! =
-                        //     core::mem::transmute(0xBFC0_0000usize);
-                        // reboot()
-
-                        // let reboot: extern "C" fn() -> ! =
-                        //     core::mem::transmute(0xA4001000usize);
-                        // reboot();
-
-                        // #define IPL3_ENTRY          0xA4000040
-                        // #define REBOOT_ADDRESS      0xA4001000
-                        //self.cpu.regs.pc = 0xA4000040;
-
-                        // let boot_vector = 0xA400_0040 as *const extern "C" fn();
-                        // (*boot_vector)();
+                        return;
                     }
                 }
             }
