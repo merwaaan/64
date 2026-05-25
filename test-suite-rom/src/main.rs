@@ -8,7 +8,7 @@
 compile_error!("must enable either feature \"record\" or \"replay\"");
 
 #[cfg(all(feature = "record", feature = "replay"))]
-compile_error!("features \"record\" and \"replay\" are mutually exclusive");
+compile_error!("features \"record\" and \"replay\" cannot be both enabled");
 
 mod allocator;
 mod app;
@@ -52,6 +52,27 @@ pub fn init_app() -> anyhow::Result<&'static mut App> {
     Ok(app())
 }
 
+#[unsafe(no_mangle)]
+extern "C" fn _entrypoint() -> ! {
+    let app = init_app().expect("failed to initialize app");
+
+    app.run::<tests::CurrentTest>().expect("failed to run app");
+
+    app.wait_for_reboot()
+}
+
+/// Registers a test.
+///
+/// All the tests must be registered with this macro.
+///
+/// The macro itself doesn't really do anything special, but the build script specifically looks for it when listing the available tests.
+#[macro_export]
+macro_rules! register_test {
+    ($test:ident) => {
+        pub struct $test;
+    };
+}
+
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
     // Prevent recursive panics
@@ -74,27 +95,9 @@ fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
         .print(&format!("{}", info), Some(TextStyle::with_color(ERROR)))
         .ok();
 
-    app().display.frame(false).ok();
-
     app().send(Message::Panic, true).ok();
 
     // Wait for reboot
 
     app().wait_for_reboot()
-}
-
-#[unsafe(no_mangle)]
-extern "C" fn _entrypoint() -> ! {
-    let app = init_app().expect("failed to initialize app");
-
-    app.run::<tests::CurrentTest>().expect("failed to run test");
-
-    app.wait_for_reboot()
-}
-
-#[macro_export]
-macro_rules! register_test {
-    ($test:ident) => {
-        pub struct $test;
-    };
 }

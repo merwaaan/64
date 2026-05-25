@@ -26,6 +26,8 @@ pub trait Test {
     fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError>;
 }
 
+pub struct TestResult {}
+
 /// Helper to avoid having to specify empty boilerplate for tests without parameters.
 #[macro_export]
 macro_rules! declare_test {
@@ -73,16 +75,11 @@ impl From<TestError> for anyhow::Error {
     }
 }
 
-#[derive(Debug, strum::Display)]
-pub enum Mismatch {
-    /// The recorded values are different from the runtime values.
-    DifferentStep {
-        runtime_step: Step,
-        expected_step: Step,
-        step_index: u32,
-    },
-    /// The runtime test emitted extra steps after all the recorded steps have been compared.
-    ExcessSteps { step_index: u32 },
-    /// The runtime test has completed without comparing all the recorded steps.
-    MissingSteps { step_index: u32 },
+/// Represents a mismatch between a runtime step and an embedded step record on hardware.
+#[derive(Debug)]
+pub struct Mismatch {
+    pub runtime_step: Step,
+    pub expected_step: Option<Step>,
+    pub case_index: u32,
+    pub step_index: u32,
 }

@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow, bail};
 use postcard::ser_flavors::Flavor;
-use test_suite_common::Message;
+use test_suite_common::{AUX_SERVER_READY_VALUE, Message};
 
 use crate::io;
 
@@ -109,8 +109,6 @@ impl Sc64 {
             // Copy the buffer to the cart's staging area, as u32 since u8 writes seem buggy on hardware
 
             for (i, chunk_bytes) in data.chunks(4).enumerate() {
-                // Pad with 0 if not exactly aligned on 4 bytes, the deserialization will ignore the extra bytes
-
                 let word = u32::from_be_bytes([
                     *chunk_bytes.get(0).unwrap_or(&0),
                     *chunk_bytes.get(1).unwrap_or(&0),
@@ -127,7 +125,7 @@ impl Sc64 {
 
         Command::UsbWrite {
             address: CART_STAGING_PHYSICAL,
-            length: aligned_length,
+            length: data.len() as u32,
         }
         .run()?;
 
@@ -146,6 +144,18 @@ impl Sc64 {
         }
 
         Ok(())
+    }
+
+    /// Waits for the server to be ready to receive data.
+    pub fn wait_for_server_ready_signal(&self) {
+        loop {
+            let event = io::read_uncached(AUX);
+            io::wait_for_pi();
+
+            if event == AUX_SERVER_READY_VALUE {
+                return;
+            }
+        }
     }
 
     /// Waits for the reboot signal.

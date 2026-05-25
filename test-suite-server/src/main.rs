@@ -46,8 +46,10 @@ enum Command {
         /// Specific test name.
         /// Records all the available tests if not specified.
         test_name: Option<String>,
-        // TODO repetitions to validate determinism?
-        // TODO run recorded on the same hardware to validate determinism?
+
+        /// Records multiple times to ensure that the test is deterministic.
+        #[arg(long)]
+        repeat: Option<usize>,
     },
     /// Replays test results by executing the replay-mode test ROMs
     Replay {
@@ -60,6 +62,10 @@ enum Command {
         /// Specific test name.
         /// Builds all the available tests if not specified.
         test_name: Option<String>,
+
+        /// Records multiple times to ensure that the test is deterministic.
+        #[arg(long)]
+        repeat: Option<usize>,
 
         /// Deletes the release directory to start fresh.
         #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
@@ -80,12 +86,13 @@ fn main() -> ExitCode {
 
     let result = match args.command {
         Command::Build { mode, test_name } => build::run(&mode, &test_name),
-        Command::Record { test_name } => record::run(&test_name),
+        Command::Record { test_name, repeat } => record::run(&test_name, repeat),
         Command::Replay { test_name: _ } => todo!("replay subcommand"),
         Command::All {
             test_name,
+            repeat,
             clean: clear,
-        } => run_all(&test_name, clear),
+        } => run_all(&test_name, repeat, clear),
         Command::Clean => clean_release_dir(),
     };
 
@@ -98,13 +105,13 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_all(test_name: &Option<String>, clean: bool) -> Result<()> {
+fn run_all(test_name: &Option<String>, repeat: Option<usize>, clean: bool) -> Result<()> {
     if clean {
         clean_release_dir().context("failed to clear release directory")?;
     }
 
     build::run(&Mode::Record, test_name).context("failed to build record-mode ROMs")?;
-    record::run(test_name).context("failed to record results on hardware")?;
+    record::run(test_name, repeat).context("failed to record results on hardware")?;
     build::run(&Mode::Replay, test_name).context("failed to build replay-mode ROMs")
 }
 
@@ -140,10 +147,12 @@ pub struct Test {
     module: String,
 }
 
+/// Returns all the tests registered via the `register_test!` macro.
 pub fn list_tests() -> Result<Vec<Test>> {
     let mut tests = Vec::new();
 
-    let register_test_regex = Regex::new(r"register_test!\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")?;
+    let register_test_regex =
+        Regex::new(r"(?m)^\s*register_test!\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")?;
 
     for entry in fs::read_dir(rom_tests_dir())? {
         let path = entry?.path();

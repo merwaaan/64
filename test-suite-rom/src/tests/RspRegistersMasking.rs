@@ -1,4 +1,4 @@
-//! This test records the masking applied to the RSP registesr when written to.
+//! Records the RSP registers masking when written to.
 //!
 //! Findings:
 //! - The DMA address registers do not read back the written value ??? TODO until DMA starts?
@@ -11,11 +11,11 @@ use n64_specs::rsp;
 
 use crate::{
     app::App,
-    io,
+    io, register_test,
     test::{Test, TestError},
 };
 
-pub struct RspRegistersMasking;
+register_test!(RspRegistersMasking);
 
 impl Test for RspRegistersMasking {
     type Params = rsp::Register;

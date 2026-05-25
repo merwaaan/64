@@ -5,7 +5,7 @@ use embedded_graphics::{
     mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::Rgb888,
     prelude::*,
-    primitives::{PrimitiveStyleBuilder, Rectangle, StrokeAlignment},
+    primitives::{PrimitiveStyleBuilder, Rectangle},
 };
 use embedded_text::{
     TextBox,
@@ -22,7 +22,8 @@ pub const WIDTH: u32 = 320;
 pub const HEIGHT: u32 = 240;
 pub const PIXELS: usize = (WIDTH * HEIGHT) as usize;
 
-const MARGIN: u32 = 16;
+const MARGIN: u32 = 8;
+const PROGRESS_HEIGHT: u32 = 16;
 
 pub const WHITE: RGBA5551 = RGBA5551::from_rgba(0xFF, 0xFF, 0xFF, 0xFF);
 pub const SUCCESS: RGBA5551 = RGBA5551::from_rgba(0x4C, 0xAF, 0x50, 0xFF);
@@ -147,20 +148,20 @@ impl Display {
         Ok(())
     }
 
-    pub fn frame(&mut self, success: bool) -> Result<()> {
-        let color = if success { SUCCESS } else { ERROR };
-        let color = rgba5551_to_eg_rgb888(color);
+    pub fn progress(&mut self, done: u32, total: u32) -> Result<()> {
+        let color = rgba5551_to_eg_rgb888(SUCCESS);
 
-        Rectangle::new(Point::zero(), Size::new(WIDTH, HEIGHT))
-            .into_styled(
-                PrimitiveStyleBuilder::new()
-                    .stroke_color(color)
-                    .stroke_width(MARGIN / 2)
-                    .stroke_alignment(StrokeAlignment::Inside)
-                    .build(),
-            )
-            .draw(self)
-            .map_err(|e| anyhow!("failed to draw frame in framebuffer: {e}"))?;
+        // Use fixed-point arithmetic in case emulators have not implemented floating point arithmetics
+        let progress = (done << 16) / total;
+        let width = (WIDTH * progress) >> 16;
+
+        Rectangle::new(
+            Point::new(0, HEIGHT.saturating_sub(PROGRESS_HEIGHT) as i32),
+            Size::new(width, PROGRESS_HEIGHT),
+        )
+        .into_styled(PrimitiveStyleBuilder::new().fill_color(color).build())
+        .draw(self)
+        .map_err(|e| anyhow!("failed to draw frame in framebuffer: {e}"))?;
 
         Ok(())
     }

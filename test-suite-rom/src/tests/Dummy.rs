@@ -5,11 +5,11 @@ use arbitrary_int::u24;
 
 use crate::{
     app::App,
-    io,
+    io, register_test,
     test::{Test, TestError},
 };
 
-pub struct Dummy;
+register_test!(Dummy);
 
 impl Test for Dummy {
     type Params = bool;
@@ -19,7 +19,7 @@ impl Test for Dummy {
     }
 
     fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-        app.comment(&format!("Dummy test with params {:?}", params))?;
+        app.comment(&format!("Dummy test with params = {:?}", params))?;
 
         app.value(if *params { u32::MAX } else { 0 })?;
 
@@ -29,7 +29,10 @@ impl Test for Dummy {
             app.memory(unsafe { ram_data.as_ptr().add(i) as u32 })?;
         }
 
-        app.memory_region(ram_data.as_ptr() as u32, ram_data.len() as u32 * 4)?;
+        app.memory_region(
+            io::uncached_ptr(ram_data.as_ptr() as u32) as u32,
+            ram_data.len() as u32 * 4,
+        )?;
 
         // Test PI DMA
 

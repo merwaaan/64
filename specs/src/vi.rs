@@ -265,7 +265,7 @@ mapped_registers!(
     burst: Burst,
     vertical_total: VerticalTotal,
     horizontal_total: HorizontalTotal,
-    horizontal_leap: HorizontalTotalLeap,
+    horizontal_total_leap: HorizontalTotalLeap,
     horizontal_video: HorizontalVideo,
     vertical_video: VerticalVideo,
     vertical_burst: VerticalBurst,

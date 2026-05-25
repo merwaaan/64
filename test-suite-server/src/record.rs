@@ -6,20 +6,23 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use serialport::SerialPort;
 use similar::{ChangeTag, TextDiff};
-use test_suite_common::{Message, Step};
+use test_suite_common::{AUX_SERVER_READY_VALUE, Message, Step};
 use winnow::{
     Parser as WinnowParser, Partial,
     binary::{be_u8, be_u24, be_u32},
     error::ErrMode,
     prelude::*,
-    token::{literal, take},
+    token::take,
 };
+
+// TODO logs messy, how to deal with indentation?
 
 use crate::{Mode, find_test_rom, list_tests, release_dir};
 
 /// Records the results of either a specific test ROM of all the built record-mode ROMs by executing them on hardware.
-pub fn run(test_name: &Option<String>) -> Result<()> {
+pub fn run(test_name: &Option<String>, repeat: Option<usize>) -> Result<()> {
     let tests = if let Some(test_name) = test_name {
         let path = find_test_rom(&test_name, Mode::Record);
 
@@ -44,13 +47,13 @@ pub fn run(test_name: &Option<String>) -> Result<()> {
     };
 
     for (test, test_rom_path) in tests {
-        record_test(&test, &test_rom_path)?;
+        record_test(&test, &test_rom_path, repeat)?;
     }
 
     Ok(())
 }
 
-fn record_test(test_name: &str, test_rom_path: &PathBuf) -> Result<()> {
+fn record_test(test_name: &str, test_rom_path: &PathBuf, repeat: Option<usize>) -> Result<()> {
     log::info!("Recording \"{}\"...", test_name);
 
     // Upload the ROM to the SC64
@@ -59,33 +62,37 @@ fn record_test(test_name: &str, test_rom_path: &PathBuf) -> Result<()> {
 
     // Wait for the result to be sent back
 
-    let result = listen_for_test_result()?;
+    let steps = listen_for_test_steps()?;
 
     // If requested, repeat the recording to validate determinism
 
-    let repetitions = None; //Some(1); // TODO to arg
-
-    if let Some(repetitions) = repetitions {
-        check_determinism(&result, repetitions)?;
+    if let Some(repeat) = repeat {
+        check_determinism(&test_rom_path, &steps, repeat)?;
     }
 
     // Save the test result
 
-    save_test_result(&test_name, &result).with_context(|| "failed to save test result")
+    save_test_steps(&test_name, &steps).with_context(|| "failed to save test steps")
 }
 
-fn check_determinism(steps: &Vec<Step>, repetitions: usize) -> Result<()> {
+fn check_determinism(
+    test_rom_path: &PathBuf,
+    reference_steps: &Vec<Step>,
+    repeat: usize,
+) -> Result<()> {
     log::info!(
         "  Checking recording determinism for {} repetitions...",
-        repetitions
+        repeat
     );
 
-    let steps_text = serde_json::to_string_pretty(&steps)?;
+    let steps_text = serde_json::to_string_pretty(&reference_steps)?;
 
-    for i in 0..repetitions {
-        log::info!("    Recording repetition {}/{}...", i + 1, repetitions);
+    for i in 0..repeat {
+        log::info!("    Recording repetition {}/{}...", i + 1, repeat);
 
-        let repeat = listen_for_test_result()?;
+        upload_rom_to_sc64(test_rom_path).with_context(|| "failed to upload ROM to SC64")?;
+
+        let repeat = listen_for_test_steps()?;
 
         let repeat_text = serde_json::to_string_pretty(&repeat)?;
 
@@ -134,7 +141,7 @@ fn upload_rom_to_sc64(path: &PathBuf) -> Result<()> {
 }
 
 /// Listens on the serial port until a `TestResult` is received and saved.
-fn listen_for_test_result() -> Result<Vec<Step>> {
+fn listen_for_test_steps() -> Result<Vec<Step>> {
     const SERIAL_PORT: &str = "COM3";
 
     let mut port = serialport::new(SERIAL_PORT, 115_200)
@@ -147,6 +154,10 @@ fn listen_for_test_result() -> Result<Vec<Step>> {
         .with_context(|| format!("failed to open serial port {SERIAL_PORT}"))?;
 
     log::info!("  Listening for test result on {SERIAL_PORT}...");
+
+    // Notify the test program that we're ready to receive data
+
+    send_ready_to_n64(&mut *port)?;
 
     // Reception buffer
     let mut reception_buffer = [0u8; 512];
@@ -178,7 +189,7 @@ fn listen_for_test_result() -> Result<Vec<Step>> {
                 //     &raw_packets_buffer
                 // );
 
-                let messages = parse_messages(&mut raw_packets_buffer, &mut raw_messages_buffer);
+                let messages = parse_messages(&mut raw_packets_buffer, &mut raw_messages_buffer)?;
 
                 for message in messages {
                     //log::debug!("Received message: {:0X?}", message);
@@ -212,11 +223,21 @@ fn listen_for_test_result() -> Result<Vec<Step>> {
     }
 }
 
+fn send_ready_to_n64(port: &mut dyn SerialPort) -> Result<()> {
+    port.write_all(b"CMD")?;
+    port.write_all(b"X")?; // AUX_WRITE
+    port.write_all(&AUX_SERVER_READY_VALUE.to_be_bytes())?; // Data 0
+    port.write_all(&0u32.to_be_bytes())?; // Data 1
+    port.flush()?;
+
+    Ok(())
+}
+
 /// Processes pending data and returns the fully received messages.
 fn parse_messages(
     raw_packets_buffer: &mut Vec<u8>,
     raw_messages_buffer: &mut Vec<u8>,
-) -> Vec<Message> {
+) -> Result<Vec<Message>> {
     let mut messages = Vec::new();
 
     // As long as there are packets to parse...
@@ -231,7 +252,7 @@ fn parse_messages(
         // Try to parse the first packet, which might be fully received or not
 
         match parse_packet(&mut cursor) {
-            Ok(data) => {
+            Ok(Packet::Pkt { data }) => {
                 // We got a full packet, buffer its data
 
                 raw_messages_buffer.extend_from_slice(&data);
@@ -265,36 +286,79 @@ fn parse_messages(
                     }
                 }
             }
+            Ok(Packet::Cmp { data: _, .. }) => {
+                //log::debug!("    Response: {:0X?}", data);
+
+                let consumed = raw_packets_buffer.len() - cursor.len();
+                raw_packets_buffer.drain(..consumed);
+            }
+            Ok(Packet::Err { data, .. }) => {
+                bail!("Received error from SC64, {:0X?}", data);
+            }
             Err(ErrMode::Incomplete(_)) => {
                 // Incomplete packet, wait for more data
 
                 break;
             }
             Err(e) => {
-                panic!("failed to parse packet, {:?}", e); // TODO bail!
+                bail!("failed to parse packet, {:?}, {:0X?}", e, cursor);
             }
         }
     }
 
-    messages
+    Ok(messages)
+}
+
+enum Packet {
+    Pkt { data: Vec<u8> },
+    Cmp { data: Vec<u8> },
+    Err { data: Vec<u8> },
 }
 
 /// Parses a possibly-partial packet and returns the raw message data that it contains.
 // https://github.com/Polprzewodnikowy/SummerCart64/blob/main/docs/03_usb_interface.md#sc64---pc-packets
-fn parse_packet(input: &mut Partial<&[u8]>) -> ModalResult<Vec<u8>> {
-    literal("PKT").parse_next(input)?;
-    literal("U").parse_next(input)?; // type = data
-    let _packet_data_len = be_u32.parse_next(input)?;
-    let _data_type = be_u8.parse_next(input)?; // TODO literal?
+fn parse_packet(input: &mut Partial<&[u8]>) -> ModalResult<Packet> {
+    let kind = take(3u8).parse_next(input)?;
+    let id = be_u8.parse_next(input)?;
 
-    let data_len: u32 = be_u24.parse_next(input)?;
-    let data = take(data_len).parse_next(input)?.to_vec();
+    let packet_data_len = be_u32.parse_next(input)?;
 
-    Ok(data)
+    let data = if packet_data_len > 0 {
+        let _data_type = be_u8.parse_next(input)?;
+        let data_len = be_u24.parse_next(input)?;
+        take(data_len).parse_next(input)?.to_vec()
+    } else {
+        Vec::new()
+    };
+
+    match kind {
+        b"PKT" => {
+            //log::debug!("    Received PKT {} {:0X?}", id, data);
+
+            if id == b'U' {
+                Ok(Packet::Pkt { data })
+            } else {
+                log::error!("Received PKT with unexpected id {:0X?}", id);
+
+                Err(ErrMode::Cut(winnow::error::ContextError::new()))
+            }
+        }
+        b"CMP" => {
+            //log::debug!("    Received CMP {} {:0X?}", id, data);
+
+            Ok(Packet::Cmp { data })
+        }
+        b"ERR" => {
+            //log::debug!("    Received ERR {} {:0X?}", id, data);
+
+            Ok(Packet::Err { data })
+        }
+        _ => Err(ErrMode::Backtrack(winnow::error::ContextError::new())),
+    }
 }
 
 /// Saves test results as JSON.
-fn save_test_result(test_name: &str, result: &Vec<Step>) -> Result<()> {
+fn save_test_steps(test_name: &str, result: &Vec<Step>) -> Result<()> {
     fs::create_dir_all(release_dir())?;
 
     let path = release_dir().join(format!("{}.json", test_name));

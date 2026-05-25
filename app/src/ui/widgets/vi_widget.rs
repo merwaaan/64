@@ -45,7 +45,7 @@ impl ChildWidget for ViWidget {
             reg32(ui, "Burst", mi.regs().burst.raw_value());
             reg32(ui, "V Total", mi.regs().vertical_total.raw_value());
             reg32(ui, "H Total", mi.regs().horizontal_total.raw_value());
-            reg32(ui, "H Leap", mi.regs().horizontal_leap.raw_value());
+            reg32(ui, "H Leap", mi.regs().horizontal_total_leap.raw_value());
             reg32(ui, "H Video", mi.regs().horizontal_video.raw_value());
             reg32(ui, "V Video", mi.regs().vertical_video.raw_value());
             reg32(ui, "V Burst", mi.regs().vertical_burst.raw_value());

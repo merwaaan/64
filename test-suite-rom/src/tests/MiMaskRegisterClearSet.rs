@@ -10,7 +10,7 @@ use strum::IntoEnumIterator;
 
 use crate::{
     app::App,
-    io,
+    io, register_test,
     test::{Test, TestError},
 };
 
@@ -18,7 +18,7 @@ const CLEAR_ALL: u32 = 0x0000_0555;
 const SET_ALL: u32 = 0x0000_0AAA;
 const UNUSED_BITS: u32 = 0xFFFF_F000;
 
-pub struct MiMaskRegisterClearSet;
+register_test!(MiMaskRegisterClearSet);
 
 impl Test for MiMaskRegisterClearSet {
     type Params = u32;

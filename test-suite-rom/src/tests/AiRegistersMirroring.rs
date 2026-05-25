@@ -9,11 +9,11 @@ use n64_specs::ai;
 
 use crate::{
     app::App,
-    io, no_params,
+    io, no_params, register_test,
     test::{Test, TestError},
 };
 
-pub struct AiRegistersMirroring;
+register_test!(AiRegistersMirroring);
 
 impl Test for AiRegistersMirroring {
     no_params!();
@@ -23,6 +23,7 @@ impl Test for AiRegistersMirroring {
 
         app.memory_region(io::uncached_ptr(ai::START) as u32, ai::END - ai::START)?;
 
+        // TODO??
         for reg in [6, 7] {
             for value in [0, u32::MAX] {
                 app.comment(format!("Write {} to unused slot #{}", value, reg).as_str())?;

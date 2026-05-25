@@ -5,6 +5,15 @@ extern crate alloc;
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Serialize};
 
+/// Message sent from the server to the test program via the SummerCart AUX register to notify that the server is ready to receive data.
+///
+/// The server uploads the ROM to the SC64 and then listens to incoming messages.
+/// However, the ROM starts running as soon as the upload completes and it might send messages before the server even starts listening, making us miss them.
+/// We cannot just start listening and THEN upload the ROM, because the server and sc64deployer both use the same serial port.
+///
+/// So this basic handshake is required to ensure that the test program waits for the server to be ready to listen before sending messages.
+pub const AUX_SERVER_READY_VALUE: u32 = 0xFF00_ABCD;
+
 /// One step of a test.
 ///
 /// Each test emits a sequence of steps.
@@ -13,13 +22,18 @@ use serde::{Deserialize, Serialize};
 #[derive(
     Clone, PartialEq, Debug, Serialize, Deserialize, strum::Display, strum::EnumDiscriminants,
 )]
+
 pub enum Step {
     // Start of a test case.
     StartTestCase,
+    // End of a test case.
+    EndTestCase,
     /// A descriptive comment.
     Comment(String),
-    /// Some value relevant to the test
+    /// A 32-bit value relevant to the test
     Value(u32),
+    /// A 64-bit value relevant to the test
+    Value64(u64),
 }
 
 /// Strips the comments from a list of steps.

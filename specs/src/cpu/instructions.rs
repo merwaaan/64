@@ -151,12 +151,20 @@ instructions! {
     Dsll32 = 0x0000_003C { rt rd sa },
     Dsrl32 = 0x0000_003E { rt rd sa },
     Dsra32 = 0x0000_003F { rt rd sa },
-    //
+    // Loads/Stores
     Lui = 0x3C00_0000 { rt imm },
+    Lb = 0x8000_0000 { base rt offset },
+    Lh = 0x8400_0000 { base rt offset },
+    Lbu = 0x9000_0000 { base rt offset },
+    Lwu = 0x9C00_0000 { base rt offset },
+    Sb = 0xA000_0000 { base rt offset },
     Sw = 0xAC00_0000 { base rt offset },
+
+    Ld = 0xDC00_0000 { base rt offset },
+    Sd = 0xFC00_0000 { base rt offset },
     // Jumps
     Jr = 0x0000_0008 { rs },
-    // COP0
+    // Coprocessor 0
     Mfc0 = 0x4000_0000 { rt rd },
     Mtc0 = 0x4080_0000 { rt rd },
     Dmtc0 = 0x40A0_0000 { rt rd },

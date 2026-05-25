@@ -1,6 +1,6 @@
 //! This test records the readback behavior of the RSP's DMA registers.
 //!
-//! Findings:
+//! No surprises:
 //! - Values written to the address registers are latched until the DMA starts
 //! - Writing to the address registers while the DMA is in progress does not affect the ongoing transfer or the final register values once it completes
 

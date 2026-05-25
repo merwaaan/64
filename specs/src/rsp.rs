@@ -21,7 +21,7 @@ use bitbybit::bitfield;
 use crate::mapped_registers;
 
 pub const MEMORY_START: u32 = 0x0400_0000;
-pub const MEMORY_END: u32 = 0x0404_0000;
+pub const MEMORY_END: u32 = 0x0404_0000; // TODO DMEM + IMEM = 0x2000, is it mirrored???
 pub const MEMORY_MASK: u32 = 0x1FFF; // TODO what for?
 pub const MEMORY_BANK_SIZE: u32 = 0x1000;
 
@@ -36,6 +36,8 @@ pub const IMEM_END: u32 = IMEM_START + IMEM_SIZE;
 pub const REGISTERS_START: u32 = MEMORY_END;
 pub const REGISTERS_END: u32 = 0x040C_0000;
 pub const REGISTERS_MASK: u32 = 0x1F;
+
+// TODO const DMA alignments?
 
 /// Address in the RSP memory to transfer data from/to via DMA.
 #[bitfield(u32, instrospect, default = 0, debug)]

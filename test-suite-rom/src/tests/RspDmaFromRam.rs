@@ -1,4 +1,4 @@
-//! This tests records DMA transfers from RAM to RSP memory.
+//! Records DMA transfers from RAM to RSP memory.
 //!
 //! Findings:
 //! -
@@ -12,100 +12,78 @@ use n64_specs::rsp;
 
 use crate::{
     app::App,
-    io,
+    io, register_test,
     test::{Test, TestError},
 };
 
 // TODO does this wraps around RAM?
 
+register_test!(RspDmaFromRam);
+
 #[derive(Debug)]
 pub struct Dma {
-    rsp_destination: u32,
+    ram_offset: u32,
+    rsp_offset: u32,
     rows: u8,
     length: u32,
     skip: u16,
 }
 
-pub struct RspDmaFromRam;
-
 const RAM_DATA_SIZE: usize = 0x4000;
+
+// TODO what if non aligned? exception? buggy?
 
 impl Test for RspDmaFromRam {
     type Params = Dma;
 
     fn cases() -> impl Iterator<Item = Self::Params> {
-        // TODO
-        [].into_iter()
-        // let mut cases = Vec::new();
+        let ram_offset = [0, 8, 0x100];
+        let rsp_bank_offsets = [0, rsp::MEMORY_BANK_SIZE];
+        let rsp_offsets = [0, 0xD00, 0xFFF];
+        let lengths = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 128, 0x400, 0xFFF];
 
-        // // Various destinations and lengths
+        itertools::iproduct!(ram_offset, rsp_bank_offsets, rsp_offsets, lengths).map(
+            |(ram_offset, bank_offset, destination, length)| Dma {
+                ram_offset,
+                rsp_offset: bank_offset + destination,
+                rows: 0,
+                length,
+                skip: 0,
+            },
+        )
 
-        // for bank_offset in [0, rsp::MEMORY_BANK_SIZE] {
-        //     for bank_internal_offset in [0, 0xD00, 0xFFF] {
-        //         for length in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 128, 0x400, 0xFFF] {
-        //             cases.push(Dma {
-        //                 rsp_destination: bank_offset + bank_internal_offset,
-        //                 rows: 0,
-        //                 length,
-        //                 skip: 0,
-        //             });
-        //         }
-        //     }
-        // }
-
-        // // Various layouts
-
-        // // TODO
-        // // for row in [1, 2, 10, 0xFF] {
-        // //     cases.push(Dma {
-        // //         rsp_destination: 0,
-        // //         rows: 1,
-        // //         length,
-        // //         skip: 0,
-        // //     });
-        // // }
-
-        // cases
+        // TODO rows, skip
     }
 
     fn run(dma: &Dma, app: &mut App) -> Result<(), TestError> {
         app.comment(&format!(
-            "DMA transfer to {:08X}, {} bytes x {} rows, skip {}",
-            dma.rsp_destination, dma.length, dma.rows, dma.skip
+            "DMA transfer from RAM @ {:08X} to RSP @ {:08X}, {} bytes x {} rows, skip {}",
+            dma.ram_offset, dma.rsp_offset, dma.length, dma.rows, dma.skip
         ))?;
 
         // Clear the RSP memory
 
         let rsp_mem = io::uncached_ptr(rsp::MEMORY_START);
 
-        unsafe {
-            for i in 0..0x800 {
-                rsp_mem.add(i).write_volatile(0x0000_0000);
-            }
-        };
+        for i in (0..rsp::DMEM_SIZE + rsp::IMEM_SIZE).step_by(4) {
+            io::write_uncached(rsp_mem as u32 + i, 0x0000_0000);
+        }
 
         // Prepare some data in RAM
-        // TODO alignment a problem? #[repr(align(8))]??
-        // TODO helper to allocate such blocks?
 
-        let mut ram_data = alloc::vec![10u8; RAM_DATA_SIZE];
-
-        let cached_ptr = ram_data.as_mut_ptr();
-        let uncached_ptr = (cached_ptr as usize | 0xA000_0000) as *mut u8;
+        let mut ram_data = io::Buffer::<u8>::with_alignment(RAM_DATA_SIZE, 8);
 
         for i in 0..RAM_DATA_SIZE {
-            unsafe {
-                uncached_ptr.add(i).write_volatile(i as u8);
-            }
+            ram_data.set(i, i as u8);
         }
 
         // DMA
 
-        app.value(io::read_uncached(rsp::DmaBusy::ADDRESS))?;
+        io::write_uncached(rsp::DmaRspAddress::ADDRESS, dma.rsp_offset);
 
-        io::write_uncached(rsp::DmaRspAddress::ADDRESS, dma.rsp_destination);
-
-        io::write_uncached(rsp::DmaRamAddress::ADDRESS, ram_data.as_ptr() as u32);
+        io::write_uncached(rsp::DmaRamAddress::ADDRESS, unsafe {
+            ram_data.as_ptr().add(dma.ram_offset as usize) as u32
+        });
 
         io::write_uncached(
             rsp::DmaReadLength::ADDRESS,
@@ -116,18 +94,10 @@ impl Test for RspDmaFromRam {
                 .raw_value(),
         );
 
-        for _ in 0..3 {
-            app.value(io::read_uncached(rsp::DmaBusy::ADDRESS))?;
-        }
-
-        // TODO wait till it's over
-
-        for _ in 0..1000 {
-            core::hint::black_box(()); // Forces the compiler to treat this as a meaningful step
-        }
+        io::wait_until(|| io::read_uncached(rsp::DmaBusy::ADDRESS) == 0);
 
         // Record the whole RSP memory
 
-        app.memory_region(rsp::MEMORY_START, 0x2000)
+        app.memory_region(rsp::MEMORY_START, rsp::DMEM_SIZE + rsp::IMEM_SIZE)
     }
 }

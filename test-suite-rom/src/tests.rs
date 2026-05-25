@@ -6,6 +6,7 @@
 mod AiLengthRegisterMasking;
 mod AiRegistersMirroring;
 mod Cop0RegistersMasking;
+mod CpuInstructionsLoadStore;
 mod CpuInstructionsLogical;
 mod Dummy;
 mod MiMaskRegisterClearSet;
@@ -13,6 +14,7 @@ mod MiVersionRegisterValue;
 mod RspDmaBuffering;
 mod RspDmaFromRam;
 mod RspDmaLatching;
+mod RspMemoryMirroring;
 mod RspRegistersMasking;
 mod RspRegistersMirroring;
 mod RspSemaphoreRegister;

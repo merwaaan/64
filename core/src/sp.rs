@@ -490,10 +490,7 @@ impl Sp {
         // Increment the DMA registers for the next transfer
         // TODO do it on completion?
 
-        let next_sp_address = slot
-            .sp_address
-            .wrapping_add(((bytes_per_row * rows) as u32))
-            & 0xFFF
+        let next_sp_address = slot.sp_address.wrapping_add((bytes_per_row * rows) as u32) & 0xFFF
             | (sp_bank_offset as u32);
 
         s.sp.control_regs

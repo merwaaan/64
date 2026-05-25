@@ -87,7 +87,7 @@ fn build_test(test: &Test, mode: &Mode) -> Result<()> {
 
     z64.extend(IPL);
 
-    // Add some padding
+    // Add some padding, IPL3 looks for 256-byte aligned blocks of memory
 
     let pad = |z64: &mut Vec<u8>, alignment: usize| {
         let misalignment = (alignment - (z64.len() % alignment)) % alignment;

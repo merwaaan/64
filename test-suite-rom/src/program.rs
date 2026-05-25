@@ -1,11 +1,12 @@
+use alloc::vec::Vec;
 use core::arch::asm;
 
-use alloc::vec::Vec;
 use arbitrary_int::prelude::*;
 use n64_specs::cpu::{instructions::*, registers::Register};
 
 use crate::io;
 
+/// TODO doc
 pub struct Program {
     instructions: Vec<u32>,
 }
@@ -48,15 +49,15 @@ impl Program {
         // TODO to ram!
 
         for (i, opcode) in self.instructions.iter().enumerate() {
-            io::write_uncached(n64_specs::rsp::DMEM_START + (i as u32 * 4), *opcode);
+            io::write_uncached(n64_specs::rsp::IMEM_START + (i as u32 * 4), *opcode);
         }
 
         io::write_uncached(
-            n64_specs::rsp::DMEM_START + (self.instructions.len() as u32 * 4),
+            n64_specs::rsp::IMEM_START + (self.instructions.len() as u32 * 4),
             Jr::default().with_rs(u5::from_u8(31)).raw_value(),
         );
 
-        let entry = io::uncached_ptr(n64_specs::rsp::DMEM_START) as u32;
+        let entry = io::uncached_ptr(n64_specs::rsp::IMEM_START) as u32;
 
         unsafe {
             asm!(
@@ -154,21 +155,73 @@ impl Program {
         }
     }
 
-    // Loads a value into a register (LUI + ORI).
-    pub fn load_reg(&mut self, reg: Register, value: u32) -> &mut Self {
+    /// Sets a 32-bit value into a register.
+    pub fn set_reg(&mut self, reg: Register, value: u32) -> &mut Self {
+        let lo = value as u16;
+        let hi = (value >> 16) as u16;
+
+        self.push(Lui::default().with_rt(reg.into()).with_imm(hi).into())
+            .push(
+                Ori::default()
+                    .with_rt(reg.into())
+                    .with_rs(reg.into())
+                    .with_imm(lo)
+                    .into(),
+            )
+    }
+
+    /// Sets a 64-bit value into a register.
+    pub fn set_reg64(&mut self, reg: Register, value: u64) -> &mut Self {
+        let b0_b1 = (value >> 32) as u32;
+        let b2 = (value >> 16) as u16;
+        let b3 = value as u16;
+
+        self.set_reg(reg, b0_b1);
+
         self.push(
-            Lui::default()
+            Dsll::default()
+                .with_rd(reg.into())
                 .with_rt(reg.into())
-                .with_imm((value >> 16) as u16)
+                .with_sa(u5::from_u8(16))
                 .into(),
         )
         .push(
             Ori::default()
                 .with_rt(reg.into())
                 .with_rs(reg.into())
-                .with_imm(value as u16)
+                .with_imm(b2)
                 .into(),
         )
+        .push(
+            Dsll::default()
+                .with_rd(reg.into())
+                .with_rt(reg.into())
+                .with_sa(u5::from_u8(16))
+                .into(),
+        )
+        .push(
+            Ori::default()
+                .with_rt(reg.into())
+                .with_rs(reg.into())
+                .with_imm(b3)
+                .into(),
+        )
+    }
+
+    /// Stores a 32-bit register value into memory.
+    /// Requires a separate work register to temporarily hold the destination address.
+    pub fn store_reg(&mut self, reg: Register, address: u32, work_reg: Register) -> &mut Self {
+        self.set_reg(work_reg, address);
+
+        self.sw(reg, work_reg, 0)
+    }
+
+    /// Stores a 64-bit register value into memory.
+    /// Requires a separate work register to temporarily hold the destination address.
+    pub fn store_reg64(&mut self, reg: Register, address: u32, work_reg: Register) -> &mut Self {
+        self.set_reg(work_reg, address);
+
+        self.sd(reg, work_reg, 0)
     }
 
     pub fn and(&mut self, rd: Register, rs: Register, rt: Register) -> &mut Self {
@@ -198,6 +251,16 @@ impl Program {
     pub fn sw(&mut self, rt: Register, base: Register, offset: u16) -> &mut Self {
         self.push(
             Sw::default()
+                .with_rt(rt.into())
+                .with_base(base.into())
+                .with_offset(offset)
+                .into(),
+        )
+    }
+
+    pub fn sd(&mut self, rt: Register, base: Register, offset: u16) -> &mut Self {
+        self.push(
+            Sd::default()
                 .with_rt(rt.into())
                 .with_base(base.into())
                 .with_offset(offset)

@@ -15,45 +15,47 @@ use crate::{
     test::{Test, TestError},
 };
 
+const REGISTERS: [Register; 3] = [Register::R0, Register::T0, Register::T1];
+
+const REGISTER_VALUES: [u64; 14] = [
+    0x0000_0000_0000_0000,
+    0x0000_0000_0000_0001,
+    0x0000_0000_0000_CD15,
+    0x0000_0000_2640_044E,
+    0x0000_0000_5555_5555,
+    0x0000_0000_7FFF_FFFF,
+    0x0000_0000_8008_00F0,
+    0x0000_0000_AAAA_AAAA,
+    0x0000_0000_DBCA_0000,
+    0x0000_0000_FFFF_FFFF,
+    0x105C_00CE_0000_0000,
+    0xC000_FFFF_0000_0007,
+    0xFFFF_002F_89AB_F51F,
+    0xFFFF_FFFF_FFFF_FFFF,
+];
+
 #[derive(Debug)]
 pub struct RegisterParam {
-    reg_value1: u32,
-    reg_value2: u32,
+    reg_value1: u64,
+    reg_value2: u64,
     reg_in1: Register,
     reg_in2: Register,
     reg_out: Register,
 }
-
-// TODO just make the instruction a param instead of using macro?
 
 macro_rules! reg_variant {
     ($instr:ident) => {
         type Params = RegisterParam;
 
         fn cases() -> impl Iterator<Item = Self::Params> {
-            let values = [
-                0,
-                1,
-                0x0000_CD15,
-                0x2640_044E,
-                0x5555_5555,
-                0x7FFF_FFFF,
-                /*0x8008_00F0,
-                0xAAAA_AAAA,
-                0xDBCA_0000,
-                0xFFFF_FFFF,*/
-            ];
-
-            let regs = [
-                Register::R0,
-                Register::AT,
-                Register::V0,
-                Register::V1,
-                Register::A1,
-                // TODO how many?
-            ];
-
-            itertools::iproduct!(values, values, regs, regs, regs).map(
+            itertools::iproduct!(
+                REGISTER_VALUES,
+                REGISTER_VALUES,
+                REGISTERS,
+                REGISTERS,
+                REGISTERS
+            )
+            .map(
                 |(reg_value1, reg_value2, reg_in1, reg_in2, reg_out)| RegisterParam {
                     reg_value1,
                     reg_value2,
@@ -67,7 +69,7 @@ macro_rules! reg_variant {
         fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
             app.comment(&format!(
                 "{} {}, {}={:08X}, {}={:08X}",
-                "TODO name",
+                stringify!($instr).to_uppercase(),
                 params.reg_out,
                 params.reg_in1,
                 params.reg_value1,
@@ -75,11 +77,11 @@ macro_rules! reg_variant {
                 params.reg_value2,
             ))?;
 
-            let result: io::Buffer<u32> = io::Buffer::<u32>::new(1);
+            let result = io::Buffer::<u64>::new(1);
 
             Program::new()
-                .load_reg(params.reg_in1, params.reg_value1)
-                .load_reg(params.reg_in2, params.reg_value2)
+                .set_reg64(params.reg_in1, params.reg_value1)
+                .set_reg64(params.reg_in2, params.reg_value2)
                 .push(
                     $instr::default()
                         .with_rs(params.reg_in1.into())
@@ -87,11 +89,10 @@ macro_rules! reg_variant {
                         .with_rd(params.reg_out.into())
                         .into(),
                 )
-                .load_reg(Register::T3, result.as_ptr() as u32) // TODO other reg func
-                .sw(params.reg_out, Register::T3, 0)
+                .store_reg64(params.reg_out, result.as_ptr() as u32, Register::T3)
                 .run();
 
-            app.value(result.get(0))
+            app.value64(result.get(0))
         }
     };
 }
@@ -122,7 +123,7 @@ impl Test for CpuInstructionXor {
 
 #[derive(Debug)]
 pub struct ImmediateParam {
-    reg_value: u32,
+    reg_value: u64,
     imm_value: u16,
     reg_in: Register,
     reg_out: Register,
@@ -133,38 +134,9 @@ macro_rules! imm_variant {
         type Params = ImmediateParam;
 
         fn cases() -> impl Iterator<Item = Self::Params> {
-            let reg_values = [
-                0,
-                1,
-                0x0000_CD15,
-                0x2640_044E,
-                0x5555_5555,
-                0x7FFF_FFFF,
-                /*0x8008_00F0,
-                0xAAAA_AAAA,
-                0xDBCA_0000,
-                0xFFFF_FFFF,*/
-            ];
+            let imm_values = [0, 1, 0x1002, 0xCD15, 0x044E, 0x5555, 0xFFFF];
 
-            // TODO pick vals
-            let imm_values = [
-                0, 1, 0xCD15, 0x044E, 0x5555,
-                0xFFFF,
-                /*0x8008_00F0,
-                0xAAAA_AAAA,
-                0xDBCA_0000,
-                0xFFFF_FFFF,*/
-            ];
-
-            let regs = [
-                Register::R0,
-                Register::AT,
-                Register::V0,
-                Register::V1,
-                Register::A1, // TODO?
-            ];
-
-            itertools::iproduct!(reg_values, imm_values, regs, regs).map(
+            itertools::iproduct!(REGISTER_VALUES, imm_values, REGISTERS, REGISTERS).map(
                 |(reg_value, imm_value, reg_in, reg_out)| ImmediateParam {
                     reg_value,
                     imm_value,
@@ -177,13 +149,17 @@ macro_rules! imm_variant {
         fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
             app.comment(&format!(
                 "{} {}, {}={:08X}, {:08X}",
-                "TODO name", params.reg_out, params.reg_in, params.reg_value, params.imm_value,
+                stringify!($instr).to_uppercase(),
+                params.reg_out,
+                params.reg_in,
+                params.reg_value,
+                params.imm_value,
             ))?;
 
-            let result: io::Buffer<u32> = io::Buffer::<u32>::new(1);
+            let result = io::Buffer::<u64>::new(1);
 
             Program::new()
-                .load_reg(params.reg_in, params.reg_value)
+                .set_reg64(params.reg_in, params.reg_value)
                 .push(
                     $instr::default()
                         .with_rs(params.reg_in.into())
@@ -191,11 +167,10 @@ macro_rules! imm_variant {
                         .with_imm(params.imm_value)
                         .into(),
                 )
-                .load_reg(Register::T3, result.as_ptr() as u32) // TODO other reg func
-                .sw(params.reg_out, Register::T3, 0)
+                .store_reg64(params.reg_out, result.as_ptr() as u32, Register::T3)
                 .run();
 
-            app.value(result.get(0))
+            app.value64(result.get(0))
         }
     };
 }

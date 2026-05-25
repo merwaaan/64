@@ -1,5 +1,5 @@
-use alloc::string::String;
-use anyhow::{Result, anyhow, bail};
+use alloc::{format, string::String};
+use anyhow::{Context, Result, anyhow, bail};
 use test_suite_common::{Message, Step};
 
 use crate::{display::*, io, isviewer, sc64::Sc64, test::*};
@@ -40,7 +40,7 @@ impl App {
             ("replay", "Replaying")
         };
 
-        self.print(&alloc::format!("{} (mode: {})\n", T::name(), mode), None)?;
+        self.print(&format!("{} (mode: {})\n", T::name(), mode), None)?;
 
         if self.sc64.is_none() && cfg!(feature = "record") {
             self.print(
@@ -52,7 +52,7 @@ impl App {
         // Run the test
 
         self.print(
-            &alloc::format!("{} {} test cases...", verb, T::cases().count()),
+            &format!("{} {} test cases...", verb, T::cases().count()),
             None,
         )?;
 
@@ -77,12 +77,24 @@ impl App {
 
     // Helpers to emit steps
 
+    pub fn start_test_case(&mut self) -> Result<(), TestError> {
+        self.process_step(Step::StartTestCase)
+    }
+
+    pub fn end_test_case(&mut self) -> Result<(), TestError> {
+        self.process_step(Step::EndTestCase)
+    }
+
     pub fn comment(&mut self, comment: &str) -> Result<(), TestError> {
         self.process_step(Step::Comment(String::from(comment)))
     }
 
     pub fn value(&mut self, value: u32) -> Result<(), TestError> {
         self.process_step(Step::Value(value))
+    }
+
+    pub fn value64(&mut self, value: u64) -> Result<(), TestError> {
+        self.process_step(Step::Value64(value))
     }
 
     pub fn memory(&mut self, address: u32) -> Result<(), TestError> {
@@ -100,6 +112,9 @@ impl App {
     }
 
     pub fn memory_region(&mut self, address: u32, byte_length: u32) -> Result<(), TestError> {
+        // NOTE: we record memory regions as separate 32-bit values to make it easier to stream
+        // and prevent out-of-memory situations when serializing/deserializing large regions as a whole
+
         if address & 3 != 0 {
             return Err(anyhow!(
                 "Memory address ({:08X}) must be aligned to 4 bytes",
@@ -172,6 +187,12 @@ impl App {
 
     #[cfg(feature = "record")]
     fn record_test<T: Test>(&mut self) -> Result<()> {
+        // Wait for the server to be ready to receive data
+
+        if let Some(sc64) = &mut self.sc64 {
+            sc64.wait_for_server_ready_signal();
+        }
+
         // Notify the server that the test starts
 
         self.send(Message::TestStarted, false)?;
@@ -179,13 +200,12 @@ impl App {
         // Run each test case
 
         for (case_index, params) in T::cases().enumerate() {
-            // Record a "case start" step to delimit cases
+            let result = self
+                .process_step(Step::StartTestCase)
+                .and_then(|_| T::run(&params, self))
+                .and_then(|_| self.process_step(Step::EndTestCase));
 
-            self.process_step(Step::StartTestCase)?;
-
-            // Run the test case
-
-            match T::run(&params, self) {
+            match result {
                 Ok(()) => {}
 
                 Err(TestError::Other(e)) => bail!(
@@ -195,19 +215,25 @@ impl App {
                     e
                 ),
 
-                Err(TestError::Mismatch(_)) => unreachable!(),
+                Err(TestError::Mismatch(_)) => {
+                    unreachable!("mismatches should not happen in record mode")
+                }
+            }
+
+            if case_index % 100 == 0 {
+                self.display
+                    .progress(case_index as u32 + 1, T::cases().count() as u32)?;
             }
         }
 
         // Notify the server that the test completed
-        // (and flush the remaining buffered data)
+        // (and flush any remaining buffered messages)
 
         self.send(Message::TestCompleted, true)?;
 
         // Done!
 
-        self.print("\nDone!\n", Some(TextStyle::with_color(SUCCESS)))?;
-        self.display.frame(true)
+        self.print("\nDone!\n", Some(TextStyle::with_color(SUCCESS)))
     }
 
     #[cfg(feature = "replay")]
@@ -217,41 +243,46 @@ impl App {
         let mut successful_cases = 0;
 
         for (case_index, params) in T::cases().enumerate() {
-            match T::run(&params, self) {
+            let result = self
+                .process_step(Step::StartTestCase)
+                .and_then(|_| T::run(&params, self))
+                .and_then(|_| self.process_step(Step::EndTestCase));
+
+            match result {
                 Ok(()) => {
-                    // Ensure that all the recorded steps have been compared
-
-                    match self.comparator.finalize_case() {
-                        Ok(()) => {
-                            successful_cases += 1;
-
-                            //self.display.print("ok", None)?;
-                        }
-
-                        Err(TestError::Mismatch(mismatch)) => {
-                            self.print_mismatch(&mismatch)?;
-
-                            self.comparator.skip_case()?;
-                        }
-
-                        Err(TestError::Other(e)) => {
-                            bail!("failed to finalize test case {}, {}", case_index, e)
-                        }
-                    }
+                    successful_cases += 1;
                 }
 
                 Err(TestError::Mismatch(mismatch)) => {
-                    self.print_mismatch(&mismatch)?;
+                    // Display
 
-                    // Skip the rest of the test case
-                    // (only if the mismatch is not due to excess steps, in which case we're already at the start of the next case)
+                    let message = format!(
+                        "Mismatch at case {} / step {}:\n  - expected {}\n  -      got {:08X?}",
+                        mismatch.case_index,
+                        mismatch.step_index,
+                        mismatch
+                            .expected_step
+                            .map(|s| format!("{:08X?}", s))
+                            .unwrap_or("nothing".into()),
+                        mismatch.runtime_step,
+                    );
 
-                    if !matches!(mismatch, crate::test::Mismatch::ExcessSteps { .. }) {
-                        self.comparator.skip_case()?;
-                    }
+                    self.display
+                        .print(&message, Some(TextStyle::with_color(ERROR)))?;
                 }
 
                 Err(TestError::Other(e)) => bail!("failed to run test case {}, {}", case_index, e),
+            }
+
+            // Skip to the next case
+
+            self.comparator
+                .skip_case()
+                .with_context(|| format!("failed to skip test case {}", case_index))?;
+
+            if case_index % 100 == 0 {
+                self.display
+                    .progress(case_index as u32 + 1, T::cases().count() as u32)?;
             }
         }
 
@@ -259,49 +290,18 @@ impl App {
 
         if successful_cases == T::cases().count() {
             self.print("\nSuccess!\n", Some(TextStyle::with_color(SUCCESS)))?;
-            self.display.frame(true);
         } else {
             self.print(
-                &alloc::format!(
+                &format!(
                     "\n{}/{} tests failed\n",
                     T::cases().count() - successful_cases,
                     T::cases().count()
                 ),
                 Some(TextStyle::with_color(ERROR)),
             )?;
-            self.display.frame(false);
         }
 
         Ok(())
-    }
-
-    #[cfg(feature = "replay")]
-    fn print_mismatch(&mut self, mismatch: &crate::test::Mismatch) -> Result<()> {
-        use crate::test::Mismatch;
-
-        let message = match mismatch {
-            Mismatch::DifferentStep {
-                runtime_step,
-                expected_step,
-                step_index,
-            } => alloc::format!(
-                "Mismatch at step {}:\n  - expected {:08X?}\n  -      got {:08X?}",
-                step_index,
-                expected_step,
-                runtime_step,
-            ),
-
-            Mismatch::ExcessSteps { step_index } => {
-                alloc::format!("Emitted more steps than expected ({})", step_index)
-            }
-
-            Mismatch::MissingSteps { step_index } => {
-                alloc::format!("Emitted less steps than expected ({})", step_index)
-            }
-        };
-
-        self.display
-            .print(&message, Some(TextStyle::with_color(ERROR)))
     }
 
     /// "Processes" a step.

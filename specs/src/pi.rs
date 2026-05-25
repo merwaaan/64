@@ -12,7 +12,7 @@ pub const START: u32 = 0x0460_0000;
 pub const END: u32 = 0x0470_0000;
 
 pub const DMA_RAM_ALIGNMENT: usize = 8;
-pub const DMA_PI_ALIGNMENT: usize = 2;
+pub const DMA_PI_ALIGNMENT: usize = 2; // TODO sure?
 
 /// Physical address in the main RAM to transfer data from/to via DMA.
 #[bitfield(u32, instrospect, forbid_overlaps, default = 0, debug)]

@@ -1,4 +1,4 @@
-//! This tests records how the RSP registers are mirrored over the whole range they're accessible from.
+//! Records how the RSP registers are mirrored over the whole range they're accessible from.
 //!
 //! No surprises:
 //! - the registers are mirrored every 8 words without gaps or unexpected patterns
@@ -7,11 +7,11 @@ use n64_specs::rsp;
 
 use crate::{
     app::App,
-    io, no_params,
+    io, no_params, register_test,
     test::{Test, TestError},
 };
 
-pub struct RspRegistersMirroring;
+register_test!(RspRegistersMirroring);
 
 impl Test for RspRegistersMirroring {
     no_params!();
@@ -38,13 +38,16 @@ impl Test for RspRegistersMirroring {
                 .raw_value(),
         );
 
+        // TODO DMA to set addr regs
+
         io::read_uncached(rsp::Semaphore::ADDRESS); // Switch the semaphore to 1
 
-        // TODO region?
+        // Read the whole range of RSP registers
 
-        for address in (rsp::REGISTERS_START..rsp::REGISTERS_END).step_by(4) {
-            app.memory(address)?;
-        }
+        app.memory_region(
+            io::uncached_ptr(rsp::REGISTERS_START) as u32,
+            rsp::REGISTERS_END - rsp::REGISTERS_START,
+        )?;
 
         Ok(())
     }

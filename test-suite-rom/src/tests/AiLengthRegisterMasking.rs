@@ -12,11 +12,11 @@ use n64_specs::ai;
 
 use crate::{
     app::App,
-    io, no_params,
+    io, no_params, register_test,
     test::{Test, TestError},
 };
 
-pub struct AiLengthRegisterMasking;
+register_test!(AiLengthRegisterMasking);
 
 impl Test for AiLengthRegisterMasking {
     no_params!();

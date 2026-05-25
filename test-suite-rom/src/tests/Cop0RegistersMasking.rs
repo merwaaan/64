@@ -16,6 +16,8 @@
 //! No surprises:
 //! - All the used registers are masked as documented
 
+// TODO clean up with new helpers
+
 use alloc::format;
 use core::arch::asm;
 use n64_specs::cop0::Register;
@@ -23,7 +25,7 @@ use strum::IntoEnumIterator;
 
 use crate::{
     app::App,
-    no_params,
+    no_params, register_test,
     test::{Test, TestError},
 };
 
@@ -107,7 +109,7 @@ macro_rules! mtc0 {
     };
 }
 
-pub struct Cop0RegistersMasking;
+register_test!(Cop0RegistersMasking);
 
 impl Test for Cop0RegistersMasking {
     no_params!();
