@@ -88,40 +88,42 @@ impl Mi {
             specs::mi::EnabledInterrupts::OFFSET => {
                 let command = fake_reg[0];
 
-                if command.bit_is_set::<0>() {
-                    s.mi.regs.enabled_interrupts.set_sp(false);
-                } else if command.bit_is_set::<1>() {
-                    s.mi.regs.enabled_interrupts.set_sp(true);
+                // If both bits targeting the same interrupt are set, nothing happens
+
+                if command.bit_is_set::<0>() ^ command.bit_is_set::<1>() {
+                    s.mi.regs
+                        .enabled_interrupts
+                        .set_sp(command.bit_is_set::<1>());
                 }
 
-                if command.bit_is_set::<2>() {
-                    s.mi.regs.enabled_interrupts.set_si(false);
-                } else if command.bit_is_set::<3>() {
-                    s.mi.regs.enabled_interrupts.set_si(true);
+                if command.bit_is_set::<2>() ^ command.bit_is_set::<3>() {
+                    s.mi.regs
+                        .enabled_interrupts
+                        .set_si(command.bit_is_set::<3>());
                 }
 
-                if command.bit_is_set::<4>() {
-                    s.mi.regs.enabled_interrupts.set_ai(false);
-                } else if command.bit_is_set::<5>() {
-                    s.mi.regs.enabled_interrupts.set_ai(true);
+                if command.bit_is_set::<4>() ^ command.bit_is_set::<5>() {
+                    s.mi.regs
+                        .enabled_interrupts
+                        .set_ai(command.bit_is_set::<5>());
                 }
 
-                if command.bit_is_set::<6>() {
-                    s.mi.regs.enabled_interrupts.set_vi(false);
-                } else if command.bit_is_set::<7>() {
-                    s.mi.regs.enabled_interrupts.set_vi(true);
+                if command.bit_is_set::<6>() ^ command.bit_is_set::<7>() {
+                    s.mi.regs
+                        .enabled_interrupts
+                        .set_vi(command.bit_is_set::<7>());
                 }
 
-                if command.bit_is_set::<8>() {
-                    s.mi.regs.enabled_interrupts.set_pi(false);
-                } else if command.bit_is_set::<9>() {
-                    s.mi.regs.enabled_interrupts.set_pi(true);
+                if command.bit_is_set::<8>() ^ command.bit_is_set::<9>() {
+                    s.mi.regs
+                        .enabled_interrupts
+                        .set_pi(command.bit_is_set::<9>());
                 }
 
-                if command.bit_is_set::<10>() {
-                    s.mi.regs.enabled_interrupts.set_dp(false);
-                } else if command.bit_is_set::<11>() {
-                    s.mi.regs.enabled_interrupts.set_dp(true);
+                if command.bit_is_set::<10>() ^ command.bit_is_set::<11>() {
+                    s.mi.regs
+                        .enabled_interrupts
+                        .set_dp(command.bit_is_set::<11>());
                 }
 
                 Self::update_cause_register(&s.mi, &mut s.cop0);
