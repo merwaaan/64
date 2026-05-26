@@ -20,32 +20,26 @@ impl Test for RspMemoryMirroring {
     fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
         // Fill DMEM and IMEM and then read the whole memory range
 
-        let mem = io::uncached_ptr(rsp::MEMORY_START);
+        let mem_start = io::uncached_addr(rsp::MEMORY_START);
 
         for i in (0..rsp::DMEM_SIZE + rsp::IMEM_SIZE).step_by(4) {
-            io::write_uncached(mem as u32 + i, i);
+            io::write_uncached(mem_start + i, i);
         }
 
         app.comment("Read the whole range")?;
 
-        app.memory_region(
-            io::uncached_ptr(rsp::MEMORY_START) as u32,
-            rsp::MEMORY_END - rsp::MEMORY_START,
-        )?;
+        app.memory_region(mem_start, rsp::MEMORY_END - rsp::MEMORY_START)?;
 
-        // Write to each 0x2000 bytes block and read back the base block
+        // Write to each successive 0x2000 region and read back the base region
 
         for mirror in 1..31 {
             app.comment(&format!("Write to mirror {}", mirror))?;
 
             for i in (0..rsp::DMEM_SIZE + rsp::IMEM_SIZE).step_by(4) {
-                io::write_uncached(mem as u32 + mirror * 0x2000 + i, mirror);
+                io::write_uncached(mem_start as u32 + mirror * 0x2000 + i, mirror);
             }
 
-            app.memory_region(
-                io::uncached_ptr(rsp::MEMORY_START) as u32,
-                rsp::DMEM_SIZE + rsp::IMEM_SIZE,
-            )?;
+            app.memory_region(mem_start, rsp::DMEM_SIZE + rsp::IMEM_SIZE)?;
         }
 
         Ok(())

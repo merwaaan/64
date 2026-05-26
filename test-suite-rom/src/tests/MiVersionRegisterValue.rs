@@ -5,11 +5,11 @@ use n64_specs::mi;
 
 use crate::{
     app::App,
-    io, no_params,
+    io, no_params, register_test,
     test::{Test, TestError},
 };
 
-pub struct MiVersionRegisterValue;
+register_test!(MiVersionRegisterValue);
 
 impl Test for MiVersionRegisterValue {
     no_params!();

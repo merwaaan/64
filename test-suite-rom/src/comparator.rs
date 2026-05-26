@@ -271,7 +271,7 @@ impl Comparator {
         io::pi_dma(
             &io::PiDma {
                 direction: io::PiDmaDirection::PiToRam,
-                ram_address: u24::from_u32(io::physical(self.dma_buffer.as_ptr() as u32)),
+                ram_address: u24::from_u32(io::physical_addr(self.dma_buffer.as_ptr() as u32)),
                 pi_address: self.dma_source_address - dma_source_address_misalignment,
                 length: u24::from_u32(bytes_to_transfer + dma_source_address_misalignment - 1),
             },

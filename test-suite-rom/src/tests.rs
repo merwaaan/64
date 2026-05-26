@@ -12,6 +12,7 @@ mod CpuInstructionsShift;
 mod Dummy;
 mod MiMaskRegisterClearSet;
 mod MiVersionRegisterValue;
+mod PiRegistersMirroring;
 mod RspDmaBuffering;
 mod RspDmaFromRam;
 mod RspDmaLatching;

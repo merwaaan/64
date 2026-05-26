@@ -12,12 +12,16 @@ pub fn wait_until(condition: impl Fn() -> bool) {
 
 // Uncached memory access
 
-pub fn physical(address: u32) -> u32 {
+pub fn physical_addr(address: u32) -> u32 {
     address & 0x1FFF_FFFF
 }
 
+pub fn uncached_addr(offset: u32) -> u32 {
+    physical_addr(offset) | (n64_specs::map::Segment::KSEG1 as u32)
+}
+
 pub fn uncached_ptr(offset: u32) -> *mut u32 {
-    (n64_specs::map::Segment::KSEG1 as u32 | offset) as *mut u32
+    uncached_addr(offset) as *mut u32
 }
 
 pub fn read_uncached(offset: u32) -> u32 {
@@ -37,6 +41,7 @@ pub struct Buffer<T> {
     layout: Layout,
 }
 
+// TODO constructor with iter?
 impl<T> Buffer<T> {
     pub fn new(capacity: usize) -> Self {
         Self::with_alignment(capacity, 8)
@@ -86,7 +91,7 @@ impl<T> Buffer<T> {
             .checked_mul(core::mem::size_of::<T>())
             .expect("buffer index overflow");
 
-        let physical = physical(self.data.as_ptr() as u32).wrapping_add(byte_offset as u32);
+        let physical = physical_addr(self.data.as_ptr() as u32).wrapping_add(byte_offset as u32);
 
         (n64_specs::map::Segment::KSEG1 as u32 | physical) as *mut T
     }
@@ -103,19 +108,34 @@ impl<T> Buffer<T> {
         unsafe { self.uncached_item(index).read_volatile() }
     }
 
-    pub fn set(&mut self, index: usize, value: T) {
+    fn set(&mut self, index: usize, value: T) {
+        assert!(
+            index < self.size,
+            "buffer index out of bounds ({}/{})",
+            index,
+            self.size
+        );
+
         unsafe { self.uncached_item(index).write_volatile(value) };
     }
 
     pub fn push(&mut self, value: T) {
         assert!(
             self.size < self.capacity,
-            "buffer capacity exceeded {}",
+            "buffer capacity exceeded ({})",
             self.capacity
         );
 
-        self.set(self.size, value);
+        let old_size = self.size;
         self.size += 1;
+        self.set(old_size, value);
+    }
+
+    pub fn pop(&mut self) -> T {
+        assert!(!self.is_empty(), "buffer is empty");
+
+        self.size -= 1;
+        self.get(self.size)
     }
 
     pub fn clear(&mut self) {

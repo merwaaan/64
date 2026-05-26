@@ -29,12 +29,9 @@ impl Test for Dummy {
             app.memory(unsafe { ram_data.as_ptr().add(i) as u32 })?;
         }
 
-        app.memory_region(
-            io::uncached_ptr(ram_data.as_ptr() as u32) as u32,
-            ram_data.len() as u32 * 4,
-        )?;
+        app.memory_region(ram_data.as_ptr() as u32, ram_data.len() as u32 * 4)?;
 
-        // Test PI DMA
+        //
 
         app.comment("Test PI DMA")?;
 
@@ -43,7 +40,7 @@ impl Test for Dummy {
         io::pi_dma(
             &io::PiDma {
                 direction: io::PiDmaDirection::PiToRam,
-                ram_address: u24::from_u32(io::physical(ram_data.as_ptr() as u32)),
+                ram_address: u24::from_u32(io::physical_addr(ram_data.as_ptr() as u32)),
                 pi_address: 0x1000_0000,
                 length: u24::from_u8(0x40 - 1),
             },
@@ -52,9 +49,9 @@ impl Test for Dummy {
 
         app.memory_region(ram_data.as_ptr() as u32, ram_data.len() as u32)?;
 
-        // Test RSP DMA
+        //
 
-        // TODO
+        // TODO app.comment("Test PI DMA")?;
 
         Ok(())
     }

@@ -18,19 +18,16 @@ use crate::{
 
 const REGISTERS: [Register; 3] = [Register::R0, Register::T0, Register::T1];
 
-const REGISTER_IN_VALUES: [u64; 14] = [
+const REGISTER_IN_VALUES: [u64; 11] = [
     0x0000_0000_0000_0000,
     0x0000_0000_0000_0001,
-    0x0000_0000_0000_CD15,
-    0x0000_0000_2640_044E,
-    0x0000_0000_5555_5555,
+    0x0000_0000_0000_1F00,
+    0x0000_0000_2999_45B8,
     0x0000_0000_7FFF_FFFF,
     0x0000_0000_8008_00F0,
-    0x0000_0000_AAAA_AAAA,
-    0x0000_0000_DBCA_0000,
     0x0000_0000_FFFF_FFFF,
+    0x0000_0001_FFFF_FFFF,
     0x105C_00CE_0000_0000,
-    0xC000_FFFF_0000_0007,
     0xFFFF_002F_89AB_F51F,
     0xFFFF_FFFF_FFFF_FFFF,
 ];
@@ -151,7 +148,8 @@ macro_rules! v_variant {
             fn cases() -> impl Iterator<Item = Self::Params> {
                 let shifts: Vec<_> = (0..=31)
                     .chain([
-                        0xFFFF_FFFF_FFFF_FFE0,
+                        0x0000_0000_0000_FFE0,
+                        0x0000_0000_0000_FFE4,
                         0xABCD_0000_FFFF_0004,
                         0xFFFF_FFFF_FFFF_FFFF,
                     ])
