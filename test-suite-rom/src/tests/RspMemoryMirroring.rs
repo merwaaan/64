@@ -3,6 +3,7 @@
 //! No surprises:
 //! - the memory is mirrored 32 times, every 0x2000 bytes, without unexpected patterns
 
+use alloc::format;
 use n64_specs::rsp;
 
 use crate::{
@@ -17,7 +18,7 @@ impl Test for RspMemoryMirroring {
     no_params!();
 
     fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-        // Fill DMEM and IMEM
+        // Fill DMEM and IMEM and then read the whole memory range
 
         let mem = io::uncached_ptr(rsp::MEMORY_START);
 
@@ -25,12 +26,27 @@ impl Test for RspMemoryMirroring {
             io::write_uncached(mem as u32 + i, i);
         }
 
-        // Read the whole memory range
+        app.comment("Read the whole range")?;
 
         app.memory_region(
             io::uncached_ptr(rsp::MEMORY_START) as u32,
             rsp::MEMORY_END - rsp::MEMORY_START,
         )?;
+
+        // Write to each 0x2000 bytes block and read back the base block
+
+        for mirror in 1..31 {
+            app.comment(&format!("Write to mirror {}", mirror))?;
+
+            for i in (0..rsp::DMEM_SIZE + rsp::IMEM_SIZE).step_by(4) {
+                io::write_uncached(mem as u32 + mirror * 0x2000 + i, mirror);
+            }
+
+            app.memory_region(
+                io::uncached_ptr(rsp::MEMORY_START) as u32,
+                rsp::DMEM_SIZE + rsp::IMEM_SIZE,
+            )?;
+        }
 
         Ok(())
     }

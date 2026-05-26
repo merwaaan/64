@@ -92,9 +92,8 @@ impl Sc64 {
 
     /// Sends raw data over USB.
     fn send_raw(&self, data: &[u8]) -> Result<()> {
-        let aligned_length = data.len().next_multiple_of(4) as u32;
-
         // TODO DMA faster but sometimes doesn't work???
+        //let aligned_length = data.len().next_multiple_of(4) as u32;
         // io::pi_dma(
         //     &io::PiDma {
         //         direction: io::PiDmaDirection::RamToPi,

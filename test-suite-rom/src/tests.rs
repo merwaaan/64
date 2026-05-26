@@ -8,6 +8,7 @@ mod AiRegistersMirroring;
 mod Cop0RegistersMasking;
 mod CpuInstructionsLoadStore;
 mod CpuInstructionsLogical;
+mod CpuInstructionsShift;
 mod Dummy;
 mod MiMaskRegisterClearSet;
 mod MiVersionRegisterValue;

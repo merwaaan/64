@@ -2,10 +2,7 @@
 //! ANDI, ORI, XORI
 
 use alloc::format;
-use n64_specs::cpu::{
-    instructions::{And, Andi, Nor, Or, Ori, Xor, Xori},
-    registers::Register,
-};
+use n64_specs::cpu::{instructions::*, registers::Register};
 
 use crate::{
     app::App,

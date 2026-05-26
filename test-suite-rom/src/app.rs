@@ -1,5 +1,5 @@
 use alloc::{format, string::String};
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail};
 use test_suite_common::{Message, Step};
 
 use crate::{display::*, io, isviewer, sc64::Sc64, test::*};
@@ -275,6 +275,8 @@ impl App {
             }
 
             // Skip to the next case
+
+            use anyhow::Context;
 
             self.comparator
                 .skip_case()

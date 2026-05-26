@@ -24,7 +24,7 @@ use crate::{Mode, find_test_rom, list_tests, release_dir};
 /// Records the results of either a specific test ROM of all the built record-mode ROMs by executing them on hardware.
 pub fn run(test_name: &Option<String>, repeat: Option<usize>) -> Result<()> {
     let tests = if let Some(test_name) = test_name {
-        let path = find_test_rom(&test_name, Mode::Record);
+        let path = find_test_rom(test_name, Mode::Record);
 
         if let Some(path) = path {
             vec![(test_name.clone(), path)]
@@ -67,12 +67,12 @@ fn record_test(test_name: &str, test_rom_path: &PathBuf, repeat: Option<usize>) 
     // If requested, repeat the recording to validate determinism
 
     if let Some(repeat) = repeat {
-        check_determinism(&test_rom_path, &steps, repeat)?;
+        check_determinism(test_rom_path, &steps, repeat)?;
     }
 
     // Save the test result
 
-    save_test_steps(&test_name, &steps).with_context(|| "failed to save test steps")
+    save_test_steps(test_name, &steps).with_context(|| "failed to save test steps")
 }
 
 fn check_determinism(
@@ -286,7 +286,7 @@ fn parse_messages(
                     }
                 }
             }
-            Ok(Packet::Cmp { data: _, .. }) => {
+            Ok(Packet::Cmp) => {
                 //log::debug!("    Response: {:0X?}", data);
 
                 let consumed = raw_packets_buffer.len() - cursor.len();
@@ -311,7 +311,7 @@ fn parse_messages(
 
 enum Packet {
     Pkt { data: Vec<u8> },
-    Cmp { data: Vec<u8> },
+    Cmp,
     Err { data: Vec<u8> },
 }
 
@@ -346,7 +346,7 @@ fn parse_packet(input: &mut Partial<&[u8]>) -> ModalResult<Packet> {
         b"CMP" => {
             //log::debug!("    Received CMP {} {:0X?}", id, data);
 
-            Ok(Packet::Cmp { data })
+            Ok(Packet::Cmp)
         }
         b"ERR" => {
             //log::debug!("    Received ERR {} {:0X?}", id, data);

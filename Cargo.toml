@@ -6,7 +6,7 @@ resolver = "3"
 #[profile.release]
 #lto = "fat"
 #codegen-units = 1
-#panic = "abort"
+#panic = "abort" TODO unwind needed to catch emu panics from ui?
 
 [profile.profiling]
 inherits = "release"

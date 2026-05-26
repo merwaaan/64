@@ -101,3 +101,6 @@ fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
 
     app().wait_for_reboot()
 }
+
+// TODO
+// - RAM reg mirroring

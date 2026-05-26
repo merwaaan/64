@@ -1,5 +1,5 @@
 //! Interrupts are toggled by setting/clearing specific bits in the MI Mask register.
-//! This test records what happens when a write both sets and clears an interrupt.
+//! This records what happens when a write both sets and clears the same interrupt.
 //!
 //! Findings:
 //! - Clearing and setting an interrupt mask at the same time does nothing
@@ -14,11 +14,11 @@ use crate::{
     test::{Test, TestError},
 };
 
+register_test!(MiMaskRegisterClearSet);
+
 const CLEAR_ALL: u32 = 0x0000_0555;
 const SET_ALL: u32 = 0x0000_0AAA;
 const UNUSED_BITS: u32 = 0xFFFF_F000;
-
-register_test!(MiMaskRegisterClearSet);
 
 impl Test for MiMaskRegisterClearSet {
     type Params = u32;
@@ -56,13 +56,19 @@ impl Test for MiMaskRegisterClearSet {
 
         let mask_reg = mi::EnabledInterrupts::ADDRESS;
 
-        app.comment("From cleared")?;
+        app.comment("Clear")?;
         io::write_uncached(mask_reg, CLEAR_ALL);
+        app.value(io::read_uncached(mask_reg))?;
+
+        app.comment("Write")?;
         io::write_uncached(mask_reg, *params);
         app.value(io::read_uncached(mask_reg))?;
 
-        app.comment("From set")?;
+        app.comment("Set")?;
         io::write_uncached(mask_reg, SET_ALL);
+        app.value(io::read_uncached(mask_reg));
+
+        app.comment("Write")?;
         io::write_uncached(mask_reg, *params);
         app.value(io::read_uncached(mask_reg))
     }
