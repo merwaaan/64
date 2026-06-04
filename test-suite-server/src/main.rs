@@ -32,22 +32,23 @@ struct Args {
 #[derive(Subcommand, Debug)]
 enum Command {
     /// Lists all the available tests.
-    List,
+    List {
+        #[command(flatten)]
+        filter: TestFilter,
+    },
     /// Builds the test ROMs in either record or replay mode.
     /// Replay mode requires the test data to have been recorded beforehand.
     Build {
         #[arg(value_enum)]
         mode: Mode,
 
-        /// Specific test name.
-        /// Builds all the available tests if not specified.
-        test_name: Option<String>,
+        #[command(flatten)]
+        filter: TestFilter,
     },
     /// Records test results by executing the record-mode test ROMs
     Record {
-        /// Specific test name.
-        /// Records all the available tests if not specified.
-        test_name: Option<String>,
+        #[command(flatten)]
+        filter: TestFilter,
 
         /// Records multiple times to ensure that the test is deterministic.
         #[arg(long)]
@@ -55,15 +56,13 @@ enum Command {
     },
     /// Replays test results by executing the replay-mode test ROMs
     Replay {
-        /// Specific test name.
-        /// Records all the available tests if not specified.
-        test_name: Option<String>,
+        #[command(flatten)]
+        filter: TestFilter,
     },
     /// Builds the record-mode ROMs, executes them to collect results and builds the replay-mode ROMs.
     All {
-        /// Specific test name.
-        /// Builds all the available tests if not specified.
-        test_name: Option<String>,
+        #[command(flatten)]
+        filter: TestFilter,
 
         /// Records multiple times to ensure that the test is deterministic.
         #[arg(long)]
@@ -77,6 +76,24 @@ enum Command {
     Clean,
 }
 
+#[derive(clap::Args, Debug, Clone, Default)]
+pub struct TestFilter {
+    /// Test name filters.
+    ///
+    /// Only considers tests where `module::name` contains one of the filters if specified.
+    /// Considers all the available tests if not specified.
+    #[arg(long = "filter", short = 'f')]
+    pub filters: Vec<String>,
+}
+
+impl TestFilter {
+    pub fn matches(&self, test: &Test) -> bool {
+        let full_name = format!("{}::{}", test.module, test.name);
+
+        self.filters.is_empty() || self.filters.iter().any(|filter| full_name.contains(filter))
+    }
+}
+
 fn main() -> ExitCode {
     env_logger::builder()
         .filter_level(log::LevelFilter::Debug)
@@ -87,15 +104,15 @@ fn main() -> ExitCode {
     let args = Args::parse();
 
     let result = match args.command {
-        Command::List => show_test_list(),
-        Command::Build { mode, test_name } => build::run(&mode, &test_name),
-        Command::Record { test_name, repeat } => record::run(&test_name, repeat),
-        Command::Replay { test_name: _ } => todo!("replay subcommand"),
+        Command::List { filter } => show_test_list(&filter),
+        Command::Build { mode, filter } => build::run(&mode, &filter),
+        Command::Record { filter, repeat } => record::run(&filter, repeat),
+        Command::Replay { .. } => todo!("replay subcommand"),
         Command::All {
-            test_name,
+            filter,
             repeat,
             clean: clear,
-        } => run_all(&test_name, repeat, clear),
+        } => run_all(&filter, repeat, clear),
         Command::Clean => clean_release_dir(),
     };
 
@@ -108,8 +125,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn show_test_list() -> Result<()> {
-    let tests = list_tests()?;
+fn show_test_list(filter: &TestFilter) -> Result<()> {
+    let tests = list_tests(filter)?;
 
     log::info!("{} tests:", tests.len());
 
@@ -120,14 +137,16 @@ fn show_test_list() -> Result<()> {
     Ok(())
 }
 
-fn run_all(test_name: &Option<String>, repeat: Option<usize>, clean: bool) -> Result<()> {
+fn run_all(filter: &TestFilter, repeat: Option<usize>, clean: bool) -> Result<()> {
     if clean {
         clean_release_dir().context("failed to clear release directory")?;
     }
 
-    build::run(&Mode::Record, test_name).context("failed to build record-mode ROMs")?;
-    record::run(test_name, repeat).context("failed to record results on hardware")?;
-    build::run(&Mode::Replay, test_name).context("failed to build replay-mode ROMs")
+    build::run(&Mode::Record, filter).context("failed to build record-mode ROMs")?;
+    record::run(filter, repeat).context("failed to record results on hardware")?;
+    build::run(&Mode::Replay, filter).context("failed to build replay-mode ROMs")
+
+    // TODO replay recording on same hardware to validate
 }
 
 pub fn rom_crate_dir() -> PathBuf {
@@ -163,7 +182,7 @@ pub struct Test {
 }
 
 /// Returns all the tests registered via the `register_test!` macro.
-pub fn list_tests() -> Result<Vec<Test>> {
+pub fn list_tests(filter: &TestFilter) -> Result<Vec<Test>> {
     let mut tests = Vec::new();
 
     let register_test_regex =
@@ -182,23 +201,24 @@ pub fn list_tests() -> Result<Vec<Test>> {
             let source = fs::read_to_string(&path)
                 .with_context(|| format!("failed to read {}", path.display()))?;
 
-            for cap in register_test_regex.captures_iter(&source) {
-                tests.push(Test {
-                    name: cap[1].to_string(),
+            for capture in register_test_regex.captures_iter(&source) {
+                let test = Test {
+                    name: capture[1].to_string(),
                     module: module.clone(),
-                });
+                };
+
+                if filter.matches(&test) {
+                    tests.push(test);
+                }
             }
         }
     }
 
-    Ok(tests)
-}
+    if !filter.filters.is_empty() && tests.is_empty() {
+        log::warn!("No tests matched filters: {}", filter.filters.join(", "));
+    }
 
-pub fn find_test(test_name: &str) -> Result<Option<Test>> {
-    Ok(list_tests()?
-        .iter()
-        .find(|test| test.name == test_name)
-        .cloned())
+    Ok(tests)
 }
 
 pub fn find_test_rom(test_name: &str, mode: Mode) -> Option<PathBuf> {

@@ -4,19 +4,13 @@ use anyhow::{Context, Result, anyhow, bail};
 use object::{Object, ObjectSection, ObjectSymbol};
 use test_suite_common::Step;
 
-use crate::{Mode, Test, find_test, list_tests, release_dir, rom_crate_dir};
+use crate::{Mode, Test, TestFilter, list_tests, release_dir, rom_crate_dir};
 
-/// Builds either a specific test ROM of all of them, in either record or replay mode.
-pub fn run(mode: &Mode, test_name: &Option<String>) -> Result<()> {
+/// Builds test ROMs, in either record or replay mode.
+pub fn run(mode: &Mode, filter: &TestFilter) -> Result<()> {
     log::info!("Building tests in {mode:?} mode...");
 
-    let tests = if let Some(test_name) = test_name {
-        vec![find_test(test_name)?.ok_or_else(|| anyhow::anyhow!("no test named {test_name}"))?]
-    } else {
-        list_tests()?
-    };
-
-    for test in tests {
+    for test in list_tests(filter)? {
         build_test(&test, mode)?;
     }
 

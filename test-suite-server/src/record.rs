@@ -19,35 +19,20 @@ use winnow::{
 
 // TODO logs messy, how to deal with indentation?
 
-use crate::{Mode, find_test_rom, list_tests, release_dir};
+use crate::{Mode, TestFilter, find_test_rom, list_tests, release_dir};
 
 /// Records the results of either a specific test ROM of all the built record-mode ROMs by executing them on hardware.
-pub fn run(test_name: &Option<String>, repeat: Option<usize>) -> Result<()> {
-    let tests = if let Some(test_name) = test_name {
-        let path = find_test_rom(test_name, Mode::Record);
+pub fn run(filter: &TestFilter, repeat: Option<usize>) -> Result<()> {
+    let tests = list_tests(filter)?;
 
-        if let Some(path) = path {
-            vec![(test_name.clone(), path)]
+    for test in tests {
+        let rom_path = find_test_rom(&test.name, Mode::Record);
+
+        if let Some(rom_path) = rom_path {
+            record_test(&test.name, &rom_path, repeat)?;
         } else {
-            bail!("no record-mode ROM for {test_name}");
+            log::warn!("no record-mode ROM for {}", test.name);
         }
-    } else {
-        let tests: Vec<_> = list_tests()?
-            .into_iter()
-            .filter_map(|test| {
-                find_test_rom(&test.name, Mode::Record).map(|path| (test.name.clone(), path))
-            })
-            .collect();
-
-        if tests.is_empty() {
-            bail!("no tests to record in {}", release_dir().display());
-        }
-
-        tests
-    };
-
-    for (test, test_rom_path) in tests {
-        record_test(&test, &test_rom_path, repeat)?;
     }
 
     Ok(())
