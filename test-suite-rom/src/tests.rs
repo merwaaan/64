@@ -3,9 +3,12 @@
 
 #![allow(non_snake_case)]
 
+mod AiDma;
 mod AiLengthRegisterMasking;
 mod AiRegistersMirroring;
 mod Cop0RegistersMasking;
+mod CpuInstructionsArithmetic;
+mod CpuInstructionsException;
 mod CpuInstructionsLoadStore;
 mod CpuInstructionsLogical;
 mod CpuInstructionsShift;

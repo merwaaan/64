@@ -1,8 +1,8 @@
 use std::fs;
 
 use anyhow::{Context, Result, anyhow, bail};
-use object::{Object, ObjectSymbol};
-use test_suite_common::{Step, strip_comments};
+use object::{Object, ObjectSection, ObjectSymbol};
+use test_suite_common::Step;
 
 use crate::{Mode, Test, find_test, list_tests, release_dir, rom_crate_dir};
 
@@ -148,10 +148,6 @@ fn build_test(test: &Test, mode: &Mode) -> Result<()> {
             )
         })?;
 
-        // Strip the comments to save memory
-
-        let steps = strip_comments(&steps);
-
         // Serialize the steps to a binary buffer
         // (each step one after another, not the vector, to allow streaming without loading the whole vector in the program)
 
@@ -184,12 +180,27 @@ fn build_test(test: &Test, mode: &Mode) -> Result<()> {
             ("EMBEDDED_DATA_ROM_OFFSET", embedded_data_offset),
             ("EMBEDDED_DATA_ROM_SIZE", steps_data.len() as u32),
         ] {
-            let patch_rom_offset = program_elf
-                .symbols()
-                .find(|s| s.name() == Ok(symbol_name))
-                .ok_or_else(|| anyhow!("{symbol_name} symbol not found"))?
-                .address() as usize
-                & 0x1FFF_FFFF; // linked as in KSEG0 but we need a base offset
+            let symbol = program_elf
+                .symbol_by_name(symbol_name)
+                .ok_or_else(|| anyhow!("{symbol_name} symbol not found"))?;
+
+            let section_index = symbol
+                .section_index()
+                .ok_or_else(|| anyhow!("{symbol_name} has no section index"))?;
+
+            let section = program_elf.section_by_index(section_index)?;
+
+            let (section_file_offset, _section_file_size) = section
+                .file_range()
+                .ok_or_else(|| anyhow!("{symbol_name} section has no file range"))?;
+
+            let in_section_offset = symbol
+                .address()
+                .checked_sub(section.address())
+                .ok_or_else(|| anyhow!("{symbol_name} address is before section start"))?
+                as usize;
+
+            let patch_rom_offset = section_file_offset as usize + in_section_offset;
 
             let z64_patch_offset = program_offset + patch_rom_offset;
 

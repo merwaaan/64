@@ -26,20 +26,37 @@ impl Test for RspMemoryMirroring {
             io::write_uncached(mem_start + i, i);
         }
 
-        app.comment("Read the whole range")?;
-
-        app.memory_region(mem_start, rsp::MEMORY_END - rsp::MEMORY_START)?;
+        app.memory_region(
+            &format!(
+                "Read RSP memory from {:08X} to {:08X}",
+                rsp::MEMORY_START,
+                rsp::MEMORY_END
+            ),
+            mem_start,
+            rsp::MEMORY_END - rsp::MEMORY_START,
+        )?;
 
         // Write to each successive 0x2000 region and read back the base region
 
         for mirror in 1..31 {
-            app.comment(&format!("Write to mirror {}", mirror))?;
+            let mirror_start = mem_start + mirror * 0x2000;
 
             for i in (0..rsp::DMEM_SIZE + rsp::IMEM_SIZE).step_by(4) {
-                io::write_uncached(mem_start as u32 + mirror * 0x2000 + i, mirror);
+                io::write_uncached(mirror_start + i, mirror);
             }
 
-            app.memory_region(mem_start, rsp::DMEM_SIZE + rsp::IMEM_SIZE)?;
+            app.memory_region(
+                &format!(
+                    "Write to mirror {} ({:08X} to {:08X}) and read back from {:08X} to {:08X}",
+                    mirror,
+                    mirror_start,
+                    mirror_start + rsp::DMEM_SIZE + rsp::IMEM_SIZE,
+                    rsp::MEMORY_START,
+                    rsp::MEMORY_START + rsp::DMEM_SIZE + rsp::IMEM_SIZE
+                ),
+                mem_start,
+                rsp::DMEM_SIZE + rsp::IMEM_SIZE,
+            )?;
         }
 
         Ok(())

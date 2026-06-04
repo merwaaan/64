@@ -111,6 +111,8 @@ macro_rules! mtc0 {
 
 register_test!(Cop0RegistersMasking);
 
+// TODO make regs params
+
 impl Test for Cop0RegistersMasking {
     no_params!();
 
@@ -131,6 +133,8 @@ impl Test for Cop0RegistersMasking {
         for reg in regs {
             // Registers have unpredictable initial values so we record which bits are writable instead of the exact values
 
+            // TODO use program
+
             for_cop0_reg!(reg, mtc0, 0);
             let zeroed = for_cop0_reg!(reg, mfc0);
 
@@ -139,8 +143,7 @@ impl Test for Cop0RegistersMasking {
 
             let writable = maxed & !zeroed;
 
-            app.comment(&format!("{:?}", reg))?;
-            app.value(writable)?;
+            app.value(&format!("{:?}", reg), writable)?;
         }
 
         Ok(())

@@ -429,7 +429,7 @@ impl Sp {
 
         let skips = (length >> 20) & !7;
 
-        let mut ram_addr = (slot.ram_address & 0x007F_FFFF) as usize;
+        let mut ram_addr = (slot.ram_address & 0x007F_FFFF) as usize; // TODO > 0x007F_FFFF possible! libdragon ipl3 uses that to zero DMEM at boot
         let mut sp_addr = slot.sp_address as usize;
 
         // On the SP side, reads/writes wrap around either IMEM or DMEM

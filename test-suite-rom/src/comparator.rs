@@ -3,10 +3,7 @@ use anyhow::{Result, bail};
 use arbitrary_int::prelude::*;
 use test_suite_common::Step;
 
-use crate::{
-    io,
-    test::{Mismatch, TestError},
-};
+use crate::io;
 
 /// The PI address of the embedded data produced by the corresponding record-mode test.
 fn embedded_data_pi_address() -> u32 {
@@ -95,17 +92,20 @@ impl Default for Comparator {
     }
 }
 
+pub enum Comparison {
+    Same,
+    Different {
+        expected_step: Step,
+        step_index: u32,
+    },
+    TooManySteps {
+        step_index: u32,
+    },
+}
+
 impl Comparator {
     // Compares a runtime step against the next expected step.
-    pub fn compare(&mut self, step: &Step) -> Result<(), TestError> {
-        // Ignore comments as they have been stripped from the embedded steps
-
-        if matches!(step, Step::Comment(_)) {
-            self.test_case_step_index += 1;
-
-            return Ok(());
-        }
-
+    pub fn compare(&mut self, step: &Step) -> Result<Comparison> {
         // Peek at the next expected step
 
         let expected_step = self.peek()?;
@@ -122,26 +122,21 @@ impl Comparator {
 
                     self.take()?;
 
-                    Ok(())
+                    Ok(Comparison::Same)
                 }
                 // Mismatch, raise an error
                 // (the rest of the test case will still need to be skipped)
                 else {
-                    Err(TestError::Mismatch(Mismatch {
-                        runtime_step: step.clone(),
-                        expected_step: Some(expected_step.clone()),
-                        case_index: self.test_case_index,
+                    Ok(Comparison::Different {
+                        expected_step: expected_step.clone(),
                         step_index: self.test_case_step_index,
-                    }))
+                    })
                 }
             }
-            // All steps have been consumed, the runtime test case emitted too many steps
-            None => Err(TestError::Mismatch(Mismatch {
-                runtime_step: step.clone(),
-                expected_step: None,
-                case_index: self.test_case_index,
+            // All the recorded steps have been consumed, the runtime test case emitted too many steps
+            None => Ok(Comparison::TooManySteps {
                 step_index: self.test_case_step_index,
-            })),
+            }),
         }
     }
 

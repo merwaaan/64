@@ -12,6 +12,7 @@ pub mod color;
 pub mod cop0;
 pub mod cpu;
 pub mod dd;
+pub mod exception;
 pub mod interrupt;
 pub mod isviewer;
 pub mod map;

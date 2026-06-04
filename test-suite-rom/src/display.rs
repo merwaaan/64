@@ -43,7 +43,7 @@ impl Default for Display {
         // TODO use specific reg for each write instead of base + offset
         // TODO does the IPL do that?
 
-        let vi_reg_base = io::uncached_ptr(vi::START);
+        let vi_reg_base = io::uncached_ptr::<u32>(vi::START);
 
         // TODO a bit glitchy, was better before tweaking the settings
 

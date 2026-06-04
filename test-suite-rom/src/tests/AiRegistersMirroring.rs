@@ -1,8 +1,7 @@
 //! This tests records how the AI registers are mirrored over the whole range they're accessible from.
 //!
 //! Findings:
-//! - The 6 registers are mirrored every 8 words
-//! - Writing to the 2 unused slots has no effect
+//! - The 6 registers are mirrored 0x8000 times, every 0x20 bytes, leaving 2 unused slots
 
 use alloc::format;
 use n64_specs::ai;
@@ -19,20 +18,21 @@ impl Test for AiRegistersMirroring {
     no_params!();
 
     fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-        app.comment(format!("Read from {:08X} to {:08X}", ai::START, ai::END).as_str())?;
+        // Do a DMA to get some values in the registers
 
-        app.memory_region(io::uncached_ptr(ai::START) as u32, ai::END - ai::START)?;
+        // TODO
 
-        // TODO??
-        for reg in [6, 7] {
-            for value in [0, u32::MAX] {
-                app.comment(format!("Write {} to unused slot #{}", value, reg).as_str())?;
+        // Read the whole range
 
-                io::write_uncached(ai::START + reg * 4, value);
-
-                app.memory_region(io::uncached_ptr(ai::START) as u32, 8 * 4)?;
-            }
-        }
+        app.memory_region(
+            &format!(
+                "Read AI registers from {:08X} to {:08X}",
+                ai::START,
+                ai::END
+            ),
+            io::uncached_addr(ai::START),
+            ai::END - ai::START,
+        )?;
 
         Ok(())
     }

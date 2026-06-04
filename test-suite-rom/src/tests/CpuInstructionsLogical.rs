@@ -64,17 +64,7 @@ macro_rules! reg_variant {
         }
 
         fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-            app.comment(&format!(
-                "{} {}, {}={:08X}, {}={:08X}",
-                stringify!($instr).to_uppercase(),
-                params.reg_out,
-                params.reg_in1,
-                params.reg_value1,
-                params.reg_in2,
-                params.reg_value2,
-            ))?;
-
-            let result = io::Buffer::<u64>::new(1);
+            let result: u64 = 0;
 
             Program::new()
                 .set_reg64(params.reg_in1, params.reg_value1)
@@ -86,10 +76,25 @@ macro_rules! reg_variant {
                         .with_rd(params.reg_out.into())
                         .into(),
                 )
-                .store_reg64(params.reg_out, result.as_ptr() as u32, Register::T3)
+                .store_reg64(
+                    params.reg_out,
+                    core::ptr::addr_of!(result) as u32,
+                    Register::T3,
+                )
                 .run();
 
-            app.value64(result.get(0))
+            app.value64(
+                &format!(
+                    "{} {}, {}={:08X}, {}={:08X}",
+                    stringify!($instr).to_uppercase(),
+                    params.reg_out,
+                    params.reg_in1,
+                    params.reg_value1,
+                    params.reg_in2,
+                    params.reg_value2,
+                ),
+                result,
+            )
         }
     };
 }
@@ -144,15 +149,6 @@ macro_rules! imm_variant {
         }
 
         fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-            app.comment(&format!(
-                "{} {}, {}={:08X}, {:08X}",
-                stringify!($instr).to_uppercase(),
-                params.reg_out,
-                params.reg_in,
-                params.reg_value,
-                params.imm_value,
-            ))?;
-
             let result = io::Buffer::<u64>::new(1);
 
             Program::new()
@@ -167,7 +163,17 @@ macro_rules! imm_variant {
                 .store_reg64(params.reg_out, result.as_ptr() as u32, Register::T3)
                 .run();
 
-            app.value64(result.get(0))
+            app.value64(
+                &format!(
+                    "{} {}, {}={:08X}, {:08X}",
+                    stringify!($instr).to_uppercase(),
+                    params.reg_out,
+                    params.reg_in,
+                    params.reg_value,
+                    params.imm_value,
+                ),
+                result.get(0),
+            )
         }
     };
 }

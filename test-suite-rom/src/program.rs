@@ -57,7 +57,13 @@ impl Program {
             Jr::default().with_rs(u5::from_u8(31)).raw_value(),
         );
 
-        let entry = io::uncached_ptr(n64_specs::rsp::IMEM_START) as u32;
+        // NOP
+        io::write_uncached(
+            n64_specs::rsp::IMEM_START + (self.instructions.len() as u32 * 4 + 4),
+            0,
+        );
+
+        let entry = io::uncached_addr(n64_specs::rsp::IMEM_START);
 
         unsafe {
             asm!(

@@ -50,7 +50,7 @@ impl Sc64 {
         // Verify that the unlock succeeded by reading the IDENTIFIER which should be "SCv2" (0x53437632).
         // If still locked or if we're not on a SummerCart, we'll get 0x000C_000C (open bus).
 
-        let id = io::read_uncached(ID);
+        let id: u32 = io::read_uncached(ID);
 
         if id != 0x53437632 {
             return Ok(None);
@@ -148,7 +148,7 @@ impl Sc64 {
     /// Waits for the server to be ready to receive data.
     pub fn wait_for_server_ready_signal(&self) {
         loop {
-            let event = io::read_uncached(AUX);
+            let event: u32 = io::read_uncached(AUX);
             io::wait_for_pi();
 
             if event == AUX_SERVER_READY_VALUE {
@@ -163,7 +163,7 @@ impl Sc64 {
             // When uploading a ROM with the --reboot flag, the SC64 will send a HALT event via AUX.
             // It expects the same value to be written back to AUX to acknowledge the event.
 
-            let event = io::read_uncached(AUX);
+            let event: u32 = io::read_uncached(AUX);
             io::wait_for_pi();
 
             if event == AUX_HALT_VALUE {
@@ -174,7 +174,7 @@ impl Sc64 {
                 // Same logic, write it back.
 
                 loop {
-                    let event = io::read_uncached(AUX);
+                    let event: u32 = io::read_uncached(AUX);
                     io::wait_for_pi();
 
                     if event == AUX_REBOOT_VALUE {
@@ -241,7 +241,7 @@ impl Command {
 
         io::wait_for_pi();
 
-        while (io::read_uncached(SCR) & SCR_CMD_BUSY_BIT) != 0 {
+        while (io::read_uncached::<u32>(SCR) & SCR_CMD_BUSY_BIT) != 0 {
             timeout = timeout.wrapping_add(1);
 
             if timeout == 0xFFFF_FFFF {
@@ -249,7 +249,7 @@ impl Command {
             }
         }
 
-        if (io::read_uncached(SCR) & SCR_CMD_ERROR_BIT) != 0 {
+        if (io::read_uncached::<u32>(SCR) & SCR_CMD_ERROR_BIT) != 0 {
             bail!("SC64 command {:?} failed", self);
         }
 
@@ -262,7 +262,7 @@ impl Command {
 /// Accumulates the messages raw data in a buffer and flushes it when full.
 ///
 /// This has two significant benefits:
-/// - Serializing large messages (eg. step Comments) to a complete buffer might exceed the available memory.
+/// - Serializing large messages to a complete buffer might exceed the available memory.
 ///   So this "streams" such messages into multiple transfers, without allocating the whole deserialized buffer upfront.
 /// - Sending each message separately would significantly slow down execution, as we have to wait for each transfer to complete.
 ///   So this flushes the buffer when full, having typically accumulated multiple messages.

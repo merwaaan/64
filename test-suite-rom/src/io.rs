@@ -20,16 +20,20 @@ pub fn uncached_addr(offset: u32) -> u32 {
     physical_addr(offset) | (n64_specs::map::Segment::KSEG1 as u32)
 }
 
-pub fn uncached_ptr(offset: u32) -> *mut u32 {
-    uncached_addr(offset) as *mut u32
+pub fn uncached_ptr<T>(offset: u32) -> *mut T {
+    uncached_addr(offset) as *mut T
 }
 
-pub fn read_uncached(offset: u32) -> u32 {
-    unsafe { uncached_ptr(offset).read_volatile() }
+pub fn uncached_ptr_of<T>(value: &T) -> *mut T {
+    uncached_addr(value as *const T as u32) as *mut T
 }
 
-pub fn write_uncached(offset: u32, value: u32) {
-    unsafe { uncached_ptr(offset).write_volatile(value) }
+pub fn read_uncached<T>(offset: u32) -> T {
+    unsafe { uncached_ptr::<T>(offset).read_volatile() }
+}
+
+pub fn write_uncached<T>(offset: u32, value: T) {
+    unsafe { uncached_ptr::<T>(offset).write_volatile(value) }
 }
 
 // Aligned heap buffer with a fixed capacity.
@@ -89,7 +93,7 @@ impl<T> Buffer<T> {
     fn uncached_item(&self, index: usize) -> *mut T {
         let byte_offset = index
             .checked_mul(core::mem::size_of::<T>())
-            .expect("buffer index overflow");
+            .expect("buffer index overflow"); // TODO not the actual error
 
         let physical = physical_addr(self.data.as_ptr() as u32).wrapping_add(byte_offset as u32);
 
@@ -154,7 +158,7 @@ impl<T> Drop for Buffer<T> {
 // PI
 
 pub fn wait_for_pi() {
-    while read_uncached(n64_specs::pi::Status::ADDRESS) & 0x3 != 0 {}
+    while read_uncached::<u32>(n64_specs::pi::Status::ADDRESS) & 0x3 != 0 {}
     // TODO timeout?
 }
 
@@ -188,7 +192,7 @@ pub fn pi_dma(dma: &PiDma, wait: bool) {
     write_uncached(start_reg_address, dma.length.value());
 
     if wait {
-        wait_until(|| read_uncached(n64_specs::pi::Status::ADDRESS) & 0x1 == 0);
+        wait_until(|| read_uncached::<u32>(n64_specs::pi::Status::ADDRESS) & 0x1 == 0);
     }
 }
 

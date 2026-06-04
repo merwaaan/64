@@ -15,6 +15,9 @@ impl Test for MiVersionRegisterValue {
     no_params!();
 
     fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-        app.value(io::read_uncached(mi::Version::ADDRESS))
+        app.value(
+            "MI Version register",
+            io::read_uncached(mi::Version::ADDRESS),
+        )
     }
 }

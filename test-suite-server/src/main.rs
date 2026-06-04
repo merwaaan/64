@@ -31,6 +31,8 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Lists all the available tests.
+    List,
     /// Builds the test ROMs in either record or replay mode.
     /// Replay mode requires the test data to have been recorded beforehand.
     Build {
@@ -85,6 +87,7 @@ fn main() -> ExitCode {
     let args = Args::parse();
 
     let result = match args.command {
+        Command::List => show_test_list(),
         Command::Build { mode, test_name } => build::run(&mode, &test_name),
         Command::Record { test_name, repeat } => record::run(&test_name, repeat),
         Command::Replay { test_name: _ } => todo!("replay subcommand"),
@@ -103,6 +106,18 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn show_test_list() -> Result<()> {
+    let tests = list_tests()?;
+
+    log::info!("{} tests:", tests.len());
+
+    for test in tests {
+        log::info!("- {}:{}", test.module, test.name);
+    }
+
+    Ok(())
 }
 
 fn run_all(test_name: &Option<String>, repeat: Option<usize>, clean: bool) -> Result<()> {

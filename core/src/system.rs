@@ -158,8 +158,11 @@ impl System {
             }
         }
 
-        // s.breakpoints.add(0x80000180);
+        // s.breakpoints.add(0x80000000);
+        // s.breakpoints.add(0x80000080);
         // s.breakpoints.add(0x80000100);
+        // s.breakpoints.add(0x80000180);
+        // s.breakpoints.add(0xA400_1000);
 
         // Schedule the first scanline
 
@@ -175,12 +178,6 @@ impl System {
     }
 
     fn initialize(&mut self) {
-        // Set the PC to the start of the IPL
-        //
-        // NOTE: IPL starts at A4000040 and executes the boot sequence, skipped for now
-
-        self.cpu.regs.pc = 0xA4000040;
-
         // Setup the registers as IPL would have done
         // https://n64.readthedocs.io/index.html#simulating-the-pif-rom
 
@@ -189,13 +186,17 @@ impl System {
         self.cpu.regs.gpr[22].set(0x0000003F);
         self.cpu.regs.gpr[29].set(0xA4001FF0); // SP at the end of IMEM
 
-        // Copy the cart's boot code to RAM
+        // Copy the first 0x1000 bytes of the cart to DMEM
 
         for i in 0..0x1000u32 {
             let byte = Cart::read::<u8>(self, CartLocation::from_relative(i));
 
             Sp::write_mem(self, Location::from_relative(i), byte);
         }
+
+        // Set the PC to the start of IPL3, right after the ROM header
+
+        self.cpu.regs.pc = 0xA4000040;
 
         // Set the exception code to 11111
         // TODO unclear if expected, makes lemon tests pass

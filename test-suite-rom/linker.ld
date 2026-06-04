@@ -1,7 +1,26 @@
 ENTRY(_entrypoint)
 
 SECTIONS {
-    /* Start in KSEG0, skip the first 0x400 bytes as legacy data can lie there according to Libdragon */
+    . = 0x80000000;
+    .exception.tlb_refill : {
+        KEEP(*(.exception.tlb_refill))
+    }
+
+    . = 0x80000080;
+    .exception.xtlb_refill : {
+        KEEP(*(.exception.xtlb_refill))
+    }
+
+    . = 0x80000100;
+    .exception.cache : {
+        KEEP(*(.exception.cache))
+    }
+
+    . = 0x80000180;
+    .exception.general : {
+        KEEP(*(.exception.general))
+    }
+
     . = 0x80000400;
 
     .boot : {

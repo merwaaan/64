@@ -1,5 +1,6 @@
 use core::slice;
 
+use arbitrary_int::prelude::*;
 use n64_specs as specs;
 
 use crate::{
@@ -142,7 +143,6 @@ impl Ai {
         // No active DMA transfer: execute
         else {
             s.ai.active_dma = Some(slot);
-            s.ai.regs.status.set_dma_busy(true);
 
             Self::start_dma(s, slot);
         }
@@ -155,11 +155,11 @@ impl Ai {
             return;
         }
 
-        // log::info!(
-        //     "AI: DMA {:X} bytes from RAM {:08X}",
-        //     slot.length.raw_value,
-        //     slot.address.raw_value,
-        // );
+        log::info!(
+            "AI: DMA {:X} bytes from RAM {:08X}",
+            slot.length,
+            slot.address,
+        );
 
         // Push RAM data to the audio renderer
 
@@ -177,6 +177,8 @@ impl Ai {
         let cycles = ((samples / (s.ai.sample_rate() as f64)) * 93_750_000.0) as usize; // TODO correct cycle unit?
 
         Events::push(s, EventType::AiDmaTransferComplete, cycles);
+
+        s.ai.regs.status.set_dma_busy(true);
     }
 
     pub(crate) fn dma_completed(s: &mut System) {
@@ -203,6 +205,8 @@ impl Ai {
 
             Self::start_dma(s, slot);
         } else {
+            s.ai.regs.dma_length.set_value(u18::ZERO);
+
             s.ai.regs.status.set_dma_busy(false);
         }
     }

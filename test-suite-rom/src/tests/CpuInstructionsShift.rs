@@ -74,16 +74,6 @@ macro_rules! sa_variant {
             }
 
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-                app.comment(&format!(
-                    "{} {}={:08X}, {}={:08X}, {:0X}",
-                    stringify!($instr).to_uppercase(),
-                    params.reg_out,
-                    params.reg_out_value,
-                    params.reg_in,
-                    params.reg_in_value,
-                    params.shift
-                ))?;
-
                 let result = io::Buffer::<u64>::new(1);
 
                 Program::new()
@@ -98,7 +88,18 @@ macro_rules! sa_variant {
                     .store_reg64(params.reg_out, result.as_ptr() as u32, Register::T3)
                     .run();
 
-                app.value64(result.get(0))
+                app.value64(
+                    &format!(
+                        "{} {}={:08X}, {}={:08X}, {:0X}",
+                        stringify!($instr).to_uppercase(),
+                        params.reg_out,
+                        params.reg_out_value,
+                        params.reg_in,
+                        params.reg_in_value,
+                        params.shift
+                    ),
+                    result.get(0),
+                )
             }
         }
     };
@@ -178,17 +179,6 @@ macro_rules! v_variant {
             }
 
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-                app.comment(&format!(
-                    "{} {}={:08X}, {}={:08X}, {}={:08X}",
-                    stringify!($instr).to_uppercase(),
-                    params.reg_out,
-                    params.reg_out_value,
-                    params.reg_in1,
-                    params.reg_in1_value,
-                    params.reg_in2,
-                    params.reg_in2_value
-                ))?;
-
                 let result = io::Buffer::<u64>::new(3);
 
                 Program::new()
@@ -204,7 +194,20 @@ macro_rules! v_variant {
                     .store_reg64(params.reg_out, result.as_ptr() as u32, Register::T3)
                     .run();
 
-                app.value64(result.get(0))
+                app.value64(
+                    &format!(
+                        "{} {}={:08X}, {}={:08X}, {}={:08X}",
+                        stringify!($instr).to_uppercase(),
+                        params.reg_out,
+                        params.reg_out_value,
+                        params.reg_in1,
+                        params.reg_in1_value,
+                        params.reg_in2,
+                        params.reg_in2_value
+                    ),
+                    result.get(0),
+                )
+
                 // TODO others?
             }
         }

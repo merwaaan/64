@@ -64,6 +64,8 @@ impl ChildWidget for AiWidget {
                 Text::new(format!("{} Hz", update.ai.sample_rate())).show(ui);
             });
 
+            reg32(ui, "Bit rate", update.ai.regs.bit_rate.raw_value());
+
             ui.separator();
 
             // Samples

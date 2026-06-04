@@ -42,18 +42,20 @@ impl Test for ViRegistersMasking {
     }
 
     fn run(reg: &vi::Register, app: &mut App) -> Result<(), TestError> {
-        app.comment(&format!("Test masking of VI {} register", reg))?;
-
         // Save/Restore the register value so as not to break display
-        let saved = io::read_uncached(reg.address());
+        let saved: u32 = io::read_uncached(reg.address());
 
-        app.comment("Clear all bits")?;
         io::write_uncached(reg.address(), 0x0000_0000);
-        app.value(io::read_uncached(reg.address()))?;
+        app.value(
+            &format!("Read from VI {} register after clearing all bits", reg),
+            io::read_uncached(reg.address()),
+        )?;
 
-        app.comment("Set all bits")?;
-        io::write_uncached(reg.address(), 0xFFFF_FFFF);
-        app.value(io::read_uncached(reg.address()))?;
+        io::write_uncached(reg.address(), 0xFFFF_FFFFu32);
+        app.value(
+            &format!("Read from VI {} register after setting all bits", reg),
+            io::read_uncached(reg.address()),
+        )?;
 
         io::write_uncached(reg.address(), saved);
 

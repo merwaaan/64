@@ -2,7 +2,6 @@
 
 extern crate alloc;
 
-use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Serialize};
 
 /// Message sent from the server to the test program via the SummerCart AUX register to notify that the server is ready to receive data.
@@ -28,25 +27,12 @@ pub enum Step {
     StartTestCase,
     // End of a test case.
     EndTestCase,
-    /// A descriptive comment.
-    Comment(String),
+    /// A boolean value relevant to the test
+    Bool(bool),
     /// A 32-bit value relevant to the test
     Value(u32),
     /// A 64-bit value relevant to the test
     Value64(u64),
-}
-
-/// Strips the comments from a list of steps.
-/// This reduces the size of the embedded data and we still have comments in the human-readable JSON files produced by the server.
-pub fn strip_comments(steps: &[Step]) -> Vec<Step> {
-    steps
-        .iter()
-        .cloned()
-        .filter_map(|step| match step {
-            Step::Comment(_) => None,
-            _ => Some(step),
-        })
-        .collect()
 }
 
 /// Message sent from the N64 program to the server.

@@ -11,6 +11,7 @@
 
 // TODO 0xFF00ABCD is actually the value i write to AUX?! for 2048 mirrors because of partial decoder width?
 
+use alloc::format;
 use n64_specs::pi;
 
 use crate::{
@@ -29,7 +30,15 @@ impl Test for PiRegistersMirroring {
 
         // Read the whole range of PI registers
 
-        app.memory_region(io::uncached_addr(pi::START), pi::END - pi::START)?;
+        app.memory_region(
+            &format!(
+                "Read PI registers from {:08X} to {:08X}",
+                pi::START,
+                pi::END
+            ),
+            io::uncached_addr(pi::START),
+            pi::END - pi::START,
+        )?;
 
         Ok(())
     }

@@ -172,7 +172,7 @@ impl Pi {
         };
 
         // log::info!(
-        //     "PI DMA transfer: {:X} bytes from CART {:08X} to RAM {:08X}",
+        //     "PI DMA transfer: {:X} bytes from PI {:08X} to RAM {:08X}",
         //     actual_length,
         //     s.pi.regs[CART_ADDR_REG],
         //     s.pi.regs[DRAM_ADDR_REG]

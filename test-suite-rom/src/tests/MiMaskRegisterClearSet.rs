@@ -52,24 +52,22 @@ impl Test for MiMaskRegisterClearSet {
     }
 
     fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-        app.comment(&format!("Write {:08X} to the MI Mask register", params))?;
-
         let mask_reg = mi::EnabledInterrupts::ADDRESS;
 
-        app.comment("Clear")?;
         io::write_uncached(mask_reg, CLEAR_ALL);
-        app.value(io::read_uncached(mask_reg))?;
-
-        app.comment("Write")?;
         io::write_uncached(mask_reg, *params);
-        app.value(io::read_uncached(mask_reg))?;
 
-        app.comment("Set")?;
+        app.value(
+            &format!("Write {:08X} to the cleared MI Mask register", *params),
+            io::read_uncached(mask_reg),
+        )?;
+
         io::write_uncached(mask_reg, SET_ALL);
-        app.value(io::read_uncached(mask_reg));
-
-        app.comment("Write")?;
         io::write_uncached(mask_reg, *params);
-        app.value(io::read_uncached(mask_reg))
+
+        app.value(
+            &format!("Write {:08X} to the set MI Mask register", *params),
+            io::read_uncached(mask_reg),
+        )
     }
 }

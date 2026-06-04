@@ -7,7 +7,7 @@ macro_rules! instructions {
             $name:ident = $default:literal { $($fields:ident)* }
         ),+ $(,)?
     ) => {
-        // One struct for each instruction type
+        // One struct per instruction
 
         $(
             instructions! { @build_struct $name $default $( $fields )* }
@@ -21,7 +21,7 @@ macro_rules! instructions {
 
         impl Instruction {
             /// Returns the raw opcode of the instruction.
-            pub fn opcode(self) -> u32 { // TODO rename opcode
+            pub fn opcode(self) -> u32 {
                 match self {
                     $( Self::$name(inner) => inner.raw_value(), )+
                 }
@@ -39,9 +39,9 @@ macro_rules! instructions {
         )+
     };
 
-    // Muncher for instruction fields
+    // Muncher to accumulate instruction fields
     //
-    // Consumes fields (rt, rs, etc) until the list is empty and them emits the final struct
+    // Consumes fields (rt, rs, base, etc) until the list is empty and them emits the final struct
 
     (@build_struct $name:ident $default:literal $( $field:ident )*) => {
         instructions! { @build_struct [$name, $default] [] $( $field )* }
@@ -96,10 +96,19 @@ macro_rules! instructions {
         }
     };
 
+    // target
+    (@build_struct [$name:ident, $default:literal] [$($body:tt)*] target $($rest:tt)*) => {
+        instructions! { @build_struct [$name, $default]
+            [$($body)* #[bits(0..=25, rw)] pub target: u26,] $($rest)*
+        }
+    };
+
+    // Invalid field
     (@build_struct [$name:ident, $default:literal] [$($body:tt)*] $unknown:ident $($rest:tt)*) => {
         compile_error!(concat!("unsupported field: ", stringify!($unknown)));
     };
 
+    // Final struct wrapper
     (@build_struct [$name:ident, $default:literal] [$($body:tt)*]) => {
         #[bitfield(u32, forbid_overlaps, introspect, default = $default, debug)]
         pub struct $name {
@@ -116,11 +125,16 @@ instructions! {
     Addu = 0x0000_0021 { rs rt rd },
     Sub = 0x0000_0022 { rs rt rd },
     Subu = 0x0000_0023 { rs rt rd },
+    Slt = 0x0000_002A { rs rt rd },
+    Sltu = 0x0000_002B { rs rt rd },
     Dadd = 0x0000_002C { rs rt rd },
+    Daddu = 0x0000_002D { rs rt rd },
     Dsub = 0x0000_002E { rs rt rd },
     Dsubu = 0x0000_002F { rs rt rd },
     Addi = 0x2000_0000 { rs rt imm },
     Addiu = 0x2400_0000 { rs rt imm },
+    Slti = 0x2800_0000 { rs rt imm },
+    Sltiu = 0x2C00_0000 { rs rt imm },
     Daddi = 0x6000_0000 { rs rt imm },
     Daddiu = 0x6400_0000 { rs rt imm },
     Mfhi = 0x0000_0010 { rd },
@@ -164,6 +178,7 @@ instructions! {
     Sd = 0xFC00_0000 { base rt offset },
     // Jumps
     Jr = 0x0000_0008 { rs },
+    J = 0x0800_0000 { target },
     // Coprocessor 0
     Mfc0 = 0x4000_0000 { rt rd },
     Mtc0 = 0x4080_0000 { rt rd },
@@ -175,4 +190,8 @@ instructions! {
     Tlbp = 0x1000_0008 { },
     Eret = 0x4200_0018 { },
     // TODOCache = 0x1000_001C { },
+    // Special
+    Syscall = 0x0000_000C { },
+    Break = 0x0000_000D { },
+    Sync = 0x0000_000F { },
 }

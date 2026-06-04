@@ -134,11 +134,6 @@ impl Test for RspDmaFromRam {
     }
 
     fn run(dma: &Dma, app: &mut App) -> Result<(), TestError> {
-        app.comment(&format!(
-            "DMA transfer from RAM @ {:0X} to RSP @ {:0X}, {:0X} bytes x {:0X} rows, skip {:0X}",
-            dma.ram_offset, dma.rsp_offset, dma.length, dma.rows, dma.skip
-        ))?;
-
         // Clear the RSP memory
 
         for i in (0..rsp::DMEM_SIZE + rsp::IMEM_SIZE).step_by(4) {
@@ -175,11 +170,14 @@ impl Test for RspDmaFromRam {
                 .raw_value(),
         );
 
-        io::wait_until(|| io::read_uncached(rsp::DmaBusy::ADDRESS) == 0);
+        io::wait_until(|| io::read_uncached::<u32>(rsp::DmaBusy::ADDRESS) == 0);
 
         // Record the whole RSP memory
 
-        app.memory_region(
+        app.memory_region(&format!(
+            "DMA transfer from RAM @ {:0X} to RSP @ {:0X}, {:0X} bytes x {:0X} rows, skip {:0X}",
+            dma.ram_offset, dma.rsp_offset, dma.length, dma.rows, dma.skip
+        ),
             io::uncached_addr(rsp::MEMORY_START),
             rsp::DMEM_SIZE + rsp::IMEM_SIZE,
         )

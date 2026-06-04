@@ -28,6 +28,7 @@ impl Test for RspSemaphoreRegister {
             0x1234_5678,
             0x8000_0000,
             0x5555_5555,
+            0x8000_0000,
             0xAAAA_AAAA,
             0xFFFF_FFFF,
         ]
@@ -35,41 +36,65 @@ impl Test for RspSemaphoreRegister {
     }
 
     fn run(value: &u32, app: &mut App) -> Result<(), TestError> {
-        app.comment(&format!(
-            "Write {:08X} to the RSP semaphore register",
-            value
-        ))?;
-
         let semaphore_reg = rsp::Semaphore::ADDRESS;
 
-        app.comment("Clear")?;
+        // Clear and read a few times
+
         io::write_uncached(semaphore_reg, 0);
 
-        app.comment("Read a few times")?;
-        app.value(io::read_uncached(semaphore_reg))?;
-        app.value(io::read_uncached(semaphore_reg))?;
-        app.value(io::read_uncached(semaphore_reg))?;
+        for i in 0..10 {
+            app.value(
+                &format!("Read from the semaphore after clearing ({})", i),
+                io::read_uncached(semaphore_reg),
+            )?;
+        }
 
-        app.comment("Write the value and read a few times")?;
-        io::write_uncached(semaphore_reg, *value);
-        app.value(io::read_uncached(semaphore_reg))?;
-        app.value(io::read_uncached(semaphore_reg))?;
-        app.value(io::read_uncached(semaphore_reg))?;
+        // Write and read a few times
 
-        app.comment("Write the value multiple times before reading again");
         io::write_uncached(semaphore_reg, *value);
-        io::write_uncached(semaphore_reg, *value);
-        io::write_uncached(semaphore_reg, *value);
-        app.value(io::read_uncached(semaphore_reg))?;
-        app.value(io::read_uncached(semaphore_reg))?;
-        app.value(io::read_uncached(semaphore_reg))?;
 
-        app.comment("Write different values before reading again");
-        io::write_uncached(semaphore_reg, 0xABCD_6789);
+        for i in 0..10 {
+            app.value(
+                &format!(
+                    "Read from the semaphore after writing {:08X} ({})",
+                    *value, i
+                ),
+                io::read_uncached(semaphore_reg),
+            )?;
+        }
+
+        // Write the same value multiple times before reading again
+
+        for _ in 0..10 {
+            io::write_uncached(semaphore_reg, *value);
+        }
+
+        for i in 0..10 {
+            app.value(
+                &format!(
+                    "Read from the semaphore after writing {:08X} multiple times ({})",
+                    *value, i
+                ),
+                io::read_uncached(semaphore_reg),
+            )?;
+        }
+
+        // Write different values before reading again
+
+        io::write_uncached(semaphore_reg, 0xABCD_6789u32);
         io::write_uncached(semaphore_reg, *value);
-        io::write_uncached(semaphore_reg, 0xBBBB_8787);
-        app.value(io::read_uncached(semaphore_reg))?;
-        app.value(io::read_uncached(semaphore_reg))?;
-        app.value(io::read_uncached(semaphore_reg))
+        io::write_uncached(semaphore_reg, 0xBBBB_8787u32);
+
+        for i in 0..10 {
+            app.value(
+                &format!(
+                    "Read from the semaphore after writing various values ({})",
+                    i
+                ),
+                io::read_uncached(semaphore_reg),
+            )?;
+        }
+
+        Ok(())
     }
 }

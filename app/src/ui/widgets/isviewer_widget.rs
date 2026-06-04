@@ -37,7 +37,7 @@ impl ChildWidget for IsViewerWidget {
     fn show(&mut self, ui: &mut egui::Ui) -> Vec<Command> {
         if let Some(text) = &self.last_update {
             ScrollArea::vertical().show(ui, |ui| {
-                ui.add(Label::new(text).wrap());
+                ui.monospace(text);
             });
         }
 

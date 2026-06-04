@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(alloc_error_handler)]
 #![feature(asm_experimental_arch)]
+#![feature(naked_functions)]
 #![feature(used_with_arg)]
 
 #[cfg(not(any(feature = "record", feature = "replay")))]
@@ -13,6 +14,7 @@ compile_error!("features \"record\" and \"replay\" cannot be both enabled");
 mod allocator;
 mod app;
 mod display;
+mod exceptions;
 mod io;
 mod isviewer;
 mod program;
@@ -22,6 +24,9 @@ mod tests;
 
 //#[cfg(feature = "replay")]
 mod comparator;
+
+// TODO
+// - RAM reg mirroring
 
 extern crate alloc;
 
@@ -33,11 +38,11 @@ use crate::{
     display::{ERROR, TextStyle},
 };
 
-// Global app instance (static to access it from the panic handler)
+// Global app instance (static to access it from the global panic handler with `app()`)
 static mut APP: *mut App = core::ptr::null_mut();
 
-pub fn app() -> &'static mut App {
-    unsafe { &mut *APP }
+pub fn app() -> Option<&'static mut App> {
+    unsafe { if APP.is_null() { None } else { Some(&mut *APP) } }
 }
 
 pub fn init_app() -> anyhow::Result<&'static mut App> {
@@ -47,9 +52,9 @@ pub fn init_app() -> anyhow::Result<&'static mut App> {
 
     unsafe {
         APP = &raw mut *alloc::boxed::Box::into_raw(app_boxed);
-    }
 
-    Ok(app())
+        Ok(&mut *APP)
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -75,7 +80,7 @@ macro_rules! register_test {
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
-    // Prevent recursive panics
+    // Intercept recursive panics
 
     static mut PANICKING: bool = false;
 
@@ -89,18 +94,25 @@ fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
         PANICKING = true;
     }
 
-    // Notify
+    if let Some(app) = app() {
+        // Notify
 
-    app()
-        .print(&format!("{}", info), Some(TextStyle::with_color(ERROR)))
-        .ok();
+        app.print(&format!("{}", info), Some(TextStyle::with_color(ERROR)))
+            .ok();
 
-    app().send(Message::Panic, true).ok();
+        app.send(Message::Panic, true).ok();
 
-    // Wait for reboot
+        // Wait for reboot
 
-    app().wait_for_reboot()
+        app.wait_for_reboot()
+    } else {
+        // The IS-VIEWER output doesn't require the app to be initialized,
+        // so this is our last resort to communicate what went wrong
+
+        isviewer::write(&format!("{}", info));
+
+        loop {
+            core::hint::spin_loop();
+        }
+    }
 }
-
-// TODO
-// - RAM reg mirroring

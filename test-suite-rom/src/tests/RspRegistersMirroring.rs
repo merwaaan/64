@@ -3,6 +3,7 @@
 //! No surprises:
 //! - the registers are mirrored every 8 words without gaps or unexpected patterns
 
+use alloc::format;
 use n64_specs::rsp;
 
 use crate::{
@@ -40,12 +41,17 @@ impl Test for RspRegistersMirroring {
 
         // TODO DMA to set addr regs
 
-        io::read_uncached(rsp::Semaphore::ADDRESS); // Switch the semaphore to 1
+        io::read_uncached::<u32>(rsp::Semaphore::ADDRESS); // Switch the semaphore to 1
 
-        // Read the whole range of RSP registers
+        // Read the whole range
 
         app.memory_region(
-            io::uncached_ptr(rsp::REGISTERS_START) as u32,
+            &format!(
+                "Read RSP registersfrom {:08X} to {:08X}",
+                rsp::REGISTERS_START,
+                rsp::REGISTERS_END
+            ),
+            io::uncached_addr(rsp::REGISTERS_START),
             rsp::REGISTERS_END - rsp::REGISTERS_START,
         )?;
 

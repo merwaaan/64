@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use alloc::string::String;
 use anyhow::Result;
 use test_suite_common::Step;
 
@@ -80,6 +81,6 @@ impl From<TestError> for anyhow::Error {
 pub struct Mismatch {
     pub runtime_step: Step,
     pub expected_step: Option<Step>,
-    pub case_index: u32,
     pub step_index: u32,
+    pub description: String,
 }

@@ -15,7 +15,9 @@ pub const END: u32 = 0x0460_0000;
 
 pub const REGISTERS_MASK: u32 = 0x1F;
 
-// TODO wo
+/// RAM address for the next DMA transfer.
+///
+/// On hardware, this is write-only: reading it returns the DmaLength value.
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
 #[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DmaRamAddress {
@@ -30,7 +32,8 @@ impl DmaRamAddress {
     }
 }
 
-// TODO wo
+/// Length of the next DMA transfer.
+/// Writing to this register starts a DMA transfer from RAM.
 #[bitfield(u32, forbid_overlaps, instrospect, default = 0, debug)]
 #[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DmaLength {
@@ -59,8 +62,10 @@ impl Control {
     }
 }
 
-// TODO r? w?
-#[bitfield(u32, forbid_overlaps, instrospect, default = 0x0110_0000, debug)]
+//0x0110_0000 prev
+// 0x01F8_0000 with wc
+// TODO wc baked in default, remove?
+#[bitfield(u32, forbid_overlaps, instrospect, default = 0x01F8_0000, debug)]
 #[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Status {
     #[bit(31, rw)]
