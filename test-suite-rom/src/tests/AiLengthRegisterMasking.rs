@@ -22,29 +22,25 @@ impl Test for AiLengthRegisterMasking {
     no_params!();
 
     fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-        // Disable DMA
+        // Disable DMA to avoid side effects
 
         io::write_uncached(
             ai::Control::ADDRESS,
             ai::Control::default().with_dma_enabled(false).raw_value(),
         );
 
-        let length_reg = io::uncached_ptr::<u32>(ai::DmaLength::ADDRESS);
+        io::write_uncached(ai::DmaLength::ADDRESS, 0x0000_0000u32);
 
-        unsafe {
-            length_reg.write_volatile(0x0000_0000); // TODO write_uncached
-            app.memory(
-                "Write 0x0000_0000 to AI DMA length register",
-                length_reg as u32,
-            )?;
+        app.memory(
+            "Write 0x0000_0000 to AI DMA length register",
+            io::read_uncached(ai::DmaLength::ADDRESS),
+        )?;
 
-            length_reg.write_volatile(0xFFFF_FFFF); // TODO write_uncached
-            app.memory(
-                "Write 0xFFFF_FFFF to AI DMA length register",
-                length_reg as u32,
-            )?;
-        }
+        io::write_uncached(ai::DmaLength::ADDRESS, 0xFFFF_FFFFu32);
 
-        Ok(())
+        app.memory(
+            "Write 0xFFFF_FFFF to AI DMA length register",
+            io::read_uncached(ai::DmaLength::ADDRESS),
+        )
     }
 }

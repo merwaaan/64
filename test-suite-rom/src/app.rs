@@ -2,7 +2,7 @@ use alloc::format;
 use anyhow::{Result, anyhow, bail};
 use test_suite_common::{Message, Step};
 
-use crate::{display::*, io, isviewer, sc64::Sc64, test::*};
+use crate::{display::*, io, isviewer, sc64::Sc64, test::*, tests};
 
 #[cfg(feature = "replay")]
 use crate::comparator::Comparator;
@@ -15,7 +15,7 @@ pub struct App {
     sc64: Option<Sc64>,
 
     #[cfg(feature = "replay")]
-    /// Comparator used in replay-mode ROMS.
+    /// Comparator for replay-mode ROMs.
     comparator: Comparator,
 }
 
@@ -31,16 +31,24 @@ impl App {
         })
     }
 
-    pub fn run<T: Test>(&mut self) -> Result<()> {
+    pub fn run(&mut self) -> Result<()> {
         // Display some info
 
-        let (mode, verb) = if cfg!(feature = "record") {
-            ("record", "Recording")
+        let verb = if cfg!(feature = "record") {
+            "Recording"
         } else {
-            ("replay", "Replaying")
+            "Replaying"
         };
 
-        self.print(&format!("{} (mode: {})\n", T::name(), mode), None)?;
+        self.print(
+            &format!(
+                "{} {} tests ({} cases)\n",
+                verb,
+                tests::test_count(),
+                tests::test_case_count()
+            ),
+            None,
+        )?;
 
         if self.sc64.is_none() && cfg!(feature = "record") {
             self.print(
@@ -49,14 +57,53 @@ impl App {
             )?;
         }
 
-        // Run the test
+        // Wait for the server to be ready to receive data
 
-        self.print(
-            &format!("{} {} test cases...", verb, T::cases().count()),
-            None,
-        )?;
+        if let Some(sc64) = &mut self.sc64 {
+            sc64.wait_for_server_ready_signal();
+        }
 
-        self.run_test::<T>()
+        // Notify the server that the program started
+
+        self.send(Message::ProgramStarted, false)?;
+
+        // Run the test plan
+
+        let successful_tests = tests::run_tests(self)?;
+
+        let success = successful_tests == tests::test_count();
+
+        // Done
+
+        #[cfg(feature = "record")]
+        {
+            assert!(success, "record-mode ROM did not succeed");
+
+            self.print("\nDone!\n", Some(TextStyle::with_color(SUCCESS)))?;
+        }
+
+        #[cfg(feature = "replay")]
+        {
+            if success {
+                self.print("\nSuccess!\n", Some(TextStyle::with_color(SUCCESS)))?;
+            } else {
+                self.print(
+                    &format!(
+                        "\n{}/{} tests failed!\n",
+                        tests::test_count() - successful_tests,
+                        tests::test_count()
+                    ),
+                    Some(TextStyle::with_color(ERROR)),
+                )?;
+            }
+        }
+
+        // Notify the server that the test completed
+        // (and flush any remaining buffered messages)
+
+        self.send(Message::ProgramCompleted { success }, true)?;
+
+        Ok(())
     }
 
     /// Prints text to the display and the IS-Viewer.
@@ -172,136 +219,96 @@ impl App {
     ///
     /// - Record mode: records the steps and sends them to the server.
     /// - Replay mode: compares the steps against the embedded recorded steps.
-    fn run_test<T: Test>(&mut self) -> Result<()> {
-        #[cfg(feature = "record")]
-        self.record_test::<T>()?;
+    pub(crate) fn run_test<T: Test>(&mut self) -> Result<bool> {
+        self.print(
+            &format!("{} ({} cases)", T::name(), T::cases().count()),
+            None,
+        )?;
 
-        #[cfg(feature = "replay")]
-        self.replay_test::<T>()?;
-
-        Ok(())
-    }
-
-    #[cfg(feature = "record")]
-    fn record_test<T: Test>(&mut self) -> Result<()> {
-        // Wait for the server to be ready to receive data
-
-        if let Some(sc64) = &mut self.sc64 {
-            sc64.wait_for_server_ready_signal();
-        }
-
-        // Notify the server that the test starts
-
-        self.send(Message::TestStarted, false)?;
+        let mut success = true;
 
         // Run each test case
 
-        for (case_index, params) in T::cases().enumerate() {
+        let result = self.process_step(Step::StartTest, "start test");
+        success &= self.check_step::<T>(None, result)?;
+        // TODO issue there???
+
+        for (case_index, case) in T::cases().enumerate() {
             let result = self
                 .process_step(Step::StartTestCase, "start test case")
-                .and_then(|_| T::run(&params, self))
+                .and_then(|_| T::run(&case, self))
                 .and_then(|_| self.process_step(Step::EndTestCase, "end test case"));
 
-            match result {
-                Ok(()) => {}
-
-                Err(TestError::Other(e)) => bail!(
-                    "failed to run test case {} with params {:?}, {}",
-                    case_index,
-                    params,
-                    e
-                ),
-
-                Err(TestError::Mismatch(_)) => {
-                    unreachable!("mismatches should not happen in record mode")
-                }
-            }
-
-            // TODO tmp
-            if case_index % 100 == 0 {
-                self.display
-                    .progress(case_index as u32 + 1, T::cases().count() as u32)?;
-            }
+            success &= self.check_step::<T>(Some(case_index), result)?;
         }
 
-        // Notify the server that the test completed
-        // (and flush any remaining buffered messages)
+        let result = self.process_step(Step::EndTest, "end test");
+        success &= self.check_step::<T>(None, result)?;
 
-        self.send(Message::TestCompleted, true)?;
-
-        // Done!
-
-        self.print("\nDone!\n", Some(TextStyle::with_color(SUCCESS)))
+        Ok(success)
     }
 
-    #[cfg(feature = "replay")]
-    fn replay_test<T: Test>(&mut self) -> Result<()> {
-        // Run each test case
+    /// Helper to handle step mismatches at different levels.
+    fn check_step<T: Test>(
+        &mut self,
+        case_index: Option<usize>,
+        result: Result<(), TestError>,
+    ) -> Result<bool> {
+        match result {
+            Ok(()) => Ok(true),
 
-        let mut successful_cases = 0;
-
-        for (case_index, params) in T::cases().enumerate() {
-            let result = self
-                .process_step(Step::StartTestCase, "start test case")
-                .and_then(|_| T::run(&params, self))
-                .and_then(|_| self.process_step(Step::EndTestCase, "end test case"));
-
-            match result {
-                Ok(()) => {
-                    successful_cases += 1;
-                }
-
-                Err(TestError::Mismatch(mismatch)) => {
-                    // Display
-
-                    let message = format!(
-                        "Mismatch at case {} / step {}: {}\n  - expected {}\n  -      got {:08X?}",
-                        case_index,
-                        mismatch.step_index,
-                        mismatch.description,
-                        mismatch
-                            .expected_step
-                            .map(|s| format!("{:08X?}", s))
-                            .unwrap_or("nothing".into()),
-                        mismatch.runtime_step,
-                    );
-
-                    self.print(&message, Some(TextStyle::with_color(ERROR)))?;
-                }
-
-                Err(TestError::Other(e)) => bail!("failed to run test case {}, {}", case_index, e),
+            #[cfg(feature = "record")]
+            Err(TestError::Mismatch(_)) => {
+                unreachable!(
+                    "mismatches should not happen in record mode{}",
+                    case_index
+                        .map(|i| format!(" (test case {})", i))
+                        .unwrap_or("".into())
+                );
             }
 
-            // Skip to the next case
+            #[cfg(feature = "replay")]
+            Err(TestError::Mismatch(mismatch)) => {
+                let at = match case_index {
+                    Some(case_index) => {
+                        format!("case {} / step {}", case_index, mismatch.step_index)
+                    }
+                    None => "test".into(),
+                };
 
-            use anyhow::Context;
+                let message = format!(
+                    "Mismatch at {}: {}\n  - expected {}\n  -      got {:08X?}",
+                    at,
+                    mismatch.description,
+                    mismatch
+                        .expected_step
+                        .map(|s| format!("{:08X?}", s))
+                        .unwrap_or("nothing".into()),
+                    mismatch.runtime_step,
+                );
 
-            self.comparator
-                .skip_case()
-                .with_context(|| format!("failed to skip test case {}", case_index))?;
+                self.print(&message, Some(TextStyle::with_color(ERROR)))?;
 
-            if case_index % 100 == 0 {
-                self.display
-                    .progress(case_index as u32 + 1, T::cases().count() as u32)?;
+                // Skip to the next test/test case
+
+                use anyhow::Context;
+
+                match mismatch.runtime_step {
+                    Step::StartTest | Step::EndTest => {
+                        self.comparator.skip_test().context("failed to skip test")?
+                    }
+
+                    _ => self
+                        .comparator
+                        .skip_case()
+                        .context("failed to skip test case")?,
+                }
+
+                Ok(false)
             }
+
+            Err(TestError::Other(e)) => bail!("failed to run test {}, {}", T::name(), e),
         }
-
-        // Done!
-
-        if successful_cases == T::cases().count() {
-            self.print("\nSuccess!\n", Some(TextStyle::with_color(SUCCESS)))?;
-        } else {
-            self.print(
-                &format!(
-                    "\n{}/{} tests failed\n",
-                    T::cases().count() - successful_cases,
-                    T::cases().count()
-                ),
-                Some(TextStyle::with_color(ERROR)),
-            )?;
-        }
-
-        Ok(())
     }
 
     /// "Processes" a step.
@@ -315,7 +322,7 @@ impl App {
                 self.send(Message::TestStep(step), false)?;
             } else {
                 // If not running on a SummerCart64, logs the steps for debugging
-                isviewer::write(&format!("{:0X?}\n", step));
+                isviewer::write(&format!("{}: {:0X?}\n", description, step));
             }
         }
 

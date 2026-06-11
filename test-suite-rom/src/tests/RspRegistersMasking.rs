@@ -39,23 +39,18 @@ impl Test for RspRegistersMasking {
     }
 
     fn run(reg: &rsp::Register, app: &mut App) -> Result<(), TestError> {
-        // TODO io uncached helpers
-        unsafe {
-            let reg_ptr = io::uncached_ptr::<u32>(reg.address());
+        io::write_uncached(reg.address(), 0x0000_0000u32);
 
-            reg_ptr.write_volatile(0x0000_0000);
-            app.value(
-                &format!("Read from RSP {} register after clearing all bits", reg),
-                reg_ptr.read_volatile(),
-            )?;
+        app.value(
+            &format!("Read from RSP {} register after clearing all bits", reg),
+            io::read_uncached(reg.address()),
+        )?;
 
-            reg_ptr.write_volatile(0xFFFF_FFFF);
-            app.value(
-                &format!("Read from RSP {} register after setting all bits", reg),
-                reg_ptr.read_volatile(),
-            )?;
-        };
+        io::write_uncached(reg.address(), 0xFFFF_FFFFu32);
 
-        Ok(())
+        app.value(
+            &format!("Read from RSP {} register after setting all bits", reg),
+            io::read_uncached(reg.address()),
+        )
     }
 }

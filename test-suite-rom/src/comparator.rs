@@ -5,7 +5,7 @@ use test_suite_common::Step;
 
 use crate::io;
 
-/// The PI address of the embedded data produced by the corresponding record-mode test.
+/// The PI address of the embedded data collected by the corresponding record-mode ROM.
 fn embedded_data_pi_address() -> u32 {
     // The build process appends the data to the ROM and patches this symbol with the actual offset.
     #[used(linker)]
@@ -23,7 +23,7 @@ fn embedded_data_pi_address() -> u32 {
     0x1000_0000 + offset
 }
 
-/// The size of the embedded data, patched similarly as the offset.
+/// The size of the embedded data, patched similarly to the offset.
 fn embedded_data_size() -> u32 {
     #[used(linker)]
     #[unsafe(no_mangle)]
@@ -51,7 +51,7 @@ pub struct Comparator {
     /// Deserializing the data starting here should yield a step.
     deserialization_buffer_offset: usize,
 
-    /// TODO doc
+    /// Deserialized bytes, to track progress.
     consumed_embedded_data: u32,
 
     /// Reception buffer for the DMA transfers.
@@ -79,7 +79,7 @@ impl Default for Comparator {
     fn default() -> Self {
         Self {
             deserialization_buffer: alloc::vec![0; BUFFER_SIZE],
-            deserialization_buffer_offset: BUFFER_SIZE, // "full" buffer to refill it from the start
+            deserialization_buffer_offset: BUFFER_SIZE, // "full" buffer to refill it at the start
             consumed_embedded_data: 0,
             dma_buffer: io::Buffer::<u8>::with_alignment(
                 BUFFER_SIZE + 1, // +1 padding to deal with PI misalignment
@@ -140,28 +140,45 @@ impl Comparator {
         }
     }
 
-    /// Skips the current test case's remaining steps.
+    /// Skips the current test's remaining embedded steps.
     ///
-    /// In case of mismatch, this advances the steps to the next test case.
-    /// If the test case completed without mismatches, no need to do anything.
+    /// In case of mismatch, this advances the steps to the next test.
+    /// If the test completed without mismatches, no need to do anything.
+    pub fn skip_test(&mut self) -> Result<()> {
+        loop {
+            match self.peek()? {
+                // If there's no more data to consume, we're done
+                // (we skipped the last test case OR there's something wrong and the next comparison will fail and report the issue)
+                None => return Ok(()),
+                // Start of a new test, we're done, we don't consume the step to let the next comparison have it
+                Some(Step::StartTest) => {
+                    self.test_case_index = 0;
+                    self.test_case_step_index = 0;
+                    return Ok(());
+                }
+                // Another step from the test to skip, continue advancing
+                Some(_) => {
+                    self.take()?;
+                }
+            }
+        }
+    }
+
+    /// Skips the current test case's remaining steps.
     pub fn skip_case(&mut self) -> Result<()> {
         loop {
             let next_step = self.peek()?;
 
             match next_step {
-                // If there's no more data to consume, we're done
-                // (we skipped the last test case OR there's something wrong and the next comparison will fail and report the issue)
                 None => {
                     return Ok(());
                 }
-                // Start of a new test case, we're done, we don't consume the step to let the next comparison have it
                 Some(Step::StartTestCase) => {
                     self.test_case_index += 1;
                     self.test_case_step_index = 0;
 
                     return Ok(());
                 }
-                // Another step from the test case to skip, continue advancing
                 Some(_) => {
                     self.take()?;
                 }
@@ -190,8 +207,7 @@ impl Comparator {
         // So we try to deserialize the step once, which might work, but if the buffer is exhausted, we refill it and try again.
         //
         // Our steps are tiny (basically a discriminant and a number value) so a single retry will be enough.
-        // If we wanted to support streaming steps with varying lengths, we would need a more sophisticated solution,
-        // but since we stripped the comments from the embedded steps, this is not an issue :)
+        // If we wanted to support streaming steps with varying lengths, we would need a more sophisticated solution, but this is not currently an issue :)
         //
         // So the second time, we're guaranteed to have the whole step buffered.
 

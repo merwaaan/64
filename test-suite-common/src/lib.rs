@@ -23,6 +23,10 @@ pub const AUX_SERVER_READY_VALUE: u32 = 0xFF00_ABCD;
 )]
 
 pub enum Step {
+    /// Start of a test.
+    StartTest,
+    /// End of a test.
+    EndTest,
     // Start of a test case.
     StartTestCase,
     // End of a test case.
@@ -38,12 +42,12 @@ pub enum Step {
 /// Message sent from the N64 program to the server.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
-    /// The test started.
-    TestStarted,
+    /// The program started.
+    ProgramStarted,
+    /// The program completed.
+    ProgramCompleted { success: bool },
+    /// The program panicked.
+    ProgramPanicked,
     /// Test step.
     TestStep(Step),
-    /// The test completed.
-    TestCompleted,
-    /// The test panicked.
-    Panic,
 }

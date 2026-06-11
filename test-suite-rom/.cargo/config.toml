@@ -6,3 +6,7 @@ build-std = ["core", "alloc"]
 
 [target."mips-nintendo64-none"]
 rustflags = ["-Clto", "-Cembed-bitcode"]
+
+[env]
+# Default value so that rust-analyzer does not break
+TEST_PATHS = ""

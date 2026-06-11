@@ -1,228 +1,290 @@
+mod all;
 mod build;
-mod record;
+mod clean;
+mod cli;
+mod execute;
+mod list;
+mod upload;
 
 use std::{
-    fs,
+    fmt::{self, Display},
     path::{Path, PathBuf},
     process::ExitCode,
 };
 
-use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
-use regex::Regex;
+use anyhow::{Result, bail};
+use clap::{Args, Parser, Subcommand};
+use tracing::error;
+use tracing_subscriber::{Registry, layer::SubscriberExt};
+use tracing_tree::HierarchicalLayer;
 
-#[derive(Clone, Debug, strum::Display, clap::ValueEnum)]
-pub enum Mode {
+use crate::cli::Cli;
+
+fn main() -> ExitCode {
+    let layer = HierarchicalLayer::default()
+        .with_writer(std::io::stdout)
+        .with_indent_lines(true)
+        .with_indent_amount(2)
+        .with_verbose_entry(false)
+        .with_verbose_exit(false)
+        .with_span_modes(false);
+
+    let subscriber = Registry::default().with(layer);
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    let cli = Cli::parse();
+
+    let result = cli.run();
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            error!("{err:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, strum::Display, clap::ValueEnum)]
+enum Mode {
     /// The ROM runs its test and sends back results.
     Record,
     /// The ROM runs its test and compares its own results to embedded results recorded on hardware.
     Replay,
 }
 
-#[derive(Parser, Debug)]
-#[command(
-    name = "test_suite_server", // TODO
-    about = "SC64 serial test message listener"// TODO
-)]
-struct Args {
-    #[command(subcommand)]
-    command: Command,
+#[derive(Args, Clone, Debug)]
+struct SourceArgs {
+    /// Matches an exact input.
+    #[arg(value_name = "NAME", conflicts_with = "matches")]
+    name: Option<String>,
+
+    #[command(flatten)]
+    matches: SourceMatches,
 }
 
-#[derive(Subcommand, Debug)]
-enum Command {
-    /// Lists all the available tests.
-    List {
-        #[command(flatten)]
-        filter: TestFilter,
-    },
-    /// Builds the test ROMs in either record or replay mode.
-    /// Replay mode requires the test data to have been recorded beforehand.
-    Build {
-        #[arg(value_enum)]
-        mode: Mode,
-
-        #[command(flatten)]
-        filter: TestFilter,
-    },
-    /// Records test results by executing the record-mode test ROMs
-    Record {
-        #[command(flatten)]
-        filter: TestFilter,
-
-        /// Records multiple times to ensure that the test is deterministic.
-        #[arg(long)]
-        repeat: Option<usize>,
-    },
-    /// Replays test results by executing the replay-mode test ROMs
-    Replay {
-        #[command(flatten)]
-        filter: TestFilter,
-    },
-    /// Builds the record-mode ROMs, executes them to collect results and builds the replay-mode ROMs.
-    All {
-        #[command(flatten)]
-        filter: TestFilter,
-
-        /// Records multiple times to ensure that the test is deterministic.
-        #[arg(long)]
-        repeat: Option<usize>,
-
-        /// Deletes the release directory to start fresh.
-        #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
-        clean: bool,
-    },
-    /// Deletes any previously generated files.
-    Clean,
-}
-
-#[derive(clap::Args, Debug, Clone, Default)]
-pub struct TestFilter {
-    /// Test name filters.
-    ///
-    /// Only considers tests where `module::name` contains one of the filters if specified.
-    /// Considers all the available tests if not specified.
-    #[arg(long = "filter", short = 'f')]
-    pub filters: Vec<String>,
-}
-
-impl TestFilter {
-    pub fn matches(&self, test: &Test) -> bool {
-        let full_name = format!("{}::{}", test.module, test.name);
-
-        self.filters.is_empty() || self.filters.iter().any(|filter| full_name.contains(filter))
+impl Display for SourceArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", Into::<Source>::into(self.clone()))
     }
 }
 
-fn main() -> ExitCode {
-    env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
-        .format_target(false)
-        .format_timestamp(None)
-        .init();
+#[derive(Subcommand, Clone, Debug)]
+enum Source {
+    All,
+    Exact { name: String },
+    Matching(SourceMatches),
+}
 
-    let args = Args::parse();
-
-    let result = match args.command {
-        Command::List { filter } => show_test_list(&filter),
-        Command::Build { mode, filter } => build::run(&mode, &filter),
-        Command::Record { filter, repeat } => record::run(&filter, repeat),
-        Command::Replay { .. } => todo!("replay subcommand"),
-        Command::All {
-            filter,
-            repeat,
-            clean: clear,
-        } => run_all(&filter, repeat, clear),
-        Command::Clean => clean_release_dir(),
-    };
-
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            log::error!("{err:#}");
-            ExitCode::FAILURE
+impl From<SourceArgs> for Source {
+    fn from(args: SourceArgs) -> Self {
+        if let Some(name) = args.name {
+            Source::Exact { name }
+        } else if !args.matches.matches.is_empty() {
+            Source::Matching(args.matches)
+        } else {
+            Source::All
         }
     }
 }
 
-fn show_test_list(filter: &TestFilter) -> Result<()> {
-    let tests = list_tests(filter)?;
-
-    log::info!("{} tests:", tests.len());
-
-    for test in tests {
-        log::info!("- {}:{}", test.module, test.name);
+impl Source {
+    fn is_filtering(&self) -> bool {
+        !matches!(self, Source::All)
     }
 
-    Ok(())
-}
-
-fn run_all(filter: &TestFilter, repeat: Option<usize>, clean: bool) -> Result<()> {
-    if clean {
-        clean_release_dir().context("failed to clear release directory")?;
+    fn matches(&self, test: &Test) -> bool {
+        match self {
+            Source::All => true,
+            // Exact: match the full path or just the name
+            Source::Exact { name } => test.path() == *name || test.name == *name,
+            Source::Matching(matches) => matches.matches(test),
+        }
     }
-
-    build::run(&Mode::Record, filter).context("failed to build record-mode ROMs")?;
-    record::run(filter, repeat).context("failed to record results on hardware")?;
-    build::run(&Mode::Replay, filter).context("failed to build replay-mode ROMs")
-
-    // TODO replay recording on same hardware to validate
 }
 
-pub fn rom_crate_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-suite-rom")
-}
-
-pub fn rom_tests_dir() -> PathBuf {
-    rom_crate_dir().join("src/tests")
-}
-
-pub fn release_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../_test_suite_output")
-}
-
-fn clean_release_dir() -> Result<()> {
-    log::info!("Clearing release directory...");
-
-    if release_dir().is_dir() {
-        fs::remove_dir_all(release_dir()).with_context(|| "failed to clear release directory")?;
+impl Display for Source {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Source::All => write!(f, "all"),
+            Source::Exact { name } => write!(f, "exact({})", name),
+            Source::Matching(matches) => write!(f, "matches({})", matches),
+        }
     }
-
-    Ok(())
 }
 
-fn test_rom_name(test_name: &str, mode: Mode) -> String {
-    format!("{}_{}.z64", test_name, mode.to_string().to_lowercase())
+/// Matches inputs containing the terms.
+#[derive(clap::Args, Debug, Clone, Default)]
+struct SourceMatches {
+    #[arg(long = "match")]
+    matches: Vec<String>,
 }
 
+impl SourceMatches {
+    fn matches(&self, test: &Test) -> bool {
+        let path = test.path();
+
+        self.matches.is_empty() || self.matches.iter().any(|filter| path.contains(filter))
+    }
+}
+
+impl Display for SourceMatches {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.matches.join(", "))
+    }
+}
+
+/// A test provided by the test suite.
 #[derive(Clone, Debug)]
-pub struct Test {
+struct Test {
     name: String,
     module: String,
 }
 
-/// Returns all the tests registered via the `register_test!` macro.
-pub fn list_tests(filter: &TestFilter) -> Result<Vec<Test>> {
-    let mut tests = Vec::new();
+impl Test {
+    fn path(&self) -> String {
+        format!("{}::{}", self.module, self.name)
+    }
+}
 
-    let register_test_regex =
-        Regex::new(r"(?m)^\s*register_test!\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")?;
+/// A set of tests to build a ROM for.
+#[derive(Clone, Debug)]
+enum TestSet {
+    /// ROM for a single test, named after the test.
+    Single { test: Test },
+    /// ROM for multiple tests, using the specified name.
+    Merged { tests: Vec<Test>, name: String },
+}
 
-    for entry in fs::read_dir(rom_tests_dir())? {
-        let path = entry?.path();
+impl TestSet {
+    fn resolve(tests: &[Test], merge: &Option<String>) -> Vec<TestSet> {
+        let mut test_sets = Vec::new();
 
-        if path.extension().is_some_and(|ext| ext == "rs") {
-            let module = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .context("non-utf8 test file name")?
-                .to_string();
-
-            let source = fs::read_to_string(&path)
-                .with_context(|| format!("failed to read {}", path.display()))?;
-
-            for capture in register_test_regex.captures_iter(&source) {
-                let test = Test {
-                    name: capture[1].to_string(),
-                    module: module.clone(),
-                };
-
-                if filter.matches(&test) {
-                    tests.push(test);
-                }
+        if let Some(merge) = merge {
+            test_sets.push(TestSet::Merged {
+                tests: tests.to_vec(),
+                name: merge.clone(),
+            });
+        } else {
+            for test in tests {
+                test_sets.push(TestSet::Single { test: test.clone() });
             }
+        }
+
+        test_sets
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            TestSet::Single { test } => &test.name,
+            TestSet::Merged { name, .. } => name,
         }
     }
 
-    if !filter.filters.is_empty() && tests.is_empty() {
-        log::warn!("No tests matched filters: {}", filter.filters.join(", "));
+    fn paths(&self) -> Vec<String> {
+        match self {
+            TestSet::Single { test } => vec![test.path()],
+            TestSet::Merged { tests, .. } => tests.iter().map(|test| test.path()).collect(),
+        }
     }
-
-    Ok(tests)
 }
 
-pub fn find_test_rom(test_name: &str, mode: Mode) -> Option<PathBuf> {
-    let path = release_dir().join(test_rom_name(test_name, mode));
+impl Display for TestSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TestSet::Single { test } => write!(f, "single({})", test.path()),
+            TestSet::Merged { tests, .. } => write!(
+                f,
+                "merged({})",
+                tests
+                    .iter()
+                    .map(|test| test.path())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    }
+}
 
-    if !path.is_file() { None } else { Some(path) }
+/// A record-mode ROM.
+#[derive(Clone, Debug)]
+struct RecordRom {
+    test_set: TestSet,
+    rom_path: PathBuf,
+}
+
+impl RecordRom {
+    fn resolve(test_set: &TestSet) -> Result<Self> {
+        let rom_path = release_dir().join(test_rom_name(test_set.name(), Mode::Record));
+
+        if !rom_path.exists() {
+            bail!("record ROM not found: {}", rom_path.display());
+        }
+
+        Ok(Self {
+            test_set: test_set.clone(),
+            rom_path,
+        })
+    }
+}
+
+/// The output of a record-mode ROM.
+#[derive(Clone, Debug)]
+struct RecordRomOutput {
+    record_rom: RecordRom,
+    steps_path: PathBuf,
+}
+
+impl RecordRomOutput {
+    fn resolve(test_set: &TestSet) -> Result<Self> {
+        let record_rom = RecordRom::resolve(test_set)?;
+
+        let steps_path = release_dir().join(format!("{}.json", test_set.name()));
+
+        if !steps_path.exists() {
+            bail!("recorded steps not found: {}", steps_path.display());
+        }
+
+        Ok(Self {
+            record_rom,
+            steps_path,
+        })
+    }
+}
+
+/// A replay-mode ROM.
+#[derive(Clone, Debug)]
+struct ReplayRom {
+    recorded: RecordRomOutput,
+    rom_path: PathBuf,
+}
+
+fn rom_crate_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-suite-rom")
+}
+
+fn rom_tests_dir() -> PathBuf {
+    rom_crate_dir().join("src/tests")
+}
+
+fn release_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../_test_suite")
+}
+
+fn tools_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../_tools")
+}
+
+pub const RECORD_ROM_SUFFIX: &str = ".record.z64";
+pub const REPLAY_ROM_SUFFIX: &str = ".z64";
+
+fn test_rom_name(test_name: &str, mode: Mode) -> String {
+    format!(
+        "{}{}",
+        test_name,
+        match mode {
+            Mode::Record => RECORD_ROM_SUFFIX,
+            Mode::Replay => REPLAY_ROM_SUFFIX,
+        }
+    )
 }

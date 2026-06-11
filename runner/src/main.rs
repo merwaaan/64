@@ -34,7 +34,7 @@ fn main() -> Result<(), String> {
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(CAPTURES_DIR);
 
-    fs::create_dir_all(&captures_dir).map_err(|e| format!("{}: {}", captures_dir.display(), e))?;
+    fs::create_dir_all(&captures_dir).with_context(captures_dir.display())?;
 
     let roms = collect_roms(&args.dir).map_err(|e| e.to_string())?;
 

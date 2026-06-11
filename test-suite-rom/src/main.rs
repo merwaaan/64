@@ -22,7 +22,7 @@ mod sc64;
 mod test;
 mod tests;
 
-//#[cfg(feature = "replay")]
+#[cfg(feature = "replay")]
 mod comparator;
 
 // TODO
@@ -61,7 +61,7 @@ pub fn init_app() -> anyhow::Result<&'static mut App> {
 extern "C" fn _entrypoint() -> ! {
     let app = init_app().expect("failed to initialize app");
 
-    app.run::<tests::CurrentTest>().expect("failed to run app");
+    app.run();
 
     app.wait_for_reboot()
 }
@@ -100,7 +100,7 @@ fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
         app.print(&format!("{}", info), Some(TextStyle::with_color(ERROR)))
             .ok();
 
-        app.send(Message::Panic, true).ok();
+        app.send(Message::ProgramPanicked, true).ok();
 
         // Wait for reboot
 

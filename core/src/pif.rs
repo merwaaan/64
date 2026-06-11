@@ -117,7 +117,7 @@ impl Pif {
                     match tx {
                         // Skip channel
                         0 => {
-                            //log::debug!("   SKIP");
+                            //log::debug!("SKIP");
                             channel += 1;
                             offset += 1;
                         }
