@@ -9,12 +9,11 @@ fn main() {
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=build.rs");
 
-    let test_paths =
-        std::env::var("TEST_PATHS").expect("TEST_PATHS environment variable is not set");
+    let test_paths = std::env::var("TEST_PATHS").unwrap_or("Dummy::Dummy".to_string()); //.expect("TEST_PATHS environment variable is not set");
 
-    if test_paths.is_empty() {
-        panic!("TEST_PATHS environment variable is not set");
-    }
+    // if test_paths.is_empty() {
+    //     panic!("TEST_PATHS environment variable is empty");
+    // }
 
     // Generate the test plan's code
 

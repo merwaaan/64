@@ -33,6 +33,8 @@ impl All {
 
         let tests = List::find_tests(&self.source.clone().into())?;
 
+        // TODO fail if empty
+
         let test_sets = TestSet::resolve(&tests, &self.merge);
 
         // Build record-mode ROMs

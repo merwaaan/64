@@ -151,7 +151,7 @@ impl Comparator {
                 // (we skipped the last test case OR there's something wrong and the next comparison will fail and report the issue)
                 None => return Ok(()),
                 // Start of a new test, we're done, we don't consume the step to let the next comparison have it
-                Some(Step::StartTest) => {
+                Some(Step::StartTest(_)) => {
                     self.test_case_index = 0;
                     self.test_case_step_index = 0;
                     return Ok(());
@@ -173,7 +173,7 @@ impl Comparator {
                 None => {
                     return Ok(());
                 }
-                Some(Step::StartTestCase) => {
+                Some(Step::StartTestCase(_)) => {
                     self.test_case_index += 1;
                     self.test_case_step_index = 0;
 

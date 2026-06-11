@@ -240,6 +240,9 @@ fn default_exception_handler() {
     let cause: u32;
     let epc: u32;
 
+    // TODO temp
+    panic!("EXCEPTION!");
+
     unsafe {
         core::arch::asm!(
             "mfc0 {cause}, $13", // Cause

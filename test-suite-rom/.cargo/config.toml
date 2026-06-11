@@ -9,4 +9,4 @@ rustflags = ["-Clto", "-Cembed-bitcode"]
 
 [env]
 # Default value so that rust-analyzer does not break
-TEST_PATHS = ""
+TEST_PATHS = "Dummy::Dummy"

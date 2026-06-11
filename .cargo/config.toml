@@ -1,0 +1,3 @@
+[env]
+# Default value so that rust-analyzer does not break TODO not needed here if we split projects later
+TEST_PATHS = "Dummy::Dummy"

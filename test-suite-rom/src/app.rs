@@ -229,13 +229,14 @@ impl App {
 
         // Run each test case
 
-        let result = self.process_step(Step::StartTest, "start test");
+        let result = self.process_step(Step::StartTest(T::name().into()), "start test");
+
         success &= self.check_step::<T>(None, result)?;
-        // TODO issue there???
+        // TODO issue there? cases still running even if test failed?
 
         for (case_index, case) in T::cases().enumerate() {
             let result = self
-                .process_step(Step::StartTestCase, "start test case")
+                .process_step(Step::StartTestCase(case_index as u32), "start test case")
                 .and_then(|_| T::run(&case, self))
                 .and_then(|_| self.process_step(Step::EndTestCase, "end test case"));
 
@@ -243,6 +244,7 @@ impl App {
         }
 
         let result = self.process_step(Step::EndTest, "end test");
+
         success &= self.check_step::<T>(None, result)?;
 
         Ok(success)
@@ -277,12 +279,12 @@ impl App {
                 };
 
                 let message = format!(
-                    "Mismatch at {}: {}\n  - expected {}\n  -      got {:08X?}",
+                    "Mismatch at {}: {}\n  - expected {}\n  -      got {:0X?}",
                     at,
                     mismatch.description,
                     mismatch
                         .expected_step
-                        .map(|s| format!("{:08X?}", s))
+                        .map(|s| format!("{:0X?}", s))
                         .unwrap_or("nothing".into()),
                     mismatch.runtime_step,
                 );
@@ -294,7 +296,7 @@ impl App {
                 use anyhow::Context;
 
                 match mismatch.runtime_step {
-                    Step::StartTest | Step::EndTest => {
+                    Step::StartTest(_) | Step::EndTest => {
                         self.comparator.skip_test().context("failed to skip test")?
                     }
 
@@ -316,6 +318,8 @@ impl App {
     /// - Record mode: send it to the server.
     /// - Replay mode: compare it against the embedded recorded steps.
     fn process_step(&mut self, step: Step, description: &str) -> Result<(), TestError> {
+        //isviewer::write(&format!("{}: {:0X?}\n", description, step));
+
         #[cfg(feature = "record")]
         {
             if self.sc64.is_some() {

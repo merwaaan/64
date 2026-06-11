@@ -191,7 +191,7 @@ impl Test for CpuInstructionLb {
 //                         .with_imm(params.imm_value)
 //                         .into(),
 //                 )
-//                 .load_reg(Register::T3, core::ptr::addr_of!(result) as u32,) // TODO other reg func
+//                 .load_reg(Register::T3, core::ptr::addr_of!(result) as u32) // TODO other reg func
 //                 .sw(params.reg_out, Register::T3, 0)
 //                 .run();
 

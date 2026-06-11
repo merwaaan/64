@@ -2,6 +2,7 @@
 
 extern crate alloc;
 
+use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 /// Message sent from the server to the test program via the SummerCart AUX register to notify that the server is ready to receive data.
@@ -23,12 +24,12 @@ pub const AUX_SERVER_READY_VALUE: u32 = 0xFF00_ABCD;
 )]
 
 pub enum Step {
-    /// Start of a test.
-    StartTest,
+    /// Start of a test, with the test name.
+    StartTest(String),
     /// End of a test.
     EndTest,
-    // Start of a test case.
-    StartTestCase,
+    // Start of a test case, with the test case index.
+    StartTestCase(u32),
     // End of a test case.
     EndTestCase,
     /// A boolean value relevant to the test
