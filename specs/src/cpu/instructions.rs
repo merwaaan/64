@@ -103,6 +103,13 @@ macro_rules! instructions {
         }
     };
 
+    // trap code
+    (@build_struct [$name:ident, $default:literal] [$($body:tt)*] code $($rest:tt)*) => {
+        instructions! { @build_struct [$name, $default]
+            [$($body)* #[bits(6..=15, rw)] pub code: u10,] $($rest)*
+        }
+    };
+
     // Invalid field
     (@build_struct [$name:ident, $default:literal] [$($body:tt)*] $unknown:ident $($rest:tt)*) => {
         compile_error!(concat!("unsupported field: ", stringify!($unknown)));
@@ -194,12 +201,12 @@ instructions! {
     Syscall = 0x0000_000C { },
     Break = 0x0000_000D { },
     Sync = 0x0000_000F { },
-    Tge = 0x0000_0030 { rs rt },
-    Tgeu = 0x0000_0031 { rs rt },
-    Tlt = 0x0000_0032 { rs rt },
-    Tltu = 0x0000_0033 { rs rt },
-    Teq = 0x0000_0034 { rs rt },
-    Tne = 0x0000_0036 { rs rt },
+    Tge = 0x0000_0030 { rs rt code },
+    Tgeu = 0x0000_0031 { rs rt code },
+    Tlt = 0x0000_0032 { rs rt code },
+    Tltu = 0x0000_0033 { rs rt code },
+    Teq = 0x0000_0034 { rs rt code },
+    Tne = 0x0000_0036 { rs rt code },
     Tgei = 0x0408_0000 { rs imm },
     Tgeiu = 0x0409_0000 { rs imm },
     Tlti = 0x040A_0000 { rs imm },

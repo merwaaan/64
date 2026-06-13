@@ -41,7 +41,7 @@ impl Build {
             }
         }
 
-        let test_sets = TestSet::resolve(&tests, &self.merge);
+        let test_sets = TestSet::new(&tests, &self.merge);
 
         match self.mode {
             Mode::Record => {

@@ -89,7 +89,7 @@ impl ExceptionHandler for ExceptionTracker {
         let cause: u32;
 
         unsafe {
-            core::arch::asm!(
+            asm!(
                 "mfc0 {cause}, $13",
                 cause = out(reg) cause,
                 options(nostack, preserves_flags),
@@ -241,10 +241,10 @@ fn default_exception_handler() {
     let epc: u32;
 
     // TODO temp
-    panic!("EXCEPTION!");
+    //panic!("EXCEPTION!");
 
     unsafe {
-        core::arch::asm!(
+        asm!(
             "mfc0 {cause}, $13", // Cause
             "mfc0 {epc}, $14",   // EPC
             cause = out(reg) cause,
@@ -265,7 +265,7 @@ fn default_exception_handler() {
             epc.wrapping_add(4)
         };
         unsafe {
-            core::arch::asm!(
+            asm!(
                 "mtc0 {epc}, $14",
                 epc = in(reg) new_epc,
                 options(nostack, preserves_flags),

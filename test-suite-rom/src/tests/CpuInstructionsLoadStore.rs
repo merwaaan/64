@@ -67,7 +67,7 @@ macro_rules! load_variant {
                         .with_offset(0)
                         .into(),
                 )
-                //.store_reg64(params.rt, result.as_ptr() as u32, Register::T3)
+                //.store_reg64(params.rt, result.as_ptr() as u32, Register::T7)
                 .run();
 
             // Program::new()
@@ -79,7 +79,7 @@ macro_rules! load_variant {
             //         //     .with_offset(params.offset)
             //         //     .into(),
             //     )
-            //     //.store_reg64(params.rt, core::ptr::addr_of!(result) as u32, Register::T3)
+            //     //.store_reg64(params.rt, core::ptr::addr_of!(result) as u32, Register::T7)
             //     .run();
 
             app.value64(

@@ -10,6 +10,7 @@ use n64_specs::cpu::{instructions::*, registers::Register};
 
 use crate::{
     app::App,
+    data::{corner_cases_16, corner_cases_64},
     exceptions::{ExceptionHandler, ExceptionTracker, install_exception_handler},
     no_params,
     program::Program,
@@ -37,7 +38,6 @@ use crate::{
 // }
 
 // TODO branch delay? special test?
-// TODO works whatever the code (x 1024)
 
 // Traps, registers variants
 
@@ -49,17 +49,9 @@ pub struct RegParam {
     rt_value: u64,
 }
 
-const REG_VALUES: [u64; 12] = [
-    0x0000_0000_0000_0000,
-    0x0000_0000_0000_0001,
+const REG_EXTRA_VALUES: &[u64] = &[
     0x0000_0000_1234_5678,
-    0x0000_0000_7FFF_FFFE,
-    0x0000_0000_7FFF_FFFF,
-    0x0000_0000_8000_0000,
-    0x0000_0000_8000_0001,
     0x0000_0000_DBCA_BA91,
-    0x0000_0000_FFFF_FFFE,
-    0x0000_0000_FFFF_FFFF,
     0x105C_00CE_0000_0000,
     0xC000_FFFF_0000_0001,
 ];
@@ -87,195 +79,167 @@ impl ExceptionHandler for TrapCatcher {
 }
 
 macro_rules! trap_reg {
-    ($instr:ident) => {
-        type Params = RegParam;
+    ($test:ident, $instr:ident) => {
+        impl Test for $test {
+            type Params = RegParam;
 
-        fn cases() -> impl Iterator<Item = Self::Params> {
-            let basic =
-                itertools::iproduct!(REG_VALUES, REG_VALUES).map(|(rs_value, rt_value)| RegParam {
-                    rs: Register::T0,
-                    rs_value,
-                    rt: Register::T1,
-                    rt_value,
+            fn cases() -> impl Iterator<Item = Self::Params> {
+                let reg_values = corner_cases_64(REG_EXTRA_VALUES);
+
+                let basic = itertools::iproduct!(reg_values.clone(), reg_values.clone()).map(
+                    |(rs_value, rt_value)| RegParam {
+                        rs: Register::T0,
+                        rs_value,
+                        rt: Register::T1,
+                        rt_value,
+                    },
+                );
+
+                let rs_is_r0 = reg_values.clone().map(|rt_value| RegParam {
+                    rs: Register::R0,
+                    rs_value: 0,
+                    rt: Register::T0,
+                    rt_value: rt_value,
                 });
 
-            let rs_is_rt = REG_VALUES.map(|value| RegParam {
-                rs: Register::T0,
-                rs_value: value,
-                rt: Register::T0,
-                rt_value: value,
-            });
+                let rt_is_r0 = reg_values.clone().map(|rs_value| RegParam {
+                    rs: Register::T0,
+                    rs_value: rs_value,
+                    rt: Register::R0,
+                    rt_value: 0,
+                });
 
-            let rs_is_r0 = REG_VALUES.map(|rt_value| RegParam {
-                rs: Register::R0,
-                rs_value: 0,
-                rt: Register::T0,
-                rt_value: rt_value,
-            });
+                let rs_is_rt = reg_values.clone().map(|value| RegParam {
+                    rs: Register::T0,
+                    rs_value: value,
+                    rt: Register::T0,
+                    rt_value: value,
+                });
 
-            let rt_is_r0 = REG_VALUES.map(|rs_value| RegParam {
-                rs: Register::T0,
-                rs_value: rs_value,
-                rt: Register::R0,
-                rt_value: 0,
-            });
+                basic.chain(rs_is_r0).chain(rt_is_r0).chain(rs_is_rt)
+            }
 
-            basic.chain(rs_is_rt).chain(rs_is_r0).chain(rt_is_r0)
-        }
+            fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
+                let handler = install_exception_handler(TrapCatcher { occurred: false });
 
-        fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-            let handler = install_exception_handler(TrapCatcher { occurred: false });
+                Program::new()
+                    .set_reg64(params.rs, params.rs_value)
+                    .set_reg64(params.rt, params.rt_value)
+                    .push(
+                        $instr::default()
+                            .with_rs(params.rs.into())
+                            .with_rt(params.rt.into())
+                            .into(),
+                    )
+                    .run();
 
-            Program::new()
-                .set_reg64(params.rs, params.rs_value)
-                .set_reg64(params.rt, params.rt_value)
-                .push(
-                    $instr::default()
-                        .with_rs(params.rs.into())
-                        .with_rt(params.rt.into())
-                        .into(),
+                app.bool(
+                    &format!(
+                        "{} {}={:08X}, {}={:08X}",
+                        stringify!($instr).to_uppercase(),
+                        params.rs,
+                        params.rs_value,
+                        params.rt,
+                        params.rt_value,
+                    ),
+                    handler.occurred,
                 )
-                .run();
 
-            app.bool(
-                &format!(
-                    "{} {}={:08X}, {}={:08X}",
-                    stringify!($instr).to_uppercase(),
-                    params.rs,
-                    params.rs_value,
-                    params.rt,
-                    params.rt_value,
-                ),
-                handler.occurred,
-            )
-
-            // TODO more fields
+                // TODO more fields?
+            }
         }
     };
 }
 
 register_test!(CpuInstructionTge);
-
-impl Test for CpuInstructionTge {
-    trap_reg!(Tge);
-}
+trap_reg!(CpuInstructionTge, Tge);
 
 register_test!(CpuInstructionTgeu);
-
-impl Test for CpuInstructionTgeu {
-    trap_reg!(Tgeu);
-}
+trap_reg!(CpuInstructionTgeu, Tgeu);
 
 register_test!(CpuInstructionTlt);
-
-impl Test for CpuInstructionTlt {
-    trap_reg!(Tlt);
-}
+trap_reg!(CpuInstructionTlt, Tlt);
 
 register_test!(CpuInstructionTltu);
-
-impl Test for CpuInstructionTltu {
-    trap_reg!(Tltu);
-}
+trap_reg!(CpuInstructionTltu, Tltu);
 
 register_test!(CpuInstructionTeq);
-
-impl Test for CpuInstructionTeq {
-    trap_reg!(Teq);
-}
+trap_reg!(CpuInstructionTeq, Teq);
 
 register_test!(CpuInstructionTne);
-
-impl Test for CpuInstructionTne {
-    trap_reg!(Tne);
-}
+trap_reg!(CpuInstructionTne, Tne);
 
 // Trap instructions have a 10-bit code area,
-// check that they are properly decoded when that code is specified
+// check that instructions are properly decoded when that code is specified
 
 macro_rules! trap_reg_code {
     // We need rs/rt values that trigger the trap for each instruction
-    (Tge) => { trap_reg_code!(@impl Tge, 1, 0); };
-    (Tgeu) => { trap_reg_code!(@impl Tgeu, 1, 0); };
-    (Tlt) => { trap_reg_code!(@impl Tlt, 0, 1); };
-    (Tltu) => { trap_reg_code!(@impl Tltu, 0, 1); };
-    (Teq) => { trap_reg_code!(@impl Teq, 1, 1); };
-    (Tne) => { trap_reg_code!(@impl Tne, 0, 1); };
+    ($test:ident, Tge) => { trap_reg_code!(@impl $test, Tge, 1, 0); };
+    ($test:ident, Tgeu) => { trap_reg_code!(@impl $test, Tgeu, 1, 0); };
+    ($test:ident, Tlt) => { trap_reg_code!(@impl $test, Tlt, 0, 1); };
+    ($test:ident, Tltu) => { trap_reg_code!(@impl $test, Tltu, 0, 1); };
+    ($test:ident, Teq) => { trap_reg_code!(@impl $test, Teq, 1, 1); };
+    ($test:ident, Tne) => { trap_reg_code!(@impl $test, Tne, 0, 1); };
 
-    (@impl $instr:ident, $rs_value:expr, $rt_value:expr) => {
-        type Params = u10; // the code
+    (@impl $test:ident, $instr:ident, $rs_value:expr, $rt_value:expr) => {
+        impl Test for $test {
+            type Params = u10; // the code
 
-        fn cases() -> impl Iterator<Item = Self::Params> {
-            (0..1024).map(u10::new)
-        }
+            fn cases() -> impl Iterator<Item = Self::Params> {
+                (0..1024).map(u10::new)
+            }
 
-        fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-            let handler = install_exception_handler(TrapCatcher { occurred: false });
+            fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
+                let handler = install_exception_handler(TrapCatcher { occurred: false });
 
-            Program::new()
-                .set_reg64(Register::T0, $rs_value)
-                .set_reg64(Register::T1, $rt_value)
-                .push(
-                    $instr::default()
-                        .with_rs(Register::T0.into())
-                        .with_rt(Register::T1.into())
-                        .into(), // TODO code
+                Program::new()
+                    .set_reg64(Register::T0, $rs_value)
+                    .set_reg64(Register::T1, $rt_value)
+                    .push(
+                        $instr::default()
+                            .with_rs(Register::T0.into())
+                            .with_rt(Register::T1.into())
+                            .with_code(*params)
+                            .into(),
+                    )
+                    .run();
+
+                assert!(handler.occurred, "{} should should have caused an exception", stringify!($instr));
+
+                app.bool(
+                    &format!(
+                        "{} T0={:08X}, T1={:08X} with code {:04X}",
+                        stringify!($instr).to_uppercase(),
+                        $rs_value,
+                        $rt_value,
+                        params,
+                    ),
+                    handler.occurred,
                 )
-                .run();
 
-            assert!(handler.occurred, "trap should should have caused an exception");
-
-            app.bool(
-                &format!(
-                    "{} T0={:08X}, T1={:08X} with code {:04X}",
-                    stringify!($instr).to_uppercase(),
-                    $rs_value,
-                    $rt_value,
-                    params,
-                ),
-                handler.occurred,
-            )
-
-            // TODO more fields
+                // TODO more fields?
+            }
         }
     };
 }
 
 register_test!(CpuInstructionTgeCode);
-
-impl Test for CpuInstructionTgeCode {
-    trap_reg_code!(Tge);
-}
+trap_reg_code!(CpuInstructionTgeCode, Tge);
 
 register_test!(CpuInstructionTgeuCode);
-
-impl Test for CpuInstructionTgeuCode {
-    trap_reg_code!(Tgeu);
-}
+trap_reg_code!(CpuInstructionTgeuCode, Tgeu);
 
 register_test!(CpuInstructionTltCode);
-
-impl Test for CpuInstructionTltCode {
-    trap_reg_code!(Tlt);
-}
+trap_reg_code!(CpuInstructionTltCode, Tlt);
 
 register_test!(CpuInstructionTltuCode);
-
-impl Test for CpuInstructionTltuCode {
-    trap_reg_code!(Tltu);
-}
+trap_reg_code!(CpuInstructionTltuCode, Tltu);
 
 register_test!(CpuInstructionTeqCode);
-
-impl Test for CpuInstructionTeqCode {
-    trap_reg_code!(Teq);
-}
+trap_reg_code!(CpuInstructionTeqCode, Teq);
 
 register_test!(CpuInstructionTneCode);
-
-impl Test for CpuInstructionTneCode {
-    trap_reg_code!(Tne);
-}
+trap_reg_code!(CpuInstructionTneCode, Tne);
 
 // Traps, immediate variants
 
@@ -286,92 +250,77 @@ pub struct ImmParam {
     imm: u16,
 }
 
-const IMM_VALUES: [u16; 10] = [
-    0x0000, 0x0001, 0x044E, 0x7FFE, 0x7FFF, 0x8000, 0x8001, 0xC123, 0xFFFE, 0xFFFF,
-];
-
 macro_rules! trap_imm {
-    ($instr:ident) => {
-        type Params = ImmParam;
+    ($test:ident, $instr:ident) => {
+        impl Test for $test {
+            type Params = ImmParam;
 
-        fn cases() -> impl Iterator<Item = Self::Params> {
-            let basic =
-                itertools::iproduct!(REG_VALUES, IMM_VALUES).map(|(rs_value, imm)| ImmParam {
-                    rs: Register::T0,
-                    rs_value,
+            fn cases() -> impl Iterator<Item = Self::Params> {
+                let reg_values = corner_cases_64(REG_EXTRA_VALUES);
+
+                let imm_values = corner_cases_16(&[0x044E, 0xC123]);
+
+                let basic = itertools::iproduct!(reg_values.clone(), imm_values.clone()).map(
+                    |(rs_value, imm)| ImmParam {
+                        rs: Register::T0,
+                        rs_value,
+                        imm,
+                    },
+                );
+
+                let rs_is_r0 = imm_values.map(|imm| ImmParam {
+                    rs: Register::R0,
+                    rs_value: 0,
                     imm,
                 });
 
-            let rs_is_r0 = IMM_VALUES.map(|imm| ImmParam {
-                rs: Register::R0,
-                rs_value: 0,
-                imm,
-            });
+                basic.chain(rs_is_r0)
+            }
 
-            basic.chain(rs_is_r0)
-        }
+            fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
+                let handler = install_exception_handler(TrapCatcher { occurred: false });
 
-        fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-            let handler = install_exception_handler(TrapCatcher { occurred: false });
+                Program::new()
+                    .set_reg64(params.rs, params.rs_value)
+                    .push(
+                        $instr::default()
+                            .with_rs(params.rs.into())
+                            .with_imm(params.imm)
+                            .into(),
+                    )
+                    .run();
 
-            Program::new()
-                .set_reg64(params.rs, params.rs_value)
-                .push(
-                    $instr::default()
-                        .with_rs(params.rs.into())
-                        .with_imm(params.imm)
-                        .into(),
+                app.bool(
+                    &format!(
+                        "{} {}={:08X}, {:08X}",
+                        stringify!($instr).to_uppercase(),
+                        params.rs,
+                        params.rs_value,
+                        params.imm,
+                    ),
+                    handler.occurred,
                 )
-                .run();
 
-            app.bool(
-                &format!(
-                    "{} {}={:08X}, {:08X}",
-                    stringify!($instr).to_uppercase(),
-                    params.rs,
-                    params.rs_value,
-                    params.imm,
-                ),
-                handler.occurred,
-            )
-
-            // TODO more fields
+                // TODO more fields
+            }
         }
     };
 }
 
 register_test!(CpuInstructionTgei);
-
-impl Test for CpuInstructionTgei {
-    trap_imm!(Tgei);
-}
+trap_imm!(CpuInstructionTgei, Tgei);
 
 register_test!(CpuInstructionTgeiu);
-
-impl Test for CpuInstructionTgeiu {
-    trap_imm!(Tgeiu);
-}
+trap_imm!(CpuInstructionTgeiu, Tgeiu);
 
 register_test!(CpuInstructionTlti);
-
-impl Test for CpuInstructionTlti {
-    trap_imm!(Tlti);
-}
+trap_imm!(CpuInstructionTlti, Tlti);
 
 register_test!(CpuInstructionTltiu);
-
-impl Test for CpuInstructionTltiu {
-    trap_imm!(Tltiu);
-}
+trap_imm!(CpuInstructionTltiu, Tltiu);
 
 register_test!(CpuInstructionTeqi);
-
-impl Test for CpuInstructionTeqi {
-    trap_imm!(Teqi);
-}
+trap_imm!(CpuInstructionTeqi, Teqi);
 
 register_test!(CpuInstructionTnei);
-
-impl Test for CpuInstructionTnei {
-    trap_imm!(Tnei);
-}
+trap_imm!(CpuInstructionTnei, Tnei);

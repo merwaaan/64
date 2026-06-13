@@ -35,7 +35,7 @@ impl All {
 
         // TODO fail if empty
 
-        let test_sets = TestSet::resolve(&tests, &self.merge);
+        let test_sets = TestSet::new(&tests, &self.merge);
 
         // Build record-mode ROMs
 

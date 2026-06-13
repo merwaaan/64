@@ -44,32 +44,51 @@ impl List {
     pub fn find_tests(source: &Source) -> Result<Vec<Test>> {
         let mut tests = Vec::new();
 
-        let register_test_regex =
-            Regex::new(r"(?m)^\s*register_test!\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")?;
+        // List the test modules
+
+        let mut modules = Vec::new();
 
         for entry in fs::read_dir(rom_tests_dir())? {
             let path = entry?.path();
 
-            if path.extension().is_some_and(|ext| ext == "rs") {
-                let module = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .context("failed to get test file name")?
-                    .to_string();
+            if !matches!(path.extension(), Some(ext) if ext == "rs") {
+                continue;
+            }
 
-                let contents = fs::read_to_string(&path)
-                    .with_context(|| format!("failed to read {}", path.display()))?;
+            let module = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .context("failed to get test file name")?
+                .to_string();
 
-                for capture in register_test_regex.captures_iter(&contents) {
-                    let test = Test {
-                        name: capture[1].to_string(),
-                        module: module.clone(),
-                    };
+            modules.push((module, path));
+        }
 
-                    // TODO mvoe fitlering here
-                    if source.matches(&test) {
-                        tests.push(test);
-                    }
+        // fs::read_dir() seems to iterate through files in alphabetical order but this is not actually guaranteed,
+        // so let's enforce it explicitly
+
+        modules.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        // Read the modules and extract the tests registered with the macro
+        // TODO something more robust? expanded macro? more sophisticated?
+
+        let register_test_regex =
+            Regex::new(r"(?m)^\s*register_test!\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")?;
+
+        for (module, module_path) in modules {
+            let module_contents = fs::read_to_string(&module_path)
+                .with_context(|| format!("failed to read {}", module_path.display()))?;
+
+            for capture in register_test_regex.captures_iter(&module_contents) {
+                let test = Test {
+                    name: capture[1].to_string(),
+                    module: module.clone(),
+                };
+
+                // Only keep matching tests
+
+                if source.matches(&test) {
+                    tests.push(test);
                 }
             }
         }
@@ -119,9 +138,6 @@ impl List {
                 }
             };
 
-            info!("stem: {}", stem);
-            info!("source: {}", source);
-            info!("matches: {}", matches);
             if matches {
                 roms.push(path);
             }

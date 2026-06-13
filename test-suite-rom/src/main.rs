@@ -13,6 +13,7 @@ compile_error!("features \"record\" and \"replay\" cannot be both enabled");
 
 mod allocator;
 mod app;
+mod data;
 mod display;
 mod exceptions;
 mod io;

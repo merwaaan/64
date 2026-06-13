@@ -6,192 +6,147 @@ use n64_specs::cpu::{instructions::*, registers::Register};
 
 use crate::{
     app::App,
+    data::{
+        RdRtRs, RtRsImm, corner_cases_16, corner_cases_64, rd_rt_rs_combinations,
+        rt_rs_combinations,
+    },
     io,
     program::Program,
     register_test,
     test::{Test, TestError},
 };
 
-const REGISTERS: [Register; 3] = [Register::R0, Register::T0, Register::T1];
-
-const REGISTER_VALUES: [u64; 14] = [
-    0x0000_0000_0000_0000,
-    0x0000_0000_0000_0001,
+const REG_EXTRA_VALUES: &[u64] = &[
     0x0000_0000_0000_CD15,
     0x0000_0000_2640_044E,
     0x0000_0000_5555_5555,
-    0x0000_0000_7FFF_FFFF,
-    0x0000_0000_8008_00F0,
     0x0000_0000_AAAA_AAAA,
     0x0000_0000_DBCA_0000,
-    0x0000_0000_FFFF_FFFF,
     0x105C_00CE_0000_0000,
     0xC000_FFFF_0000_0007,
     0xFFFF_002F_89AB_F51F,
-    0xFFFF_FFFF_FFFF_FFFF,
 ];
 
-#[derive(Debug)]
-pub struct RegisterParam {
-    reg_value1: u64,
-    reg_value2: u64,
-    reg_in1: Register,
-    reg_in2: Register,
-    reg_out: Register,
-}
+macro_rules! reg {
+    ($test:ident, $instr:ident) => {
+        impl Test for $test {
+            type Params = RdRtRs;
 
-macro_rules! reg_variant {
-    ($instr:ident) => {
-        type Params = RegisterParam;
+            fn cases() -> impl Iterator<Item = Self::Params> {
+                let reg_values = corner_cases_64(REG_EXTRA_VALUES);
 
-        fn cases() -> impl Iterator<Item = Self::Params> {
-            itertools::iproduct!(
-                REGISTER_VALUES,
-                REGISTER_VALUES,
-                REGISTERS,
-                REGISTERS,
-                REGISTERS
-            )
-            .map(
-                |(reg_value1, reg_value2, reg_in1, reg_in2, reg_out)| RegisterParam {
-                    reg_value1,
-                    reg_value2,
-                    reg_in1,
-                    reg_in2,
-                    reg_out,
-                },
-            )
-        }
+                rd_rt_rs_combinations(reg_values)
+            }
 
-        fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-            let result: u64 = 0;
+            fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
+                let mut result = io::Buffer::<u64>::new(1);
+                result.push(0);
+                // if params.rt_value == 0 && params.rs_value == 0 {
+                //     app.print(&format!("{}", result.get(0)), None)?;
+                // }
 
-            Program::new()
-                .set_reg64(params.reg_in1, params.reg_value1)
-                .set_reg64(params.reg_in2, params.reg_value2)
-                .push(
-                    $instr::default()
-                        .with_rs(params.reg_in1.into())
-                        .with_rt(params.reg_in2.into())
-                        .with_rd(params.reg_out.into())
-                        .into(),
+                Program::new()
+                    .set_reg64(params.rd, params.rd_value)
+                    .set_reg64(params.rs, params.rs_value)
+                    .set_reg64(params.rt, params.rt_value)
+                    .push(
+                        $instr::default()
+                            .with_rd(params.rd.into())
+                            .with_rs(params.rs.into())
+                            .with_rt(params.rt.into())
+                            .into(),
+                    )
+                    .store_reg64(params.rd, result.as_ptr() as u32, Register::T7)
+                    .run();
+
+                app.value64(
+                    &format!(
+                        "{} {}, {}={:08X}, {}={:08X}",
+                        stringify!($instr).to_uppercase(),
+                        params.rd,
+                        params.rs,
+                        params.rs_value,
+                        params.rt,
+                        params.rt_value,
+                    ),
+                    result.get(0),
                 )
-                .store_reg64(
-                    params.reg_out,
-                    core::ptr::addr_of!(result) as u32,
-                    Register::T3,
-                )
-                .run();
-
-            app.value64(
-                &format!(
-                    "{} {}, {}={:08X}, {}={:08X}",
-                    stringify!($instr).to_uppercase(),
-                    params.reg_out,
-                    params.reg_in1,
-                    params.reg_value1,
-                    params.reg_in2,
-                    params.reg_value2,
-                ),
-                result,
-            )
+            }
         }
     };
 }
 
 register_test!(CpuInstructionAnd);
-
-impl Test for CpuInstructionAnd {
-    reg_variant!(And);
-}
+reg!(CpuInstructionAnd, And);
 
 register_test!(CpuInstructionOr);
-
-impl Test for CpuInstructionOr {
-    reg_variant!(Or);
-}
+reg!(CpuInstructionOr, Or);
 
 register_test!(CpuInstructionNor);
-
-impl Test for CpuInstructionNor {
-    reg_variant!(Nor);
-}
+reg!(CpuInstructionNor, Nor);
 
 register_test!(CpuInstructionXor);
-
-impl Test for CpuInstructionXor {
-    reg_variant!(Xor);
-}
+reg!(CpuInstructionXor, Xor);
 
 #[derive(Debug)]
 pub struct ImmediateParam {
-    reg_value: u64,
-    imm_value: u16,
-    reg_in: Register,
-    reg_out: Register,
+    rt: Register,
+    rs: Register,
+    rs_value: u64,
+    imm: u16,
 }
 
-macro_rules! imm_variant {
-    ($instr:ident) => {
-        type Params = ImmediateParam;
+macro_rules! imm {
+    ($test:ident, $instr:ident) => {
+        impl Test for $test {
+            type Params = RtRsImm;
 
-        fn cases() -> impl Iterator<Item = Self::Params> {
-            let imm_values = [0, 1, 0x1002, 0xCD15, 0x044E, 0x5555, 0xFFFF];
+            fn cases() -> impl Iterator<Item = Self::Params> {
+                let reg_values = corner_cases_64(REG_EXTRA_VALUES);
 
-            itertools::iproduct!(REGISTER_VALUES, imm_values, REGISTERS, REGISTERS).map(
-                |(reg_value, imm_value, reg_in, reg_out)| ImmediateParam {
-                    reg_value,
-                    imm_value,
-                    reg_in,
-                    reg_out,
-                },
-            )
-        }
+                let imm_values = corner_cases_16(&[0x1002, 0xCD15, 0x044E, 0x5555]);
 
-        fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-            let result = io::Buffer::<u64>::new(1);
+                rt_rs_combinations(reg_values, imm_values)
+            }
 
-            Program::new()
-                .set_reg64(params.reg_in, params.reg_value)
-                .push(
-                    $instr::default()
-                        .with_rs(params.reg_in.into())
-                        .with_rt(params.reg_out.into())
-                        .with_imm(params.imm_value)
-                        .into(),
+            fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
+                let mut result = io::Buffer::<u64>::new(1);
+                result.push(0);
+
+                Program::new()
+                    .set_reg64(params.rt, params.rt_value)
+                    .set_reg64(params.rs, params.rs_value)
+                    .push(
+                        $instr::default()
+                            .with_rt(params.rt.into())
+                            .with_rs(params.rs.into())
+                            .with_imm(params.imm)
+                            .into(),
+                    )
+                    .store_reg64(params.rt, result.as_ptr() as u32, Register::T7)
+                    .run();
+
+                app.value64(
+                    &format!(
+                        "{} {}, {}={:08X}, {:08X}",
+                        stringify!($instr).to_uppercase(),
+                        params.rt,
+                        params.rs,
+                        params.rs_value,
+                        params.imm,
+                    ),
+                    result.get(0),
                 )
-                .store_reg64(params.reg_out, result.as_ptr() as u32, Register::T3)
-                .run();
-
-            app.value64(
-                &format!(
-                    "{} {}, {}={:08X}, {:08X}",
-                    stringify!($instr).to_uppercase(),
-                    params.reg_out,
-                    params.reg_in,
-                    params.reg_value,
-                    params.imm_value,
-                ),
-                result.get(0),
-            )
+            }
         }
     };
 }
 
 register_test!(CpuInstructionAndi);
-
-impl Test for CpuInstructionAndi {
-    imm_variant!(Andi);
-}
+imm!(CpuInstructionAndi, Andi);
 
 register_test!(CpuInstructionOri);
-
-impl Test for CpuInstructionOri {
-    imm_variant!(Ori);
-}
+imm!(CpuInstructionOri, Ori);
 
 register_test!(CpuInstructionXori);
-
-impl Test for CpuInstructionXori {
-    imm_variant!(Xori);
-}
+imm!(CpuInstructionXori, Xori);

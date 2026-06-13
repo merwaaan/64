@@ -63,7 +63,7 @@ impl Program {
             0,
         );
 
-        let entry = io::uncached_addr(n64_specs::rsp::IMEM_START);
+        let entry = io::uncached_addr(n64_specs::rsp::IMEM_START) as usize;
 
         unsafe {
             asm!(
@@ -111,7 +111,7 @@ impl Program {
 
                 // Jump
 
-                "jalr {entry}",
+                "jalr $24",
                 "nop",
 
                 // Restore the registers from the stack
@@ -156,7 +156,8 @@ impl Program {
 
                 ".set at",
 
-                entry = in(reg) entry
+                // Force the jump target to a fixed register so register allocation does not break the trampoline
+                in("$24") entry
             );
         }
     }
@@ -229,6 +230,8 @@ impl Program {
 
         self.sd(reg, work_reg, 0)
     }
+
+    // TODO rm instructions
 
     pub fn and(&mut self, rd: Register, rs: Register, rt: Register) -> &mut Self {
         self.push(

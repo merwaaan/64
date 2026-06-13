@@ -157,7 +157,7 @@ enum TestSet {
 }
 
 impl TestSet {
-    fn resolve(tests: &[Test], merge: &Option<String>) -> Vec<TestSet> {
+    fn new(tests: &[Test], merge: &Option<String>) -> Vec<TestSet> {
         let mut test_sets = Vec::new();
 
         if let Some(merge) = merge {
