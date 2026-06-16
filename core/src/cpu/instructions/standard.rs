@@ -615,7 +615,7 @@ pub struct Lld;
 impl Instruction for Lld {
     fn execute(s: &mut System, opcode: Opcode, operands: Operands) -> InstructionResult {
         let addr = opcode.offset_addr(s);
-        check_aligned!(load, addr, 3);
+        check_aligned!(load, addr, 7);
 
         s.cop0.set_ll_addr(addr);
         s.cpu.regs.load_linked_bit = true;
