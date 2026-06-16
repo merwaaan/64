@@ -47,6 +47,9 @@ pub struct Comparator {
     /// Refilled with the next chunk of embedded data from ROM when it's exhausted.
     deserialization_buffer: Vec<u8>,
 
+    /// Number of valid bytes currently buffered in `deserialization_buffer`.
+    deserialization_buffer_filled: usize,
+
     /// Current position in the buffer, increases as we deserialize steps.
     /// Deserializing the data starting here should yield a step.
     deserialization_buffer_offset: usize,
@@ -61,7 +64,7 @@ pub struct Comparator {
     /// For instance:
     /// - the RAM destination address might not be aligned to 8 bytes as we don't necesarily DMA to its aligned start address
     /// - the PI source address might not be aligned to 2 bytes as each embedded step is not aligned
-    dma_buffer: io::Buffer<u8>,
+    dma_buffer: io::UncachedBuffer<u8>,
 
     /// Current address used as the DMA source, increases as we transfer data from ROM to RAM.
     dma_source_address: u32,
@@ -79,9 +82,10 @@ impl Default for Comparator {
     fn default() -> Self {
         Self {
             deserialization_buffer: alloc::vec![0; BUFFER_SIZE],
-            deserialization_buffer_offset: BUFFER_SIZE, // "full" buffer to refill it at the start
+            deserialization_buffer_filled: 0,
+            deserialization_buffer_offset: 0,
             consumed_embedded_data: 0,
-            dma_buffer: io::Buffer::<u8>::with_alignment(
+            dma_buffer: io::UncachedBuffer::<u8>::with_alignment(
                 BUFFER_SIZE + 1, // +1 padding to deal with PI misalignment
                 n64_specs::pi::DMA_RAM_ALIGNMENT,
             ),
@@ -145,20 +149,30 @@ impl Comparator {
     /// In case of mismatch, this advances the steps to the next test.
     /// If the test completed without mismatches, no need to do anything.
     pub fn skip_test(&mut self) -> Result<()> {
+        let mut consumed_any = false;
+
         loop {
             match self.peek()? {
                 // If there's no more data to consume, we're done
                 // (we skipped the last test case OR there's something wrong and the next comparison will fail and report the issue)
                 None => return Ok(()),
-                // Start of a new test, we're done, we don't consume the step to let the next comparison have it
+                // Start of a new test. If we already consumed at least one step from the
+                // mismatching test, stop here so the next comparison sees this start marker.
+                // Otherwise consume once and keep skipping to the *next* test.
                 Some(Step::StartTest(_)) => {
-                    self.test_case_index = 0;
-                    self.test_case_step_index = 0;
-                    return Ok(());
+                    if consumed_any {
+                        self.test_case_index = 0;
+                        self.test_case_step_index = 0;
+                        return Ok(());
+                    }
+
+                    self.take()?;
+                    consumed_any = true;
                 }
                 // Another step from the test to skip, continue advancing
                 Some(_) => {
                     self.take()?;
+                    consumed_any = true;
                 }
             }
         }
@@ -166,6 +180,8 @@ impl Comparator {
 
     /// Skips the current test case's remaining steps.
     pub fn skip_case(&mut self) -> Result<()> {
+        let mut consumed_any = false;
+
         loop {
             let next_step = self.peek()?;
 
@@ -173,14 +189,36 @@ impl Comparator {
                 None => {
                     return Ok(());
                 }
+                // Start of next case. If we already consumed at least one step from the
+                // mismatching case, stop here. Otherwise consume once and keep skipping.
                 Some(Step::StartTestCase(_)) => {
-                    self.test_case_index += 1;
+                    if consumed_any {
+                        self.test_case_index += 1;
+                        self.test_case_step_index = 0;
+
+                        return Ok(());
+                    }
+
+                    self.take()?;
+                    consumed_any = true;
+                }
+                // Last case in test: stop at EndTest so caller can compare the runtime EndTest.
+                Some(Step::EndTest) => {
+                    self.test_case_index = 0;
+                    self.test_case_step_index = 0;
+
+                    return Ok(());
+                }
+                // Defensive boundary handling: if we're already at a new test, don't consume it.
+                Some(Step::StartTest(_)) => {
+                    self.test_case_index = 0;
                     self.test_case_step_index = 0;
 
                     return Ok(());
                 }
                 Some(_) => {
                     self.take()?;
+                    consumed_any = true;
                 }
             }
         }
@@ -213,13 +251,14 @@ impl Comparator {
 
         for attempt in 0..2 {
             let deserialization_slice =
-                &self.deserialization_buffer[self.deserialization_buffer_offset..];
+                &self.deserialization_buffer
+                    [self.deserialization_buffer_offset..self.deserialization_buffer_filled];
 
             match postcard::take_from_bytes::<Step>(deserialization_slice) {
                 Ok((expected_step, rest)) => {
                     if advance {
                         self.deserialization_buffer_offset =
-                            self.deserialization_buffer.len() - rest.len();
+                            self.deserialization_buffer_filled - rest.len();
 
                         self.consumed_embedded_data +=
                             (deserialization_slice.len() - rest.len()) as u32;
@@ -266,16 +305,35 @@ impl Comparator {
 
         // Slide the remaining buffered data to the front if any, it's the start of the next step
 
+        let remaining_buffered_bytes =
+            self.deserialization_buffer_filled - self.deserialization_buffer_offset;
+
         self.deserialization_buffer
-            .copy_within(self.deserialization_buffer_offset.., 0);
+            .copy_within(self.deserialization_buffer_offset..self.deserialization_buffer_filled, 0);
 
         // Transfer new data from ROM to the DMA buffer
         //
         // The destination DMA buffer is aligned to 8 bytes, so there are no issues on that side.
         // However, the source PI address might not be aligned to 2 bytes, in which case we need to copy from the previous byte and discard it later.
 
+        let free_buffer_space = self
+            .deserialization_buffer
+            .len()
+            .saturating_sub(remaining_buffered_bytes);
+
         let bytes_to_transfer =
-            (self.deserialization_buffer_offset as u32).min(self.remaining_embedded_bytes());
+            (free_buffer_space as u32).min(self.remaining_embedded_bytes());
+
+        // Nothing new to fetch from ROM.
+        //
+        // This can happen near the end of the embedded stream. In that case we must avoid
+        // issuing a DMA with `length = bytes_to_transfer - 1`, which would underflow and corrupt
+        // memory.
+        if bytes_to_transfer == 0 {
+            self.deserialization_buffer_offset = 0;
+            self.deserialization_buffer_filled = remaining_buffered_bytes;
+            return Ok(());
+        }
 
         let dma_source_address_misalignment = self.dma_source_address & 1;
 
@@ -293,7 +351,7 @@ impl Comparator {
         // discarding the possibly redundant byte transferred for alignment reasons
 
         let serialization_buffer_copy_offset =
-            (self.deserialization_buffer.len() - self.deserialization_buffer_offset) as usize;
+            remaining_buffered_bytes;
 
         for i in 0..bytes_to_transfer as usize {
             self.deserialization_buffer[serialization_buffer_copy_offset + i] = self
@@ -302,6 +360,7 @@ impl Comparator {
         }
 
         self.deserialization_buffer_offset = 0;
+        self.deserialization_buffer_filled = remaining_buffered_bytes + bytes_to_transfer as usize;
         self.dma_source_address += bytes_to_transfer;
 
         Ok(())

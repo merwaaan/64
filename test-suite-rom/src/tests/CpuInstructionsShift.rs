@@ -1,10 +1,3 @@
-//! SLL, SRL, SRA
-//! DSLL, DSRL, DSRA
-//! DSLL32, DSRL32, DSRA32
-//!
-//! SLLV, SRLV, SRAV
-//! DSLLV, DSRLV, DSRAV
-
 use alloc::format;
 use arbitrary_int::u5;
 use n64_specs::cpu::{instructions::*, registers::Register};
@@ -28,6 +21,11 @@ const REG_EXTRA_VALUES: &[u64] = &[
     0xFFFF_002F_89AB_F51F,
 ];
 
+// sa-operand variants:
+// SLL, SRL, SRA
+// DSLL, DSRL, DSRA
+// DSLL32, DSRL32, DSRA32
+
 #[derive(Debug)]
 pub struct SaParam {
     rd: Register,
@@ -44,6 +42,8 @@ macro_rules! sa {
 
             fn cases() -> impl Iterator<Item = Self::Params> {
                 let reg_values = corner_cases_64(REG_EXTRA_VALUES);
+
+                // TODO use data gen
 
                 let sa_values = (0..=31).map(u5::new);
 
@@ -89,8 +89,7 @@ macro_rules! sa {
             }
 
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-                let mut result = io::Buffer::<u64>::new(1);
-                result.push(0);
+                let result = io::CachedBuffer::<u64>::from_slice(&[0]);
 
                 Program::new()
                     .set_reg64(params.rd, params.rd_value)
@@ -148,6 +147,10 @@ sa!(CpuInstructionDsrl32, Dsrl32);
 register_test!(CpuInstructionDsra32);
 sa!(CpuInstructionDsra32, Dsra32);
 
+// v-operand variants:
+// SLLV, SRLV, SRAV
+// DSLLV, DSRLV, DSRAV
+
 #[derive(Debug)]
 pub struct VParam {
     rd: Register,
@@ -172,6 +175,8 @@ macro_rules! v {
                     0xABCD_0000_FFFF_0004,
                     0xFFFF_FFFF_FFFF_FFFF,
                 ]);
+
+                // TODO data gen
 
                 let basic = itertools::iproduct!(reg_values.clone(), v_values.clone()).map(
                     |(rt_value, v)| VParam {
@@ -264,8 +269,7 @@ macro_rules! v {
             }
 
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-                let mut result = io::Buffer::<u64>::new(1);
-                result.push(0);
+                let result = io::CachedBuffer::<u64>::from_slice(&[0]);
 
                 Program::new()
                     .set_reg64(params.rd, params.rd_value)

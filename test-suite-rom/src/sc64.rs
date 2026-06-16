@@ -30,7 +30,8 @@ const MESSAGE_BUFFER_SIZE: usize = 0x1_0000; // ~ 0,065 MB
 /// SummerCart64 interface for communicating with the server.
 pub struct Sc64 {
     /// Buffered data to be sent over USB.
-    buffer: io::Buffer<u8>,
+    buffer: io::CachedBuffer<u8>,
+    buffered_bytes: usize,
 }
 
 impl Sc64 {
@@ -64,7 +65,8 @@ impl Sc64 {
         .run()?;
 
         Ok(Some(Self {
-            buffer: io::Buffer::<u8>::with_alignment(MESSAGE_BUFFER_SIZE, 4),
+            buffer: io::CachedBuffer::<u8>::with_alignment(MESSAGE_BUFFER_SIZE, 4),
+            buffered_bytes: 0,
         }))
     }
 
@@ -82,9 +84,9 @@ impl Sc64 {
 
     /// Flushes the buffered data over USB.
     pub fn flush(&mut self) -> Result<()> {
-        if !self.buffer.is_empty() {
-            self.send_raw(self.buffer.as_slice())?;
-            self.buffer.clear();
+        if self.buffered_bytes > 0 {
+            self.send_raw(&self.buffer.as_slice()[..self.buffered_bytes])?;
+            self.buffered_bytes = 0;
         }
 
         Ok(())
@@ -280,13 +282,21 @@ impl Flavor for BufferedTransfer<'_> {
     type Output = ();
 
     fn try_push(&mut self, byte: u8) -> postcard::Result<()> {
+        assert!(
+            self.sc64.buffered_bytes < self.sc64.buffer.len(),
+            "SC64 buffered transfer queue overflow (bytes={}, capacity={})",
+            self.sc64.buffered_bytes,
+            self.sc64.buffer.len()
+        );
+
         // Queue
 
-        self.sc64.buffer.push(byte);
+        self.sc64.buffer.set(self.sc64.buffered_bytes, byte);
+        self.sc64.buffered_bytes += 1;
 
         // Send the buffered data if the buffer is full
 
-        if self.sc64.buffer.len() == self.sc64.buffer.capacity() {
+        if self.sc64.buffered_bytes == self.sc64.buffer.len() {
             self.sc64
                 .flush()
                 .map_err(|_| postcard::Error::SerdeSerCustom)?;

@@ -23,6 +23,11 @@ impl Program {
         self
     }
 
+    pub fn nop(&mut self) -> &mut Self {
+        // NOP = SLL r0, r0, r0
+        self.push(Sll::default().into())
+    }
+
     pub fn run(&self) {
         // Copy the program instructions to RAM
 

@@ -69,9 +69,9 @@ impl App {
 
         // Run the test plan
 
-        let successful_tests = tests::run_tests(self)?;
+        let failed_tests = tests::run_tests(self)?;
 
-        let success = successful_tests == tests::test_count();
+        let success = failed_tests.is_empty();
 
         // Done
 
@@ -89,9 +89,10 @@ impl App {
             } else {
                 self.print(
                     &format!(
-                        "\n{}/{} tests failed!\n",
-                        tests::test_count() - successful_tests,
-                        tests::test_count()
+                        "\n{}/{} tests failed: {}\n",
+                        failed_tests.len(),
+                        tests::test_count(),
+                        failed_tests.join(", ")
                     ),
                     Some(TextStyle::with_color(ERROR)),
                 )?;
@@ -148,6 +149,14 @@ impl App {
         let value = unsafe { (address as *const u32).read_volatile() };
 
         self.process_step(Step::Value(value), description)
+            // In case of mismatch, add info about the address to the description
+            .map_err(|e| match e {
+                TestError::Mismatch(mismatch) => TestError::Mismatch(Mismatch {
+                    description: format!("{} (address = {:08X})", description, address),
+                    ..mismatch
+                }),
+                e => e,
+            })
     }
 
     pub fn memory_region(
@@ -174,7 +183,20 @@ impl App {
         for i in 0..word_length {
             let value = unsafe { address_ptr.add(i).read_volatile() };
 
-            self.process_step(Step::Value(value), description)?;
+            self.process_step(Step::Value(value), description)
+                // In case of mismatch, add info about the region to the description
+                .map_err(|e| match e {
+                    TestError::Mismatch(mismatch) => TestError::Mismatch(Mismatch {
+                        description: format!(
+                            "{} (address = {:08X}, offset = {:0X})",
+                            description,
+                            address + (i as u32) * 4,
+                            i as u32 * 4
+                        ),
+                        ..mismatch
+                    }),
+                    e => e,
+                })?;
         }
 
         Ok(())
@@ -279,18 +301,18 @@ impl App {
                 };
 
                 let message = format!(
-                    "Mismatch at {}: {}\n  - expected {}\n  -      got {:0X?}",
+                    "Mismatch at {}: {}\n  - expected {}\n  -      got {}",
                     at,
                     mismatch.description,
                     mismatch
                         .expected_step
-                        .map(|s| format!("{:0X?}", s))
+                        .map(|s| format!("{}", s))
                         .unwrap_or("nothing".into()),
                     mismatch.runtime_step,
                 );
 
                 self.print(&message, Some(TextStyle::with_color(ERROR)))?;
-
+                panic!("end"); // TODO temp
                 // Skip to the next test/test case
 
                 use anyhow::Context;
@@ -318,8 +340,6 @@ impl App {
     /// - Record mode: send it to the server.
     /// - Replay mode: compare it against the embedded recorded steps.
     fn process_step(&mut self, step: Step, description: &str) -> Result<(), TestError> {
-        //isviewer::write(&format!("{}: {:0X?}\n", description, step));
-
         #[cfg(feature = "record")]
         {
             if self.sc64.is_some() {
@@ -332,6 +352,9 @@ impl App {
 
         #[cfg(feature = "replay")]
         {
+            // TODO temp
+            //isviewer::write(&format!("{}: {:0X?}\n", description, step));
+
             let comparison = self.comparator.compare(&step)?;
 
             // Check the outcome and convert the comparison result into an error to interrupt the test

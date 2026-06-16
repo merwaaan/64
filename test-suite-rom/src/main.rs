@@ -62,7 +62,7 @@ pub fn init_app() -> anyhow::Result<&'static mut App> {
 extern "C" fn _entrypoint() -> ! {
     let app = init_app().expect("failed to initialize app");
 
-    app.run();
+    app.run().expect("failed to run app");
 
     app.wait_for_reboot()
 }

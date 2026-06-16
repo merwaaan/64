@@ -1,24 +1,3 @@
-//! Records the VI registers masking when they are written to (or read from?).
-//!
-//! Findings:
-//! - Control: bits 31-17 are not writable, as specified in the docs, but bit 10 is, even though it's unused
-//! - Vertical scale: bits 27-16 and 11-0 are writable, as specified in the docs, bits 27-26 are writable even if unused
-//!
-//! No surprises:
-//! - Origin: bits 23-0 writable
-//! - Width: bits 11-0 writable
-//! - Interrupt line: bits 9-0 writable
-//! - Burst: bits 29-0 writable
-//! - Vertical total: bits 9-0 writable
-//! - Horizontal total: bits 20-16 and 11-0 writable
-//! - Horizontal total leap: bits 27-16 and 11-0 writable
-//! - Horizontal video: bits 25-16 and 9-0 writable
-//! - Vertical video: bits 25-16 and 9-0 writable
-//! - Vertical burst: bits 25-16 and 9-0 writable
-//! - Horizontal scale: bits 27-16 and 11-0 writable
-
-// TODO test writes to high bits of VI CURRENT clear int?
-
 use alloc::format;
 use n64_specs::vi;
 
@@ -29,6 +8,27 @@ use crate::{
 };
 
 use strum::IntoEnumIterator;
+
+// Records the VI registers masking when they are written to (or read from?).
+//
+// Findings:
+// - Control: bits 31-17 are not writable, as specified in the docs, but bit 10 is, even though it's unused
+// - Vertical scale: bits 27-16 and 11-0 are writable, as specified in the docs, bits 27-26 are writable even if unused
+//
+// No surprises:
+// - Origin: bits 23-0 writable
+// - Width: bits 11-0 writable
+// - Interrupt line: bits 9-0 writable
+// - Burst: bits 29-0 writable
+// - Vertical total: bits 9-0 writable
+// - Horizontal total: bits 20-16 and 11-0 writable
+// - Horizontal total leap: bits 27-16 and 11-0 writable
+// - Horizontal video: bits 25-16 and 9-0 writable
+// - Vertical video: bits 25-16 and 9-0 writable
+// - Vertical burst: bits 25-16 and 9-0 writable
+// - Horizontal scale: bits 27-16 and 11-0 writable
+
+// TODO test writes to high bits of VI CURRENT clear int?
 
 register_test!(ViRegistersMasking);
 

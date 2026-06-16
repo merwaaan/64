@@ -9,7 +9,7 @@ use embedded_graphics::{
 };
 use embedded_text::{
     TextBox,
-    style::{HeightMode, TextBoxStyleBuilder},
+    style::{HeightMode, TextBoxStyleBuilder, VerticalOverdraw},
 };
 use n64_specs::{
     color::{RGBA5551, RGBA8888},
@@ -24,6 +24,7 @@ pub const PIXELS: usize = (WIDTH * HEIGHT) as usize;
 
 const MARGIN: u32 = 8;
 const PROGRESS_HEIGHT: u32 = 16;
+const TEXT_BOTTOM: u32 = HEIGHT - MARGIN - PROGRESS_HEIGHT;
 
 pub const WHITE: RGBA5551 = RGBA5551::from_rgba(0xFF, 0xFF, 0xFF, 0xFF);
 pub const SUCCESS: RGBA5551 = RGBA5551::from_rgba(0x4C, 0xAF, 0x50, 0xFF);
@@ -129,21 +130,44 @@ impl Display {
                 .unwrap_or(Rgb888::BLACK),
         );
 
-        let bounds = Rectangle::new(
-            Point::new(MARGIN as i32, self.text_cursor_y as i32),
-            Size::new(WIDTH - 2 * MARGIN, HEIGHT - 2 * MARGIN),
-        );
-
         let textbox_style = TextBoxStyleBuilder::new()
-            .height_mode(HeightMode::FitToText)
+            .height_mode(HeightMode::Exact(VerticalOverdraw::Hidden))
             .build();
 
-        let text_box = TextBox::with_textbox_style(text, bounds, text_style, textbox_style);
-        text_box
-            .draw(self)
-            .map_err(|e| anyhow!("failed to print text in framebuffer: {e}"))?;
+        let text_width = WIDTH - 2 * MARGIN;
 
-        self.text_cursor_y += text_box.bounding_box().size.height;
+        // When the text overflows, clear the screen and go back to the top
+
+        let mut remaining = text;
+
+        // TODO messy, clean up
+
+        while !remaining.is_empty() {
+            if self.text_cursor_y >= TEXT_BOTTOM {
+                self.fill(WHITE);
+                self.text_cursor_y = MARGIN;
+            }
+
+            let available_height = TEXT_BOTTOM.saturating_sub(self.text_cursor_y);
+            let bounds = Rectangle::new(
+                Point::new(MARGIN as i32, self.text_cursor_y as i32),
+                Size::new(text_width, available_height),
+            );
+
+            let chunk = remaining;
+            let text_box = TextBox::with_textbox_style(chunk, bounds, text_style, textbox_style);
+
+            remaining = text_box
+                .draw(self)
+                .map_err(|e| anyhow!("failed to print text in framebuffer: {e}"))?;
+
+            if remaining.is_empty() {
+                self.text_cursor_y +=
+                    textbox_style.measure_text_height(&text_style, chunk, text_width);
+            } else {
+                self.text_cursor_y = TEXT_BOTTOM;
+            }
+        }
 
         Ok(())
     }

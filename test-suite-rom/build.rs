@@ -23,7 +23,12 @@ fn main() {
 
     let test_runs = test_paths
         .iter()
-        .map(|path| format!("successful_tests += app.run_test::<{}>()? as usize;", path))
+        .map(|path| {
+            format!(
+                "if !app.run_test::<{}>()? {{ failed_tests.push({}::name()); }}",
+                path, path
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n    ");
 
@@ -34,16 +39,20 @@ fn main() {
         .join("\n    ");
 
     let code = format!(
-        "use anyhow::Result;
+        "
+use anyhow::Result;
+use alloc::vec::Vec;
 
 use crate::test::Test;
 
-pub fn run_tests(app: &mut crate::app::App) -> Result<usize> {{
-    let mut successful_tests = 0;
+/// Run all the selected tests.
+/// Returns the names of the tests that failed.
+pub fn run_tests(app: &mut crate::app::App) -> Result<Vec<&'static str>> {{
+    let mut failed_tests = Vec::new();
 
     {test_runs}
 
-    Ok(successful_tests)
+    Ok(failed_tests)
 }}
 
 pub fn test_count() -> usize {{

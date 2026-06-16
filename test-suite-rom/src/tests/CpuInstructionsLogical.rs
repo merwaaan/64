@@ -8,7 +8,7 @@ use crate::{
     app::App,
     data::{
         RdRtRs, RtRsImm, corner_cases_16, corner_cases_64, rd_rt_rs_combinations,
-        rt_rs_combinations,
+        rt_rs_imm_combinations,
     },
     io,
     program::Program,
@@ -39,11 +39,7 @@ macro_rules! reg {
             }
 
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-                let mut result = io::Buffer::<u64>::new(1);
-                result.push(0);
-                // if params.rt_value == 0 && params.rs_value == 0 {
-                //     app.print(&format!("{}", result.get(0)), None)?;
-                // }
+                let result = io::CachedBuffer::<u64>::from_slice(&[0]);
 
                 Program::new()
                     .set_reg64(params.rd, params.rd_value)
@@ -106,12 +102,11 @@ macro_rules! imm {
 
                 let imm_values = corner_cases_16(&[0x1002, 0xCD15, 0x044E, 0x5555]);
 
-                rt_rs_combinations(reg_values, imm_values)
+                rt_rs_imm_combinations(reg_values, imm_values)
             }
 
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-                let mut result = io::Buffer::<u64>::new(1);
-                result.push(0);
+                let result = io::CachedBuffer::<u64>::from_slice(&[0]);
 
                 Program::new()
                     .set_reg64(params.rt, params.rt_value)

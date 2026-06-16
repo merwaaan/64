@@ -1,11 +1,3 @@
-//! ADD, ADDU, SUB, SUBU
-//! DADD, DADDU, DSUB, DSUBU
-//! SLT, SLTU
-//!
-//! ADDI, ADDIU
-//! DADDI, DADDIU
-//! SLTI, SLTIU
-
 use alloc::format;
 use core::arch::asm;
 use n64_specs::cpu::{instructions::*, registers::Register};
@@ -13,8 +5,8 @@ use n64_specs::cpu::{instructions::*, registers::Register};
 use crate::{
     app::App,
     data::{
-        RdRtRs, RtRsImm, corner_cases_16, corner_cases_64, rd_rt_rs_combinations,
-        rt_rs_combinations,
+        INIT_64, RdRtRs, RtRs, RtRsImm, corner_cases_16, corner_cases_64, rd_rt_rs_combinations,
+        rt_rs_imm_combinations,
     },
     exceptions::{ExceptionHandler, install_exception_handler},
     io,
@@ -56,6 +48,10 @@ const REG_EXTRA_VALUES: &[u64] = &[
     0xFFFF_FFFF_0000_1251,
 ];
 
+// ADD, ADDU, SUB, SUBU
+// DADD, DADDU, DSUB, DSUBU
+// SLT, SLTU
+
 macro_rules! reg {
     ($test:ident, $instr:ident) => {
         impl Test for $test {
@@ -70,8 +66,7 @@ macro_rules! reg {
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
                 let ex_handler = install_exception_handler(ExceptionH { occurred: false });
 
-                let mut result = io::Buffer::<u64>::new(1);
-                result.push(0);
+                let result = io::CachedBuffer::<u64>::from_slice(&[0]);
 
                 Program::new()
                     .set_reg64(params.rd, params.rd_value)
@@ -136,6 +131,10 @@ reg!(CpuInstructionDsub, Dsub);
 register_test!(CpuInstructionDsubu);
 reg!(CpuInstructionDsubu, Dsubu);
 
+// ADDI, ADDIU
+// DADDI, DADDIU
+// SLTI, SLTIU
+
 macro_rules! imm {
     ($test:ident, $instr:ident) => {
         impl Test for $test {
@@ -146,14 +145,13 @@ macro_rules! imm {
 
                 let imm_values = corner_cases_16(&[0x0002, 0x00C5, 0x04F0, 0xAAAA]);
 
-                rt_rs_combinations(reg_values, imm_values)
+                rt_rs_imm_combinations(reg_values, imm_values)
             }
 
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
                 let ex_handler = install_exception_handler(ExceptionH { occurred: false });
 
-                let mut result = io::Buffer::<u64>::new(1);
-                result.push(0);
+                let result = io::CachedBuffer::<u64>::from_slice(&[0]);
 
                 Program::new()
                     .set_reg64(params.rt, params.rt_value)
@@ -203,3 +201,142 @@ imm!(CpuInstructionSlti, Slti);
 
 register_test!(CpuInstructionSltiu);
 imm!(CpuInstructionSltiu, Sltiu);
+
+// MULT, MULTU, DIV, DIVU
+// DMULT, DMULTU, DDIV, DDIVU
+
+macro_rules! mult_div {
+    ($test:ident, $instr:ident) => {
+        impl Test for $test {
+            type Params = RtRs;
+
+            fn cases() -> impl Iterator<Item = Self::Params> {
+                // let reg_values = corner_cases_64(REG_EXTRA_VALUES);
+
+                // rt_rs_combinations(reg_values)
+
+                [RtRs {
+                    rs: Register::T0,
+                    rs_value: 01,
+                    rt: Register::T1,
+                    rt_value: 0x8000_0000,
+                }]
+                .into_iter()
+            }
+
+            fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
+                let ex_handler = install_exception_handler(ExceptionH { occurred: false });
+
+                let hi_lo = io::CachedBuffer::<u64>::from_slice(&[INIT_64, INIT_64]);
+
+                Program::new()
+                    // Init HI/LO
+                    .set_reg64(Register::T7, INIT_64)
+                    .push(Mthi::default().with_rs(Register::T7.into()).into())
+                    .push(Mtlo::default().with_rs(Register::T7.into()).into())
+                    .nop()
+                    .nop()
+                    // Main instruction
+                    .set_reg64(params.rs, params.rs_value)
+                    .set_reg64(params.rt, params.rt_value)
+                    .push(
+                        $instr::default()
+                            .with_rs(params.rs.into())
+                            .with_rt(params.rt.into())
+                            .into(),
+                    )
+                    .nop()
+                    .nop()
+                    // Read HI/LO
+                    .push(Mfhi::default().with_rd(Register::T6.into()).into())
+                    .store_reg64(Register::T6, hi_lo.item_ptr(0) as u32, Register::T7)
+                    .push(Mflo::default().with_rd(Register::T6.into()).into())
+                    .store_reg64(Register::T6, hi_lo.item_ptr(1) as u32, Register::T7)
+                    .run();
+
+                let instr = format!(
+                    "{} {}={:08X}, {}={:08X}",
+                    stringify!($instr).to_uppercase(),
+                    params.rs,
+                    params.rs_value,
+                    params.rt,
+                    params.rt_value
+                );
+
+                app.value64(&format!("{}, HI", instr), hi_lo.get(0))?;
+                app.value64(&format!("{}, LO", instr), hi_lo.get(1))?;
+
+                app.bool("Exception", ex_handler.occurred)
+            }
+        }
+    };
+}
+
+register_test!(CpuInstructionMult);
+mult_div!(CpuInstructionMult, Mult);
+
+register_test!(CpuInstructionMultu);
+mult_div!(CpuInstructionMultu, Multu);
+
+register_test!(CpuInstructionDiv);
+mult_div!(CpuInstructionDiv, Div);
+
+register_test!(CpuInstructionDivu);
+mult_div!(CpuInstructionDivu, Divu);
+
+register_test!(CpuInstructionDmult);
+mult_div!(CpuInstructionDmult, Dmult);
+
+register_test!(CpuInstructionDmultu);
+mult_div!(CpuInstructionDmultu, Dmultu);
+
+register_test!(CpuInstructionDdiv);
+mult_div!(CpuInstructionDdiv, Ddiv);
+
+register_test!(CpuInstructionDdivu);
+mult_div!(CpuInstructionDdivu, Ddivu);
+
+// MTHI, MTLO
+// MFHI, MFLO
+
+macro_rules! move_hi_lo {
+    ($test:ident, $mt_instr:ident, $mf_instr:ident) => {
+        impl Test for $test {
+            type Params = u64;
+
+            fn cases() -> impl Iterator<Item = Self::Params> {
+                corner_cases_64(REG_EXTRA_VALUES)
+            }
+
+            fn run(rs: &Self::Params, app: &mut App) -> Result<(), TestError> {
+                let result = io::CachedBuffer::<u64>::from_slice(&[0]);
+
+                Program::new()
+                    .set_reg64(Register::T0, INIT_64)
+                    .set_reg64(Register::T1, *rs)
+                    .push($mt_instr::default().with_rs(Register::T1.into()).into())
+                    .nop() // 2-instruction delay
+                    .nop()
+                    .push($mf_instr::default().with_rd(Register::T0.into()).into())
+                    .store_reg64(Register::T0, result.as_ptr() as u32, Register::T7)
+                    .run();
+
+                app.value64(
+                    &format!(
+                        "{} / {} {:08X}",
+                        stringify!($mt_instr).to_uppercase(),
+                        stringify!($mf_instr).to_uppercase(),
+                        rs,
+                    ),
+                    result.get(0),
+                )
+            }
+        }
+    };
+}
+
+register_test!(CpuInstructionMthiMfhi);
+move_hi_lo!(CpuInstructionMthiMfhi, Mthi, Mfhi);
+
+register_test!(CpuInstructionMtloMflo);
+move_hi_lo!(CpuInstructionMtloMflo, Mtlo, Mflo);

@@ -80,7 +80,7 @@ pub fn corner_cases_64(extra: &[u64]) -> impl Iterator<Item = u64> + Clone {
 // Helper to generate register combinations.
 // Include standard cases (eg. separate RD, RT, RS) as well as corner cases (R0, RT = RS, etc).
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct RdRtRs {
     pub rd: Register,
     pub rd_value: u64,
@@ -181,7 +181,53 @@ pub fn rd_rt_rs_combinations(
         .chain(rd_is_rs_is_rt)
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
+pub struct RtRs {
+    pub rt: Register,
+    pub rt_value: u64,
+
+    pub rs: Register,
+    pub rs_value: u64,
+}
+
+pub fn rt_rs_combinations(
+    reg_values: impl Iterator<Item = u64> + Clone,
+) -> impl Iterator<Item = RtRs> + Clone {
+    let basic =
+        itertools::iproduct!(reg_values.clone(), reg_values.clone()).map(|(rs_value, rt_value)| {
+            RtRs {
+                rs: Register::T0,
+                rs_value,
+                rt: Register::T1,
+                rt_value,
+            }
+        });
+
+    let rt_is_r0 = reg_values.clone().map(|rs_value| RtRs {
+        rs: Register::T0,
+        rs_value,
+        rt: Register::R0,
+        rt_value: 0,
+    });
+
+    let rs_is_r0 = reg_values.clone().map(|rt_value| RtRs {
+        rs: Register::R0,
+        rs_value: 0,
+        rt: Register::T0,
+        rt_value,
+    });
+
+    let rt_is_rs = reg_values.clone().map(|value| RtRs {
+        rs: Register::T0,
+        rs_value: value,
+        rt: Register::T0,
+        rt_value: value,
+    });
+
+    basic.chain(rt_is_r0).chain(rs_is_r0).chain(rt_is_rs)
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct RtRsImm {
     pub rt: Register,
     pub rt_value: u64,
@@ -192,49 +238,25 @@ pub struct RtRsImm {
     pub imm: u16,
 }
 
-pub fn rt_rs_combinations(
+pub fn rt_rs_imm_combinations(
     reg_values: impl Iterator<Item = u64> + Clone,
     imm_values: impl Iterator<Item = u16> + Clone,
 ) -> impl Iterator<Item = RtRsImm> + Clone {
-    let basic = itertools::iproduct!(reg_values.clone(), reg_values.clone(), imm_values.clone())
-        .map(|(rs_value, rt_value, imm)| RtRsImm {
-            rs: Register::T0,
+    itertools::iproduct!(rt_rs_combinations(reg_values.clone()), imm_values.clone()).map(
+        |(
+            RtRs {
+                rs,
+                rs_value,
+                rt,
+                rt_value,
+            },
+            imm,
+        )| RtRsImm {
+            rs,
             rs_value,
-            rt: Register::T1,
+            rt,
             rt_value,
             imm,
-        });
-
-    let rt_is_r0 =
-        itertools::iproduct!(reg_values.clone(), imm_values.clone()).map(|(rs_value, imm)| {
-            RtRsImm {
-                rs: Register::T0,
-                rs_value,
-                rt: Register::R0,
-                rt_value: 0,
-                imm,
-            }
-        });
-
-    let rs_is_r0 =
-        itertools::iproduct!(reg_values.clone(), imm_values.clone()).map(|(rt_value, imm)| {
-            RtRsImm {
-                rs: Register::R0,
-                rs_value: 0,
-                rt: Register::T0,
-                rt_value,
-                imm,
-            }
-        });
-
-    let rt_is_rs =
-        itertools::iproduct!(reg_values.clone(), imm_values.clone()).map(|(value, imm)| RtRsImm {
-            rs: Register::T0,
-            rs_value: value,
-            rt: Register::T1,
-            rt_value: value,
-            imm,
-        });
-
-    basic.chain(rt_is_r0).chain(rs_is_r0).chain(rt_is_rs)
+        },
+    )
 }

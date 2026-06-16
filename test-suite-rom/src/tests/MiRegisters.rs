@@ -1,18 +1,18 @@
-//! Interrupts are toggled by setting/clearing specific bits in the MI Mask register.
-//! This records what happens when a write both sets and clears the same interrupt.
-//!
-//! Findings:
-//! - Clearing and setting an interrupt mask at the same time does nothing
-
 use alloc::format;
 use n64_specs::{interrupt, mi};
 use strum::IntoEnumIterator;
 
 use crate::{
     app::App,
-    io, register_test,
+    io, no_params, register_test,
     test::{Test, TestError},
 };
+
+// Interrupts are toggled by setting/clearing specific bits in the MI Mask register.
+// This records what happens when a write both sets and clears the same interrupt.
+//
+// Findings:
+// - Clearing and setting an interrupt mask at the same time does nothing
 
 register_test!(MiMaskRegisterClearSet);
 
@@ -68,6 +68,23 @@ impl Test for MiMaskRegisterClearSet {
         app.value(
             &format!("Write {:08X} to the set MI Mask register", *params),
             io::read_uncached(mask_reg),
+        )
+    }
+}
+
+// This test record the value of the MI Version register.
+//
+// It might be different on different hardware revisions though.
+
+register_test!(MiVersionRegisterValue);
+
+impl Test for MiVersionRegisterValue {
+    no_params!();
+
+    fn run(_params: &Self::Params, app: &mut App) -> Result<(), TestError> {
+        app.value(
+            "MI Version register",
+            io::read_uncached(mi::Version::ADDRESS),
         )
     }
 }

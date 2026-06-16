@@ -1,5 +1,3 @@
-//! Dummy test to validate the recording mechanism and various helpers.
-
 use alloc::{format, vec::Vec};
 use arbitrary_int::u24;
 
@@ -8,6 +6,8 @@ use crate::{
     io, register_test,
     test::{Test, TestError},
 };
+
+// Dummy test to validate the recording mechanism and various helpers.
 
 register_test!(Dummy);
 
@@ -40,7 +40,8 @@ impl Test for Dummy {
 
         //
 
-        let ram_data = io::Buffer::<u8>::with_alignment(0x40, n64_specs::pi::DMA_RAM_ALIGNMENT);
+        let ram_data =
+            io::UncachedBuffer::<u8>::with_alignment(0x40, n64_specs::pi::DMA_RAM_ALIGNMENT);
 
         io::pi_dma(
             &io::PiDma {

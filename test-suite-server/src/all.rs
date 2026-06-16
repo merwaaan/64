@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Args;
 use tracing::instrument;
 
@@ -33,7 +33,9 @@ impl All {
 
         let tests = List::find_tests(&self.source.clone().into())?;
 
-        // TODO fail if empty
+        if tests.is_empty() {
+            bail!("no tests found that match {}", self.source);
+        }
 
         let test_sets = TestSet::new(&tests, &self.merge);
 

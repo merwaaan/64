@@ -11,8 +11,7 @@ use n64_specs::cpu::{instructions::*, registers::Register};
 use crate::{
     app::App,
     data::{corner_cases_16, corner_cases_64},
-    exceptions::{ExceptionHandler, ExceptionTracker, install_exception_handler},
-    no_params,
+    exceptions::{ExceptionHandler, install_exception_handler},
     program::Program,
     register_test,
     test::{Test, TestError},

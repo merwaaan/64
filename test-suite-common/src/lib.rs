@@ -2,6 +2,8 @@
 
 extern crate alloc;
 
+use core::fmt::{self, Display, Formatter};
+
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
@@ -19,9 +21,7 @@ pub const AUX_SERVER_READY_VALUE: u32 = 0xFF00_ABCD;
 /// Each test emits a sequence of steps.
 /// In record mode, the steps are sent to the server to build a compare-mode ROM.
 /// In replay mode, the steps are compared against the embedded recorded steps.
-#[derive(
-    Clone, PartialEq, Debug, Serialize, Deserialize, strum::Display, strum::EnumDiscriminants,
-)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, strum::EnumDiscriminants)]
 
 pub enum Step {
     /// Start of a test, with the test name.
@@ -38,6 +38,20 @@ pub enum Step {
     Value(u32),
     /// A 64-bit value relevant to the test
     Value64(u64),
+}
+
+impl Display for Step {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Step::StartTest(name) => write!(f, "StartTest({})", name),
+            Step::EndTest => write!(f, "EndTest"),
+            Step::StartTestCase(index) => write!(f, "StartTestCase({})", index),
+            Step::EndTestCase => write!(f, "EndTestCase"),
+            Step::Bool(value) => write!(f, "{}", value),
+            Step::Value(value) => write!(f, "{:08X}", value),
+            Step::Value64(value) => write!(f, "{:016X}", value),
+        }
+    }
 }
 
 /// Message sent from the N64 program to the server.

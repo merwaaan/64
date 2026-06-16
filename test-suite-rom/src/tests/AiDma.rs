@@ -1,10 +1,3 @@
-//! Records AI DMA transfers.
-//!
-//! We can't really record the DMA output but this records the effect of a transfer on the AI registers.
-//!
-//! Findings:
-//! - TODO 3 mystery bits set?
-
 // TODO latching
 // TODO queue while disabled
 
@@ -19,6 +12,13 @@ use crate::{
 };
 
 register_test!(AiDma);
+
+// Records AI DMA transfers.
+//
+// We can't really record the DMA output but this records the effect of a transfer on the AI registers.
+//
+// Findings:
+// - TODO 3 mystery bits set?
 
 #[derive(Debug)]
 pub struct Dma {

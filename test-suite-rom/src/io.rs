@@ -36,31 +36,29 @@ pub fn write_uncached<T>(offset: u32, value: T) {
     unsafe { uncached_ptr::<T>(offset).write_volatile(value) }
 }
 
-// Aligned heap buffer with a fixed capacity.
-// Reads and writes go through uncached memory, which is slower but also convenient to avoid caching issues.
-pub struct Buffer<T> {
+/// Aligned heap buffer with a fixed size.
+pub struct Buffer<T, const UNCACHED: bool> {
     data: NonNull<T>,
-    capacity: usize,
     size: usize,
     layout: Layout,
 }
 
-// TODO constructor with iter?
-impl<T> Buffer<T> {
-    pub fn new(capacity: usize) -> Self {
-        Self::with_alignment(capacity, 8)
-    }
+pub type CachedBuffer<T> = Buffer<T, false>;
+pub type UncachedBuffer<T> = Buffer<T, true>;
 
-    pub fn with_alignment(capacity: usize, alignment: usize) -> Self {
-        assert!(capacity > 0, "buffer capacity must be > 0");
+impl<T, const UNCACHED: bool> Buffer<T, UNCACHED> {
+    pub fn with_alignment(size: usize, alignment: usize) -> Self {
+        assert!(size > 0, "buffer size must be > 0");
 
         assert!(
             alignment.is_power_of_two(),
             "buffer alignment must be a power of two"
         );
 
-        let layout = Layout::array::<T>(capacity)
-            .and_then(|l| l.align_to(alignment))
+        let actual_alignment = alignment.max(core::mem::align_of::<T>());
+
+        let layout = Layout::array::<T>(size)
+            .and_then(|l| l.align_to(actual_alignment))
             .and_then(|l| Ok(l.pad_to_align()))
             .expect("invalid buffer layout");
 
@@ -72,14 +70,31 @@ impl<T> Buffer<T> {
 
         Self {
             data: unsafe { NonNull::new_unchecked(ptr.cast::<T>()) },
-            capacity,
-            size: 0,
+            size,
             layout,
         }
     }
 
-    pub fn capacity(&self) -> usize {
-        self.capacity
+    pub fn from_slice(values: &[T]) -> Self
+    where
+        T: Copy,
+    {
+        Self::from_slice_with_alignment(values, 8)
+    }
+
+    pub fn from_slice_with_alignment(values: &[T], alignment: usize) -> Self
+    where
+        T: Copy,
+    {
+        assert!(!values.is_empty(), "buffer source slice must not be empty");
+
+        let mut buffer = Self::with_alignment(values.len(), alignment);
+
+        for (index, value) in values.iter().copied().enumerate() {
+            buffer.set(index, value);
+        }
+
+        buffer
     }
 
     pub fn len(&self) -> usize {
@@ -90,14 +105,42 @@ impl<T> Buffer<T> {
         self.size == 0
     }
 
-    fn uncached_item(&self, index: usize) -> *mut T {
-        let byte_offset = index
-            .checked_mul(core::mem::size_of::<T>())
-            .expect("buffer index overflow"); // TODO not the actual error
+    fn check_bounds(&self, index: usize) {
+        assert!(
+            index < self.size,
+            "buffer index out of bounds ({}/{})",
+            index,
+            self.size
+        );
+    }
 
-        let physical = physical_addr(self.data.as_ptr() as u32).wrapping_add(byte_offset as u32);
+    pub fn item_ptr(&self, index: usize) -> *mut T {
+        self.check_bounds(index);
 
-        (n64_specs::map::Segment::KSEG1 as u32 | physical) as *mut T
+        if UNCACHED {
+            let byte_offset = index
+                .checked_mul(core::mem::size_of::<T>())
+                .expect("buffer index overflow");
+
+            let physical =
+                physical_addr(self.data.as_ptr() as u32).wrapping_add(byte_offset as u32);
+
+            (n64_specs::map::Segment::KSEG1 as u32 | physical) as *mut T
+        } else {
+            unsafe { self.data.as_ptr().add(index) }
+        }
+    }
+
+    pub fn get(&self, index: usize) -> T {
+        self.check_bounds(index);
+
+        unsafe { self.item_ptr(index).read_volatile() }
+    }
+
+    pub fn set(&mut self, index: usize, value: T) {
+        self.check_bounds(index);
+
+        unsafe { self.item_ptr(index).write_volatile(value) };
     }
 
     pub fn as_slice(&self) -> &[T] {
@@ -105,49 +148,11 @@ impl<T> Buffer<T> {
     }
 
     pub fn as_ptr(&self) -> *mut T {
-        self.uncached_item(0)
-    }
-
-    pub fn get(&self, index: usize) -> T {
-        unsafe { self.uncached_item(index).read_volatile() }
-    }
-
-    fn set(&mut self, index: usize, value: T) {
-        assert!(
-            index < self.size,
-            "buffer index out of bounds ({}/{})",
-            index,
-            self.size
-        );
-
-        unsafe { self.uncached_item(index).write_volatile(value) };
-    }
-
-    pub fn push(&mut self, value: T) {
-        assert!(
-            self.size < self.capacity,
-            "buffer capacity exceeded ({})",
-            self.capacity
-        );
-
-        let old_size = self.size;
-        self.size += 1;
-        self.set(old_size, value);
-    }
-
-    pub fn pop(&mut self) -> T {
-        assert!(!self.is_empty(), "buffer is empty");
-
-        self.size -= 1;
-        self.get(self.size)
-    }
-
-    pub fn clear(&mut self) {
-        self.size = 0;
+        self.item_ptr(0)
     }
 }
 
-impl<T> Drop for Buffer<T> {
+impl<T, const UNCACHED: bool> Drop for Buffer<T, UNCACHED> {
     fn drop(&mut self) {
         unsafe {
             dealloc(self.data.as_ptr().cast(), self.layout);

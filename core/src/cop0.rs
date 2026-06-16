@@ -287,6 +287,7 @@ impl Cop0 {
     }
 
     pub fn set_ll_addr(&mut self, value: u32) {
+        // TODO physical or not?
         self.regs[Register::LLAddr as usize].set(value >> 4);
     }
 

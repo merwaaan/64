@@ -1,8 +1,3 @@
-//! Records how the RSP DMEM/IMEM is mirrored over the whole range it's accessible from.
-//!
-//! No surprises:
-//! - the memory is mirrored 32 times, every 0x2000 bytes, without unexpected patterns
-
 use alloc::format;
 use n64_specs::rsp;
 
@@ -11,6 +6,11 @@ use crate::{
     io, no_params, register_test,
     test::{Test, TestError},
 };
+
+// Records how the RSP DMEM/IMEM is mirrored over the whole range it's accessible from.
+//
+// No surprises:
+// - the memory is mirrored 32 times, every 0x2000 bytes, without unexpected patterns
 
 register_test!(RspMemoryMirroring);
 
