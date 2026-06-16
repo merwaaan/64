@@ -742,18 +742,20 @@ impl Instruction for Lwr {
         let addr_base = addr & !3;
         let addr_offset = addr & 3;
 
-        let data = s.read(Address::v(addr_base))?;
+        let data: u32 = s.read(Address::v(addr_base))?;
 
-        let word = if addr_offset == 3 {
-            data
-        } else {
-            let mut word = s.cpu.regs.gpr[operands.rt()].get();
-            word &= !(0xFFFF_FFFF >> (24 - 8 * addr_offset));
-            word |= data >> (24 - 8 * addr_offset);
-            word
-        };
+        let mut reg: u64 = s.cpu.regs.gpr[operands.rt()].get64();
+        reg &= !(0xFFFF_FFFF >> (24 - 8 * addr_offset));
+        reg |= data as u64 >> (24 - 8 * addr_offset);
 
-        s.cpu.regs.gpr[operands.rt()].set(word);
+        // Offset = 3 or 7: sign-extend the 32-bit value
+        if addr_offset == 3 || addr_offset == 7 {
+            s.cpu.regs.gpr[operands.rt()].set(reg as u32);
+        }
+        // Otherwise, keep the left part of the register unchanged
+        else {
+            s.cpu.regs.gpr[operands.rt()].set64(reg);
+        }
 
         Ok(None)
     }
