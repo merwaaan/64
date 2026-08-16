@@ -7,6 +7,8 @@ use crate::{
     test::{Test, TestError},
 };
 
+// TODO rsp status toggle bits conflicts
+
 // Records the RSP registers masking when written to.
 //
 // Findings:
@@ -18,16 +20,16 @@ use crate::{
 register_test!(RspRegistersMasking);
 
 impl Test for RspRegistersMasking {
-    type Params = rsp::Register;
+    type Params = rsp::registers::Register;
 
     fn cases() -> impl Iterator<Item = Self::Params> {
         [
-            rsp::Register::DmaRspAddress,
-            rsp::Register::DmaRamAddress,
-            // rsp::Register::DmaReadLength, // TODO setup DMA? possible to have empty DMA?
-            // rsp::Register::DmaWriteLength,
-            rsp::Register::DmaFull,
-            rsp::Register::DmaBusy,
+            rsp::registers::Register::DmaRspAddress,
+            rsp::registers::Register::DmaRamAddress,
+            // rsp::registers::Register::DmaReadLength, // TODO setup DMA? possible to have empty DMA?
+            // rsp::registers::Register::DmaWriteLength,
+            rsp::registers::Register::DmaFull,
+            rsp::registers::Register::DmaBusy,
         ]
         .into_iter()
 
@@ -38,7 +40,7 @@ impl Test for RspRegistersMasking {
         // We don't test the Semaphore register as it has its own exotic behavior.
     }
 
-    fn run(reg: &rsp::Register, app: &mut App) -> Result<(), TestError> {
+    fn run(reg: &rsp::registers::Register, app: &mut App) -> Result<(), TestError> {
         io::write_uncached(reg.address(), 0x0000_0000u32);
 
         app.value(
@@ -71,8 +73,8 @@ impl Test for RspRegistersMirroring {
         // TODO no readback of addr regs?
 
         io::write_uncached(
-            rsp::Status::ADDRESS,
-            rsp::StatusWrite::default()
+            rsp::registers::Status::ADDRESS,
+            rsp::registers::StatusWrite::default()
                 .with_clear_sig7(true)
                 .with_set_sig6(true)
                 .with_clear_sig5(true)
@@ -89,7 +91,7 @@ impl Test for RspRegistersMirroring {
 
         // TODO DMA to set addr regs
 
-        io::read_uncached::<u32>(rsp::Semaphore::ADDRESS); // Switch the semaphore to 1
+        io::read_uncached::<u32>(rsp::registers::Semaphore::ADDRESS); // Switch the semaphore to 1
 
         // Read the whole range
 
@@ -136,7 +138,7 @@ impl Test for RspSemaphoreRegister {
     }
 
     fn run(value: &u32, app: &mut App) -> Result<(), TestError> {
-        let semaphore_reg = rsp::Semaphore::ADDRESS;
+        let semaphore_reg = rsp::registers::Semaphore::ADDRESS;
 
         // Clear and read a few times
 

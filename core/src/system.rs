@@ -163,6 +163,7 @@ impl System {
         // s.breakpoints.add(0x80000100);
         // s.breakpoints.add(0x80000180);
         // s.breakpoints.add(0xA400_1000);
+        // s.breakpoints.add(0xA400_1030);
 
         // Schedule the first scanline
 

@@ -1,6 +1,6 @@
-// Recognizable values to spot uninitialized data
-
 use n64_specs::cpu::registers::Register;
+
+// Recognizable values to spot uninitialized data
 
 pub const INIT_16: u16 = 0x0BAD;
 pub const INIT_32: u32 = 0x0BAD_0BAD;
@@ -9,7 +9,7 @@ pub const INIT_64: u64 = 0x0BAD_0BAD_0BAD_0BAD;
 // Notable corner case values for tests.
 // Defining them once here to avoid repeating them in each test.
 
-pub const CORNER_CASES_16: &[u16] = &[
+const CORNER_CASES_16: &[u16] = &[
     // Start
     0x0000, //
     0x0001, //
@@ -22,7 +22,7 @@ pub const CORNER_CASES_16: &[u16] = &[
     0xFFFF,
 ];
 
-pub const CORNER_CASES_32: &[u32] = &[
+const CORNER_CASES_32: &[u32] = &[
     // Start
     0x0000_0000,
     0x0000_0001,
@@ -42,7 +42,7 @@ pub const CORNER_CASES_32: &[u32] = &[
     0xFFFF_FFFF,
 ];
 
-pub const CORNER_CASES_64: &[u64] = &[
+const CORNER_CASES_64: &[u64] = &[
     // Start
     0x0000_0000_0000_0000,
     0x0000_0000_0000_0001,
@@ -77,28 +77,45 @@ pub fn corner_cases_64(extra: &[u64]) -> impl Iterator<Item = u64> + Clone {
     CORNER_CASES_64.iter().copied().chain(extra.iter().copied())
 }
 
+// Trait to represent register values of varying widths.
+
+pub trait RegValue: Copy {
+    const INIT: Self;
+    const ZERO: Self;
+}
+
+impl RegValue for u32 {
+    const INIT: Self = INIT_32;
+    const ZERO: Self = 0;
+}
+
+impl RegValue for u64 {
+    const INIT: Self = INIT_64;
+    const ZERO: Self = 0;
+}
+
 // Helper to generate register combinations.
 // Include standard cases (eg. separate RD, RT, RS) as well as corner cases (R0, RT = RS, etc).
 
 #[derive(Clone, Copy, Debug)]
-pub struct RdRtRs {
+pub struct RdRtRs<T: RegValue> {
     pub rd: Register,
-    pub rd_value: u64,
+    pub rd_value: T,
 
     pub rt: Register,
-    pub rt_value: u64,
+    pub rt_value: T,
 
     pub rs: Register,
-    pub rs_value: u64,
+    pub rs_value: T,
 }
 
-pub fn rd_rt_rs_combinations(
-    values: impl Iterator<Item = u64> + Clone,
-) -> impl Iterator<Item = RdRtRs> + Clone {
+pub fn rd_rt_rs_combinations<T: RegValue>(
+    values: impl Iterator<Item = T> + Clone,
+) -> impl Iterator<Item = RdRtRs<T>> + Clone {
     let basic =
         itertools::iproduct!(values.clone(), values.clone()).map(|(rs_value, rt_value)| RdRtRs {
             rd: Register::T0,
-            rd_value: INIT_64,
+            rd_value: T::INIT,
             rs: Register::T1,
             rs_value,
             rt: Register::T2,
@@ -108,7 +125,7 @@ pub fn rd_rt_rs_combinations(
     let rd_is_r0 =
         itertools::iproduct!(values.clone(), values.clone()).map(|(rs_value, rt_value)| RdRtRs {
             rd: Register::R0,
-            rd_value: 0,
+            rd_value: T::ZERO,
             rs: Register::T0,
             rs_value,
             rt: Register::T1,
@@ -117,20 +134,20 @@ pub fn rd_rt_rs_combinations(
 
     let rs_is_r0 = values.clone().map(|rt_value| RdRtRs {
         rd: Register::T0,
-        rd_value: INIT_64,
+        rd_value: T::INIT,
         rs: Register::R0,
-        rs_value: 0,
+        rs_value: T::ZERO,
         rt: Register::T1,
         rt_value,
     });
 
     let rt_is_r0 = values.clone().map(|rs_value| RdRtRs {
         rd: Register::T0,
-        rd_value: INIT_64,
+        rd_value: T::INIT,
         rs: Register::T1,
         rs_value,
         rt: Register::R0,
-        rt_value: 0,
+        rt_value: T::ZERO,
     });
 
     let rd_is_rt =
@@ -155,7 +172,7 @@ pub fn rd_rt_rs_combinations(
 
     let rs_is_rt = values.clone().map(|rt_value| RdRtRs {
         rd: Register::T0,
-        rd_value: INIT_64,
+        rd_value: T::INIT,
         rs: Register::T1,
         rs_value: rt_value,
         rt: Register::T1,
@@ -182,17 +199,17 @@ pub fn rd_rt_rs_combinations(
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct RtRs {
+pub struct RtRs<T: RegValue> {
     pub rt: Register,
-    pub rt_value: u64,
+    pub rt_value: T,
 
     pub rs: Register,
-    pub rs_value: u64,
+    pub rs_value: T,
 }
 
-pub fn rt_rs_combinations(
-    reg_values: impl Iterator<Item = u64> + Clone,
-) -> impl Iterator<Item = RtRs> + Clone {
+pub fn rt_rs_combinations<T: RegValue>(
+    reg_values: impl Iterator<Item = T> + Clone,
+) -> impl Iterator<Item = RtRs<T>> + Clone {
     let basic =
         itertools::iproduct!(reg_values.clone(), reg_values.clone()).map(|(rs_value, rt_value)| {
             RtRs {
@@ -207,12 +224,12 @@ pub fn rt_rs_combinations(
         rs: Register::T0,
         rs_value,
         rt: Register::R0,
-        rt_value: 0,
+        rt_value: T::ZERO,
     });
 
     let rs_is_r0 = reg_values.clone().map(|rt_value| RtRs {
         rs: Register::R0,
-        rs_value: 0,
+        rs_value: T::ZERO,
         rt: Register::T0,
         rt_value,
     });
@@ -228,20 +245,20 @@ pub fn rt_rs_combinations(
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct RtRsImm {
+pub struct RtRsImm<T: RegValue> {
     pub rt: Register,
-    pub rt_value: u64,
+    pub rt_value: T,
 
     pub rs: Register,
-    pub rs_value: u64,
+    pub rs_value: T,
 
     pub imm: u16,
 }
 
-pub fn rt_rs_imm_combinations(
-    reg_values: impl Iterator<Item = u64> + Clone,
+pub fn rt_rs_imm_combinations<T: RegValue>(
+    reg_values: impl Iterator<Item = T> + Clone,
     imm_values: impl Iterator<Item = u16> + Clone,
-) -> impl Iterator<Item = RtRsImm> + Clone {
+) -> impl Iterator<Item = RtRsImm<T>> + Clone {
     itertools::iproduct!(rt_rs_combinations(reg_values.clone()), imm_values.clone()).map(
         |(
             RtRs {

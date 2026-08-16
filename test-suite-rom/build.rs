@@ -21,7 +21,7 @@ fn main() {
 
     let test_count = test_paths.len();
 
-    let test_runs = test_paths
+    let test_runs: String = test_paths
         .iter()
         .map(|path| {
             format!(

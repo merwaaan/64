@@ -7,11 +7,11 @@ use n64_specs::cpu::{instructions::*, registers::Register};
 use crate::io;
 
 /// TODO doc
-pub struct Program {
+pub struct CpuProgram {
     instructions: Vec<u32>,
 }
 
-impl Program {
+impl CpuProgram {
     pub fn new() -> Self {
         Self {
             instructions: Vec::new(),

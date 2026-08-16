@@ -155,11 +155,11 @@ impl Ai {
             return;
         }
 
-        log::info!(
-            "AI: DMA {:X} bytes from RAM {:08X}",
-            slot.length,
-            slot.address,
-        );
+        // log::info!(
+        //     "AI: DMA {:X} bytes from RAM {:08X}",
+        //     slot.length,
+        //     slot.address,
+        // );
 
         // Push RAM data to the audio renderer
 

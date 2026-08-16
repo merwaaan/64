@@ -1,15 +1,13 @@
 use alloc::format;
-use anyhow::anyhow;
 use core::arch::asm;
 use n64_specs::cpu::{instructions::*, registers::Register};
 
 use crate::{
     app::App,
+    cpu_program::CpuProgram,
     data::{INIT_64, corner_cases_16},
     exceptions::{ExceptionHandler, install_exception_handler},
-    io,
-    program::Program,
-    register_test,
+    io, register_test,
     test::{Test, TestError},
 };
 // TODO generalize
@@ -101,7 +99,7 @@ macro_rules! load_variant {
                 cause: 0,
             });
 
-            Program::new()
+            CpuProgram::new()
                 .set_reg64(params.rt, INIT_64)
                 .set_reg64(Register::T1, ram_mid as i32 as u64)
                 .push(
@@ -269,7 +267,7 @@ macro_rules! store_variant {
                 cause: 0,
             });
 
-            Program::new()
+            CpuProgram::new()
                 .set_reg64(params.rt, 0x1234_5678_ABCD_EF01)
                 .set_reg64(Register::T1, ram_mid as i32 as u64)
                 .push(

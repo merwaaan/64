@@ -222,20 +222,20 @@ pub fn rsp_dma(dma: &RspDma) {
     // TODO wait for other DMA
 
     write_uncached(
-        n64_specs::rsp::DmaRspAddress::ADDRESS,
+        n64_specs::rsp::registers::DmaRspAddress::ADDRESS,
         dma.destination_address,
     );
 
-    write_uncached(n64_specs::rsp::DmaRamAddress::ADDRESS, dma.source_address);
+    write_uncached(n64_specs::rsp::registers::DmaRamAddress::ADDRESS, dma.source_address);
 
     let start_reg_address = match dma.direction {
-        RspDmaDirection::RamToRsp => n64_specs::rsp::DmaReadLength::ADDRESS,
-        RspDmaDirection::RspToRam => n64_specs::rsp::DmaWriteLength::ADDRESS,
+        RspDmaDirection::RamToRsp => n64_specs::rsp::registers::DmaReadLength::ADDRESS,
+        RspDmaDirection::RspToRam => n64_specs::rsp::registers::DmaWriteLength::ADDRESS,
     };
 
     write_uncached(
         start_reg_address,
-        n64_specs::rsp::DmaReadLength::default()
+        n64_specs::rsp::registers::DmaReadLength::default()
             .with_rows(dma.rows)
             .with_length(dma.length)
             .with_skip(dma.skip)

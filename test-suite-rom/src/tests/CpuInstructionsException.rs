@@ -10,9 +10,9 @@ use n64_specs::cpu::{instructions::*, registers::Register};
 
 use crate::{
     app::App,
+    cpu_program::CpuProgram,
     data::{corner_cases_16, corner_cases_64},
     exceptions::{ExceptionHandler, install_exception_handler},
-    program::Program,
     register_test,
     test::{Test, TestError},
 };
@@ -121,7 +121,7 @@ macro_rules! trap_reg {
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
                 let handler = install_exception_handler(TrapCatcher { occurred: false });
 
-                Program::new()
+                CpuProgram::new()
                     .set_reg64(params.rs, params.rs_value)
                     .set_reg64(params.rt, params.rt_value)
                     .push(
@@ -191,7 +191,7 @@ macro_rules! trap_reg_code {
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
                 let handler = install_exception_handler(TrapCatcher { occurred: false });
 
-                Program::new()
+                CpuProgram::new()
                     .set_reg64(Register::T0, $rs_value)
                     .set_reg64(Register::T1, $rt_value)
                     .push(
@@ -279,7 +279,7 @@ macro_rules! trap_imm {
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
                 let handler = install_exception_handler(TrapCatcher { occurred: false });
 
-                Program::new()
+                CpuProgram::new()
                     .set_reg64(params.rs, params.rs_value)
                     .push(
                         $instr::default()

@@ -42,7 +42,7 @@ impl Test for RspMemoryMirroring {
             let mirror_start = mem_start + mirror * 0x2000;
 
             for i in (0..rsp::DMEM_SIZE + rsp::IMEM_SIZE).step_by(4) {
-                io::write_uncached(mirror_start + i, mirror);
+                io::write_uncached(mirror_start + i, mirror); // TODO varying val?
             }
 
             app.memory_region(

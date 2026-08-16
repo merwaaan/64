@@ -62,7 +62,7 @@ pub struct Sp {
     pub mem: Vec<u8>, // TODO vis
 
     /// Control registers
-    pub control_regs: specs::rsp::Registers, // TODO vis
+    pub control_regs: specs::rsp::registers::Registers, // TODO vis
 
     /// Scalar registers
     pub sregs: Registers, //TODO vis
@@ -96,7 +96,7 @@ pub struct Sp {
 
 impl Default for Sp {
     fn default() -> Self {
-        let mut control_regs = specs::rsp::Registers::default();
+        let mut control_regs = specs::rsp::registers::Registers::default();
         control_regs.status.set_halted(true);
 
         Self {
@@ -193,7 +193,7 @@ impl Sp {
 
             // Reading the semaphore returns the current value and set it to 1
 
-            if offset == specs::rsp::Register::Semaphore.offset() {
+            if offset == specs::rsp::registers::Register::Semaphore.offset() {
                 self.control_regs.semaphore.set_value(true);
             }
 
@@ -232,7 +232,7 @@ impl Sp {
             //let reg = ((addr.relative() & n64_specs::rsp::REGISTERS_MASK) >> 2) as u32;
 
             match offset {
-                specs::rsp::DmaRspAddress::OFFSET => {
+                specs::rsp::registers::DmaRspAddress::OFFSET => {
                     // 11-bit SP address.
                     // Bits 0-2 cannot be written to so the address is always aligned to 8 bytes.
                     // Bit 12 is the "bank" (0 = DMEM, 1 = IMEM).
@@ -247,7 +247,7 @@ impl Sp {
                         .dma_rsp_address
                         .set_value(s.sp.control_regs.dma_rsp_address.value() & u13::new(0x1FF8u16));
                 }
-                specs::rsp::DmaRamAddress::OFFSET => {
+                specs::rsp::registers::DmaRamAddress::OFFSET => {
                     // 24-bit RAM address.
                     // Bits 0-2 cannot be written to so the address is always aligned to 8 bytes.
 
@@ -261,7 +261,7 @@ impl Sp {
                         s.sp.control_regs.dma_ram_address.value() & u24::new(0x00FF_FFF8),
                     );
                 }
-                specs::rsp::DmaReadLength::OFFSET => {
+                specs::rsp::registers::DmaReadLength::OFFSET => {
                     // TODO only write on completion if pending? (should read back the ongoing or last DMA)
 
                     let regs_slice =
@@ -278,7 +278,7 @@ impl Sp {
                         },
                     );
                 }
-                specs::rsp::DmaWriteLength::OFFSET => {
+                specs::rsp::registers::DmaWriteLength::OFFSET => {
                     // TODO only write on completion if pending? (should read back the ongoing or last DMA)
 
                     let regs_slice =
@@ -295,7 +295,7 @@ impl Sp {
                         },
                     );
                 }
-                specs::rsp::Status::OFFSET => {
+                specs::rsp::registers::Status::OFFSET => {
                     // TODO simplify and just use struct fields directly?
 
                     let mut status = s.sp.control_regs.status.raw_value();
@@ -359,9 +359,9 @@ impl Sp {
                     clear_set!(1 << 21, 1 << 22, 1 << 13); // 6
                     clear_set!(1 << 23, 1 << 24, 1 << 14); // 7
 
-                    s.sp.control_regs.status = specs::rsp::Status::new_with_raw_value(status);
+                    s.sp.control_regs.status = specs::rsp::registers::Status::new_with_raw_value(status);
                 }
-                specs::rsp::Semaphore::OFFSET => {
+                specs::rsp::registers::Semaphore::OFFSET => {
                     // Writes clear the semaphore
                     s.sp.control_regs.semaphore.set_value(false);
                 }

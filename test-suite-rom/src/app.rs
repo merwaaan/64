@@ -312,7 +312,7 @@ impl App {
                 );
 
                 self.print(&message, Some(TextStyle::with_color(ERROR)))?;
-                panic!("end"); // TODO temp
+                //panic!("end"); // TODO temp
                 // Skip to the next test/test case
 
                 use anyhow::Context;

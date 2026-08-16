@@ -19,7 +19,7 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct SpUpdate {
     pub pc: u12,
-    pub regs: n64_specs::rsp::Registers,
+    pub regs: n64_specs::rsp::registers::Registers,
     pub regs2: sp::Registers,
     pub vregs: [i16x8; 32],
     pub vacc: i64x8,
@@ -81,11 +81,11 @@ impl ChildWidget for SpWidget {
                 ui[1].vertical(|ui| {
                     // TODO fix
 
-                    // let mut show_reg = |reg: n64_specs::rsp::Register| {
+                    // let mut show_reg = |reg: n64_specs::rsp::registers::Register| {
                     //     reg32(ui, format!("{:>10}", reg), reg.raw_value());
                     // };
 
-                    // n64_specs::rsp::Register::iter().for_each(|reg| {
+                    // n64_specs::rsp::registers::Register::iter().for_each(|reg| {
                     //     show_reg(reg);
                     // });
 

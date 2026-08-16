@@ -154,6 +154,7 @@ impl Exception {
 
 /// Checks address alignment.
 /// Returns an exception if unaligned, convenient for instruction implementations.
+/// // TODO pass alignment instead of mask
 #[macro_export]
 macro_rules! check_aligned {
     (load, $addr:expr, $mask:expr) => {

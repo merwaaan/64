@@ -10,7 +10,7 @@ Existing test suites like [n64-systemtest](https://github.com/lemmy-64/n64-syste
 
 1. Implementing a test requires _emulating_ part of the system to formulate assertions.
 2. The test must be ran on real hardware to verify its implementation.
-3. The test can then be ran on emulators to check accuracy against hardware.
+3. The test can then be ran on emulators to check accuracy compared to real hardware.
 
 This project takes a complementary data-driven approach where data is recorded _en masse_ on real hardware:
 
@@ -77,7 +77,7 @@ By default, **each** available test is built as a separate ROM.
 
 **Options**
 
-- `[exact name]`: select the test named `[exact name]`, can be the test name only or `ModuleName::TestName`.
+- `[exact name]`: select the test named `[exact name]`, can be the full test name `TestName` or `ModuleName::TestName`.
 - `--match [keyword]`: selects tests that contain `keyword` in their `ModuleName::TestName`, multiple `--match` can be specified.
 - `--merge [rom name]`: produces a single `[rom name].z64` ROM running the selected tests in sequence.
 

@@ -1,49 +1,40 @@
-//! AND, OR, NOR, XOR
-//! ANDI, ORI, XORI
-
 use alloc::format;
-use n64_specs::cpu::{instructions::*, registers::Register};
+use n64_specs::{
+    cpu::registers::Register as CpuRegister,
+    rsp::{DMEM_START, instructions::*},
+};
 
 use crate::{
     app::App,
-    cpu_program::CpuProgram,
     data::{
-        RdRtRs, RtRsImm, corner_cases_16, corner_cases_64, rd_rt_rs_combinations,
+        RdRtRs, RtRsImm, corner_cases_16, corner_cases_32, rd_rt_rs_combinations,
         rt_rs_imm_combinations,
     },
     io, register_test,
+    rsp_program::RspProgram,
     test::{Test, TestError},
 };
 
-const REG_EXTRA_VALUES: &[u64] = &[
-    0x0000_0000_0000_CD15,
-    0x0000_0000_2640_044E,
-    0x0000_0000_5555_5555,
-    0x0000_0000_AAAA_AAAA,
-    0x0000_0000_DBCA_0000,
-    0x105C_00CE_0000_0000,
-    0xC000_FFFF_0000_0007,
-    0xFFFF_002F_89AB_F51F,
-];
+const REG_EXTRA_VALUES: &[u32] = &[0x0000_0A7E, 0x1F00_9BD1, 0xABCD_0000, 0xDDE1_94AA];
+
+// AND, OR, NOR, XOR
 
 macro_rules! reg {
     ($test:ident, $instr:ident) => {
         impl Test for $test {
-            type Params = RdRtRs<u64>;
+            type Params = RdRtRs<u32>;
 
             fn cases() -> impl Iterator<Item = Self::Params> {
-                let reg_values = corner_cases_64(REG_EXTRA_VALUES);
+                let reg_values = corner_cases_32(REG_EXTRA_VALUES);
 
                 rd_rt_rs_combinations(reg_values)
             }
 
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-                let result = io::CachedBuffer::<u64>::from_slice(&[0]);
-
-                CpuProgram::new()
-                    .set_reg64(params.rd, params.rd_value)
-                    .set_reg64(params.rs, params.rs_value)
-                    .set_reg64(params.rt, params.rt_value)
+                RspProgram::new()
+                    .set_reg(params.rd, params.rd_value)
+                    .set_reg(params.rs, params.rs_value)
+                    .set_reg(params.rt, params.rt_value)
                     .push(
                         $instr::default()
                             .with_rd(params.rd.into())
@@ -51,10 +42,18 @@ macro_rules! reg {
                             .with_rt(params.rt.into())
                             .into(),
                     )
-                    .store_reg64(params.rd, result.as_ptr() as u32, Register::T7)
+                    .push(
+                        Sw::default()
+                            .with_rt(params.rd.into())
+                            .with_base(CpuRegister::R0.into())
+                            .with_offset(0)
+                            .into(),
+                    )
                     .run();
 
-                app.value64(
+                let result = io::read_uncached(DMEM_START);
+
+                app.value(
                     &format!(
                         "{} {}, {}={:08X}, {}={:08X}",
                         stringify!($instr).to_uppercase(),
@@ -64,7 +63,7 @@ macro_rules! reg {
                         params.rt,
                         params.rt_value,
                     ),
-                    result.get(0),
+                    result,
                 )
             }
         }
@@ -83,21 +82,15 @@ reg!(CpuInstructionNor, Nor);
 register_test!(CpuInstructionXor);
 reg!(CpuInstructionXor, Xor);
 
-#[derive(Debug)]
-pub struct ImmediateParam {
-    rt: Register,
-    rs: Register,
-    rs_value: u64,
-    imm: u16,
-}
+// ANDI, ORI, XORI
 
 macro_rules! imm {
     ($test:ident, $instr:ident) => {
         impl Test for $test {
-            type Params = RtRsImm<u64>;
+            type Params = RtRsImm<u32>;
 
             fn cases() -> impl Iterator<Item = Self::Params> {
-                let reg_values = corner_cases_64(REG_EXTRA_VALUES);
+                let reg_values = corner_cases_32(REG_EXTRA_VALUES);
 
                 let imm_values = corner_cases_16(&[0x1002, 0xCD15, 0x044E, 0x5555]);
 
@@ -105,11 +98,9 @@ macro_rules! imm {
             }
 
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-                let result = io::CachedBuffer::<u64>::from_slice(&[0]);
-
-                CpuProgram::new()
-                    .set_reg64(params.rt, params.rt_value)
-                    .set_reg64(params.rs, params.rs_value)
+                RspProgram::new()
+                    .set_reg(params.rt, params.rt_value)
+                    .set_reg(params.rs, params.rs_value)
                     .push(
                         $instr::default()
                             .with_rt(params.rt.into())
@@ -117,10 +108,18 @@ macro_rules! imm {
                             .with_imm(params.imm)
                             .into(),
                     )
-                    .store_reg64(params.rt, result.as_ptr() as u32, Register::T7)
+                    .push(
+                        Sw::default()
+                            .with_rt(params.rt.into())
+                            .with_base(CpuRegister::R0.into())
+                            .with_offset(0)
+                            .into(),
+                    )
                     .run();
 
-                app.value64(
+                let result = io::read_uncached(DMEM_START);
+
+                app.value(
                     &format!(
                         "{} {}, {}={:08X}, {:08X}",
                         stringify!($instr).to_uppercase(),
@@ -129,7 +128,7 @@ macro_rules! imm {
                         params.rs_value,
                         params.imm,
                     ),
-                    result.get(0),
+                    result,
                 )
             }
         }

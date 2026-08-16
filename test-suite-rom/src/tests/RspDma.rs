@@ -141,7 +141,7 @@ impl Test for RspDmaFromRam {
         }
 
         // Prepare some data in RAM
-        // (allocate just enough space to speed up smaller tests)
+        // (allocate just enough space, to speed up smaller tests)
 
         let total =
             dma.ram_offset + (dma.rows as u32 + 1) * ((dma.length | 7) + 1 + dma.skip as u32);
@@ -154,23 +154,23 @@ impl Test for RspDmaFromRam {
 
         // DMA
 
-        io::write_uncached(rsp::DmaRspAddress::ADDRESS, dma.rsp_offset);
+        io::write_uncached(rsp::registers::DmaRspAddress::ADDRESS, dma.rsp_offset);
 
         io::write_uncached(
-            rsp::DmaRamAddress::ADDRESS,
+            rsp::registers::DmaRamAddress::ADDRESS,
             io::physical_addr(ram_data.as_ptr() as u32 + dma.ram_offset),
         );
 
         io::write_uncached(
-            rsp::DmaReadLength::ADDRESS,
-            rsp::DmaReadLength::default()
+            rsp::registers::DmaReadLength::ADDRESS,
+            rsp::registers::DmaReadLength::default()
                 .with_rows(dma.rows)
                 .with_length(u12::from_u32(dma.length))
                 .with_skip(u12::new(dma.skip))
                 .raw_value(),
         );
 
-        io::wait_until(|| io::read_uncached::<u32>(rsp::DmaBusy::ADDRESS) == 0);
+        io::wait_until(|| io::read_uncached::<u32>(rsp::registers::DmaBusy::ADDRESS) == 0);
 
         // Record the whole RSP memory
 
@@ -209,33 +209,33 @@ impl Test for RspDmaFromRam {
 //             skip: u12::new(0),
 //         });
 
-//         io::wait_until(|| io::read_uncached(rsp::DmaBusy::ADDRESS) == 0);
+//         io::wait_until(|| io::read_uncached(rsp::registers::DmaBusy::ADDRESS) == 0);
 
 //         app.comment("State after initial DMA")?;
-//         app.value(io::read_uncached(rsp::DmaBusy::ADDRESS))?;
-//         app.value(io::read_uncached(rsp::DmaRspAddress::ADDRESS))?;
-//         app.value(io::read_uncached(rsp::DmaRamAddress::ADDRESS))?;
-//         app.value(io::read_uncached(rsp::DmaReadLength::ADDRESS))?;
-//         //app.push_value(io::read_uncached(rsp::DmaWriteLength::ADDRESS))?;
+//         app.value(io::read_uncached(rsp::registers::DmaBusy::ADDRESS))?;
+//         app.value(io::read_uncached(rsp::registers::DmaRspAddress::ADDRESS))?;
+//         app.value(io::read_uncached(rsp::registers::DmaRamAddress::ADDRESS))?;
+//         app.value(io::read_uncached(rsp::registers::DmaReadLength::ADDRESS))?;
+//         //app.push_value(io::read_uncached(rsp::registers::DmaWriteLength::ADDRESS))?;
 
 //         // Setup another DMA transfer without starting it
 
-//         io::write_uncached(rsp::DmaRspAddress::ADDRESS, 0);
+//         io::write_uncached(rsp::registers::DmaRspAddress::ADDRESS, 0);
 //         app.comment("Set RSP address")?;
-//         app.value(io::read_uncached(rsp::DmaRspAddress::ADDRESS))?;
-//         app.value(io::read_uncached(rsp::DmaRamAddress::ADDRESS))?;
+//         app.value(io::read_uncached(rsp::registers::DmaRspAddress::ADDRESS))?;
+//         app.value(io::read_uncached(rsp::registers::DmaRamAddress::ADDRESS))?;
 
-//         io::write_uncached(rsp::DmaRamAddress::ADDRESS, 0);
+//         io::write_uncached(rsp::registers::DmaRamAddress::ADDRESS, 0);
 //         app.comment("Set RAM address")?;
-//         app.value(io::read_uncached(rsp::DmaRspAddress::ADDRESS))?;
-//         app.value(io::read_uncached(rsp::DmaRamAddress::ADDRESS))?;
+//         app.value(io::read_uncached(rsp::registers::DmaRspAddress::ADDRESS))?;
+//         app.value(io::read_uncached(rsp::registers::DmaRamAddress::ADDRESS))?;
 
 //         // Start the transfer
 
 //         app.comment("Start DMA")?;
 //         io::write_uncached(
-//             rsp::DmaReadLength::ADDRESS,
-//             rsp::DmaReadLength::default()
+//             rsp::registers::DmaReadLength::ADDRESS,
+//             rsp::registers::DmaReadLength::default()
 //                 .with_rows(0)
 //                 .with_length(u12::new(0x800))
 //                 .with_skip(u12::new(0))
@@ -244,20 +244,20 @@ impl Test for RspDmaFromRam {
 
 //         // Write random values to the address registers while the transfer is in progress
 
-//         io::write_uncached(rsp::DmaRspAddress::ADDRESS, u32::MAX);
-//         io::write_uncached(rsp::DmaRamAddress::ADDRESS, u32::MAX);
+//         io::write_uncached(rsp::registers::DmaRspAddress::ADDRESS, u32::MAX);
+//         io::write_uncached(rsp::registers::DmaRamAddress::ADDRESS, u32::MAX);
 
 //         // Make sure the writes occurred during the DMA
 
-//         assert_eq!(io::read_uncached(rsp::DmaBusy::ADDRESS), 1);
+//         assert_eq!(io::read_uncached(rsp::registers::DmaBusy::ADDRESS), 1);
 
-//         io::wait_until(|| io::read_uncached(rsp::DmaBusy::ADDRESS) == 0);
+//         io::wait_until(|| io::read_uncached(rsp::registers::DmaBusy::ADDRESS) == 0);
 
 //         app.comment("Dma completed")?;
-//         app.value(io::read_uncached(rsp::DmaRspAddress::ADDRESS))?;
-//         app.value(io::read_uncached(rsp::DmaRamAddress::ADDRESS))?;
-//         app.value(io::read_uncached(rsp::DmaReadLength::ADDRESS))
-//         //app.push_value(io::read_uncached(rsp::DmaWriteLength::ADDRESS))?;
+//         app.value(io::read_uncached(rsp::registers::DmaRspAddress::ADDRESS))?;
+//         app.value(io::read_uncached(rsp::registers::DmaRamAddress::ADDRESS))?;
+//         app.value(io::read_uncached(rsp::registers::DmaReadLength::ADDRESS))
+//         //app.push_value(io::read_uncached(rsp::registers::DmaWriteLength::ADDRESS))?;
 //     }
 // }
 
@@ -351,6 +351,6 @@ impl Test for RspDmaFromRam {
 
 //         // // Record the final RAM address, which indicates which transfer completed last
 
-//         // app.push_value(io::read_uncached(rsp::DmaRamAddress::ADDRESS))
+//         // app.push_value(io::read_uncached(rsp::registers::DmaRamAddress::ADDRESS))
 //     }
 // }

@@ -4,14 +4,13 @@ use n64_specs::cpu::{instructions::*, registers::Register};
 
 use crate::{
     app::App,
+    cpu_program::CpuProgram,
     data::{
         INIT_64, RdRtRs, RtRs, RtRsImm, corner_cases_16, corner_cases_64, rd_rt_rs_combinations,
         rt_rs_imm_combinations,
     },
     exceptions::{ExceptionHandler, install_exception_handler},
-    io,
-    program::Program,
-    register_test,
+    io, register_test,
     test::{Test, TestError},
 };
 
@@ -37,6 +36,7 @@ impl ExceptionHandler for ExceptionH {
         }
     }
 }
+
 const REG_EXTRA_VALUES: &[u64] = &[
     0x0000_0000_0000_CD15,
     0x0000_0000_2640_044E,
@@ -55,7 +55,7 @@ const REG_EXTRA_VALUES: &[u64] = &[
 macro_rules! reg {
     ($test:ident, $instr:ident) => {
         impl Test for $test {
-            type Params = RdRtRs;
+            type Params = RdRtRs<u64>;
 
             fn cases() -> impl Iterator<Item = Self::Params> {
                 let reg_values = corner_cases_64(REG_EXTRA_VALUES);
@@ -68,7 +68,7 @@ macro_rules! reg {
 
                 let result = io::CachedBuffer::<u64>::from_slice(&[0]);
 
-                Program::new()
+                CpuProgram::new()
                     .set_reg64(params.rd, params.rd_value)
                     .set_reg64(params.rs, params.rs_value)
                     .set_reg64(params.rt, params.rt_value)
@@ -138,7 +138,7 @@ reg!(CpuInstructionDsubu, Dsubu);
 macro_rules! imm {
     ($test:ident, $instr:ident) => {
         impl Test for $test {
-            type Params = RtRsImm;
+            type Params = RtRsImm<u64>;
 
             fn cases() -> impl Iterator<Item = Self::Params> {
                 let reg_values = corner_cases_64(REG_EXTRA_VALUES);
@@ -153,7 +153,7 @@ macro_rules! imm {
 
                 let result = io::CachedBuffer::<u64>::from_slice(&[0]);
 
-                Program::new()
+                CpuProgram::new()
                     .set_reg64(params.rt, params.rt_value)
                     .set_reg64(params.rs, params.rs_value)
                     .push(
@@ -208,7 +208,7 @@ imm!(CpuInstructionSltiu, Sltiu);
 macro_rules! mult_div {
     ($test:ident, $instr:ident) => {
         impl Test for $test {
-            type Params = RtRs;
+            type Params = RtRs<u64>;
 
             fn cases() -> impl Iterator<Item = Self::Params> {
                 // let reg_values = corner_cases_64(REG_EXTRA_VALUES);
@@ -229,7 +229,7 @@ macro_rules! mult_div {
 
                 let hi_lo = io::CachedBuffer::<u64>::from_slice(&[INIT_64, INIT_64]);
 
-                Program::new()
+                CpuProgram::new()
                     // Init HI/LO
                     .set_reg64(Register::T7, INIT_64)
                     .push(Mthi::default().with_rs(Register::T7.into()).into())
@@ -311,7 +311,7 @@ macro_rules! move_hi_lo {
             fn run(rs: &Self::Params, app: &mut App) -> Result<(), TestError> {
                 let result = io::CachedBuffer::<u64>::from_slice(&[0]);
 
-                Program::new()
+                CpuProgram::new()
                     .set_reg64(Register::T0, INIT_64)
                     .set_reg64(Register::T1, *rs)
                     .push($mt_instr::default().with_rs(Register::T1.into()).into())

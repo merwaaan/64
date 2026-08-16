@@ -1,36 +1,29 @@
 use alloc::format;
 use arbitrary_int::u5;
-use n64_specs::cpu::{instructions::*, registers::Register};
+use n64_specs::{
+    cpu::registers::Register as CpuRegister,
+    rsp::{DMEM_START, instructions::*},
+};
 
 use crate::{
     app::App,
-    cpu_program::CpuProgram,
-    data::{INIT_64, corner_cases_64},
+    data::{INIT_32, corner_cases_32},
     io, register_test,
+    rsp_program::RspProgram,
     test::{Test, TestError},
 };
 
-const REG_EXTRA_VALUES: &[u64] = &[
-    0x0000_0000_0000_1F00,
-    0x0000_0000_2999_45B8,
-    0x0000_0000_ABCD_1234,
-    0x0000_0001_FFFF_FFFF,
-    0xFFFF_FFFF_FFFF_FFFF,
-    0x105C_00CE_0000_0000,
-    0xFFFF_002F_89AB_F51F,
-];
+const REG_EXTRA_VALUES: &[u32] = &[0x0000_1F00, 0x2999_45B8, 0xABCD_1234, 0x89AB_F51F];
 
 // sa-operand variants:
 // SLL, SRL, SRA
-// DSLL, DSRL, DSRA
-// DSLL32, DSRL32, DSRA32
 
 #[derive(Debug)]
 pub struct SaParam {
-    rd: Register,
-    rd_value: u64,
-    rt: Register,
-    rt_value: u64,
+    rd: CpuRegister,
+    rd_value: u32,
+    rt: CpuRegister,
+    rt_value: u32,
     sa: u5,
 }
 
@@ -40,7 +33,7 @@ macro_rules! sa {
             type Params = SaParam;
 
             fn cases() -> impl Iterator<Item = Self::Params> {
-                let reg_values = corner_cases_64(REG_EXTRA_VALUES);
+                let reg_values = corner_cases_32(REG_EXTRA_VALUES);
 
                 // TODO use data gen
 
@@ -48,9 +41,9 @@ macro_rules! sa {
 
                 let basic = itertools::iproduct!(reg_values.clone(), sa_values.clone()).map(
                     |(rt_value, sa)| SaParam {
-                        rd: Register::T0,
-                        rd_value: INIT_64,
-                        rt: Register::T1,
+                        rd: CpuRegister::T0,
+                        rd_value: INIT_32,
+                        rt: CpuRegister::T1,
                         rt_value,
                         sa,
                     },
@@ -58,27 +51,27 @@ macro_rules! sa {
 
                 let rd_is_r0 = itertools::iproduct!(reg_values.clone(), sa_values.clone()).map(
                     |(value, sa)| SaParam {
-                        rd: Register::R0,
+                        rd: CpuRegister::R0,
                         rd_value: 0,
-                        rt: Register::T0,
+                        rt: CpuRegister::T0,
                         rt_value: value,
                         sa,
                     },
                 );
 
                 let rt_is_r0 = sa_values.clone().map(|sa| SaParam {
-                    rd: Register::T0,
-                    rd_value: INIT_64,
-                    rt: Register::R0,
+                    rd: CpuRegister::T0,
+                    rd_value: INIT_32,
+                    rt: CpuRegister::R0,
                     rt_value: 0,
                     sa,
                 });
 
                 let rd_is_rt = itertools::iproduct!(reg_values.clone(), sa_values.clone()).map(
                     |(rt_value, sa)| SaParam {
-                        rd: Register::T0,
+                        rd: CpuRegister::T0,
                         rd_value: rt_value,
-                        rt: Register::T0,
+                        rt: CpuRegister::T0,
                         rt_value,
                         sa,
                     },
@@ -88,11 +81,9 @@ macro_rules! sa {
             }
 
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-                let result = io::CachedBuffer::<u64>::from_slice(&[0]);
-
-                CpuProgram::new()
-                    .set_reg64(params.rd, params.rd_value)
-                    .set_reg64(params.rt, params.rt_value)
+                RspProgram::new()
+                    .set_reg(params.rd, params.rd_value)
+                    .set_reg(params.rt, params.rt_value)
                     .push(
                         $instr::default()
                             .with_rd(params.rd.into())
@@ -100,10 +91,18 @@ macro_rules! sa {
                             .with_sa(params.sa.into())
                             .into(),
                     )
-                    .store_reg64(params.rd, result.as_ptr() as u32, Register::T7)
+                    .push(
+                        Sw::default()
+                            .with_rt(params.rd.into())
+                            .with_base(CpuRegister::R0.into())
+                            .with_offset(0)
+                            .into(),
+                    )
                     .run();
 
-                app.value64(
+                let result = io::read_uncached(DMEM_START);
+
+                app.value(
                     &format!(
                         "{} {}, {}={:08X}, {:0X}",
                         stringify!($instr).to_uppercase(),
@@ -112,7 +111,7 @@ macro_rules! sa {
                         params.rt_value,
                         params.sa
                     ),
-                    result.get(0),
+                    result,
                 )
             }
         }
@@ -128,36 +127,17 @@ sa!(CpuInstructionSrl, Srl);
 register_test!(CpuInstructionSra);
 sa!(CpuInstructionSra, Sra);
 
-register_test!(CpuInstructionDsll);
-sa!(CpuInstructionDsll, Dsll);
-
-register_test!(CpuInstructionDsrl);
-sa!(CpuInstructionDsrl, Dsrl);
-
-register_test!(CpuInstructionDsra);
-sa!(CpuInstructionDsra, Dsra);
-
-register_test!(CpuInstructionDsll32);
-sa!(CpuInstructionDsll32, Dsll32);
-
-register_test!(CpuInstructionDsrl32);
-sa!(CpuInstructionDsrl32, Dsrl32);
-
-register_test!(CpuInstructionDsra32);
-sa!(CpuInstructionDsra32, Dsra32);
-
 // v-operand variants:
 // SLLV, SRLV, SRAV
-// DSLLV, DSRLV, DSRAV
 
 #[derive(Debug)]
 pub struct VParam {
-    rd: Register,
-    rd_value: u64,
-    rt: Register,
-    rt_value: u64,
-    rs: Register,
-    rs_value: u64,
+    rd: CpuRegister,
+    rd_value: u32,
+    rt: CpuRegister,
+    rt_value: u32,
+    rs: CpuRegister,
+    rs_value: u32,
 }
 
 macro_rules! v {
@@ -166,94 +146,89 @@ macro_rules! v {
             type Params = VParam;
 
             fn cases() -> impl Iterator<Item = Self::Params> {
-                let reg_values = corner_cases_64(REG_EXTRA_VALUES);
+                let reg_values = corner_cases_32(REG_EXTRA_VALUES);
 
-                let v_values = (0..=31).chain([
-                    0x0000_0000_0000_FFE0,
-                    0x0000_0000_0000_FFE4,
-                    0xABCD_0000_FFFF_0004,
-                    0xFFFF_FFFF_FFFF_FFFF,
-                ]);
+                let v_values = (0..=31).chain([0x0000_FFE0, 0x0000_FFE4, 0xFFFF_0004, 0xFFFF_FFFF]);
 
                 // TODO data gen
 
                 let basic = itertools::iproduct!(reg_values.clone(), v_values.clone()).map(
                     |(rt_value, v)| VParam {
-                        rd: Register::T0,
-                        rd_value: INIT_64,
-                        rt: Register::T1,
+                        rd: CpuRegister::T0,
+                        rd_value: INIT_32,
+                        rt: CpuRegister::T1,
                         rt_value,
-                        rs: Register::T2,
+                        rs: CpuRegister::T2,
                         rs_value: v,
                     },
                 );
 
                 let rd_is_r0 = itertools::iproduct!(reg_values.clone(), v_values.clone()).map(
                     |(rt_value, v)| VParam {
-                        rd: Register::R0,
+                        rd: CpuRegister::R0,
                         rd_value: 0,
-                        rt: Register::T0,
+                        rt: CpuRegister::T0,
                         rt_value,
-                        rs: Register::T1,
+                        rs: CpuRegister::T1,
                         rs_value: v,
                     },
                 );
 
                 let rt_is_r0 = v_values.clone().map(|v| VParam {
-                    rd: Register::T0,
-                    rd_value: INIT_64,
-                    rt: Register::R0,
+                    rd: CpuRegister::T0,
+                    rd_value: INIT_32,
+                    rt: CpuRegister::R0,
                     rt_value: 0,
-                    rs: Register::T1,
+                    rs: CpuRegister::T1,
                     rs_value: v,
                 });
 
                 let rs_is_r0 = reg_values.clone().map(|rt_value| VParam {
-                    rd: Register::T0,
-                    rd_value: INIT_64,
-                    rt: Register::T1,
+                    rd: CpuRegister::T0,
+                    rd_value: INIT_32,
+                    rt: CpuRegister::T1,
                     rt_value,
-                    rs: Register::R0,
+                    rs: CpuRegister::R0,
                     rs_value: 0,
                 });
 
                 let rd_is_rt = itertools::iproduct!(reg_values.clone(), v_values.clone()).map(
                     |(rt_value, v)| VParam {
-                        rd: Register::T0,
+                        rd: CpuRegister::T0,
                         rd_value: rt_value,
-                        rt: Register::T0,
+                        rt: CpuRegister::T0,
                         rt_value,
-                        rs: Register::T1,
+                        rs: CpuRegister::T1,
                         rs_value: v,
                     },
                 );
 
                 let rd_is_rs = itertools::iproduct!(reg_values.clone(), v_values.clone()).map(
                     |(rt_value, v)| VParam {
-                        rd: Register::T0,
+                        rd: CpuRegister::T0,
                         rd_value: v,
-                        rt: Register::T1,
+                        rt: CpuRegister::T1,
                         rt_value,
-                        rs: Register::T0,
+                        rs: CpuRegister::T0,
                         rs_value: v,
                     },
                 );
 
                 let rt_is_rs = reg_values.clone().map(|rt_value| VParam {
-                    rd: Register::T0,
-                    rd_value: INIT_64,
-                    rt: Register::T1,
+                    rd: CpuRegister::T0,
+                    rd_value: INIT_32,
+                    rt: CpuRegister::T1,
                     rt_value,
-                    rs: Register::T1,
+                    rs: CpuRegister::T1,
                     rs_value: rt_value,
                 });
 
                 let rd_is_rt_is_rs = reg_values.clone().map(|value| VParam {
-                    rd: Register::T0,
+                    rd: CpuRegister::T0,
                     rd_value: value,
-                    rt: Register::T0,
+                    rt: CpuRegister::T0,
                     rt_value: value,
-                    rs: Register::T0,
+                    rs: CpuRegister::T0,
                     rs_value: value,
                 });
 
@@ -268,12 +243,10 @@ macro_rules! v {
             }
 
             fn run(params: &Self::Params, app: &mut App) -> Result<(), TestError> {
-                let result = io::CachedBuffer::<u64>::from_slice(&[0]);
-
-                CpuProgram::new()
-                    .set_reg64(params.rd, params.rd_value)
-                    .set_reg64(params.rt, params.rt_value)
-                    .set_reg64(params.rs, params.rs_value)
+                RspProgram::new()
+                    .set_reg(params.rd, params.rd_value)
+                    .set_reg(params.rt, params.rt_value)
+                    .set_reg(params.rs, params.rs_value)
                     .push(
                         $instr::default()
                             .with_rd(params.rd.into())
@@ -281,10 +254,18 @@ macro_rules! v {
                             .with_rs(params.rs.into())
                             .into(),
                     )
-                    .store_reg64(params.rd, result.as_ptr() as u32, Register::T7)
+                    .push(
+                        Sw::default()
+                            .with_rt(params.rd.into())
+                            .with_base(CpuRegister::R0.into())
+                            .with_offset(0)
+                            .into(),
+                    )
                     .run();
 
-                app.value64(
+                let result = io::read_uncached(DMEM_START);
+
+                app.value(
                     &format!(
                         "{} {}, {}={:08X}, {}={:08X}",
                         stringify!($instr).to_uppercase(),
@@ -294,7 +275,7 @@ macro_rules! v {
                         params.rs,
                         params.rs_value,
                     ),
-                    result.get(0),
+                    result,
                 )
             }
         }
@@ -309,12 +290,3 @@ v!(CpuInstructionSrlv, Srlv);
 
 register_test!(CpuInstructionSrav);
 v!(CpuInstructionSrav, Srav);
-
-register_test!(CpuInstructionDsllv);
-v!(CpuInstructionDsllv, Dsllv);
-
-register_test!(CpuInstructionDsrlv);
-v!(CpuInstructionDsrlv, Dsrlv);
-
-register_test!(CpuInstructionDsrav);
-v!(CpuInstructionDsrav, Dsrav);
