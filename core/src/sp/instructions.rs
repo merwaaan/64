@@ -1392,7 +1392,6 @@ fn mfc2_disassemble(_s: &System, op: Opcode) -> String {
 fn mtc2_execute(s: &mut System, op: Opcode) -> InstructionResult {
     let data = op.rtv(s) as u16;
 
-    // TODO vreg index with rd, check???
     let mut bytes = s.sp.vregs[op.rd()].to_be_bytes();
 
     let e = op.element_offset();

@@ -7,6 +7,8 @@ use crate::{
     test::{Test, TestError},
 };
 
+// TODO SB from RAM to SPRAM doesnt seem to work well? only words work? test?
+
 // Records how the RSP DMEM/IMEM is mirrored over the whole range it's accessible from.
 //
 // No surprises:

@@ -13,6 +13,7 @@ mod MiRegisters;
 mod PiRegisters;
 mod RspDma;
 mod RspInstructionsArithmetic;
+mod RspInstructionsLoadStore;
 mod RspInstructionsLogical;
 mod RspInstructionsShift;
 mod RspMemory;

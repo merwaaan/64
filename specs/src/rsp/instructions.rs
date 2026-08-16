@@ -104,10 +104,45 @@ macro_rules! instructions {
         }
     };
 
-    // trap code
-    (@build_struct [$name:ident, $default:literal] [$($body:tt)*] code $($rest:tt)*) => {
+    // vt
+    (@build_struct [$name:ident, $default:literal] [$($body:tt)*] vt $($rest:tt)*) => {
         instructions! { @build_struct [$name, $default]
-            [$($body)* #[bits(6..=15, rw)] pub code: u10,] $($rest)*
+            [$($body)* #[bits(16..=20, rw)] pub vt: u5,] $($rest)*
+        }
+    };
+
+    // vs
+    (@build_struct [$name:ident, $default:literal] [$($body:tt)*] vs $($rest:tt)*) => {
+        instructions! { @build_struct [$name, $default]
+            [$($body)* #[bits(11..=15, rw)] pub vs: u5,] $($rest)*
+        }
+    };
+
+    // vd
+    (@build_struct [$name:ident, $default:literal] [$($body:tt)*] vd $($rest:tt)*) => {
+        instructions! { @build_struct [$name, $default]
+            [$($body)* #[bits(6..=10, rw)] pub vd: u5,] $($rest)*
+        }
+    };
+
+    // vector element specifier
+    (@build_struct [$name:ident, $default:literal] [$($body:tt)*] e $($rest:tt)*) => {
+        instructions! { @build_struct [$name, $default]
+            [$($body)* #[bits(7..=10, rw)] pub e: u4,] $($rest)*
+        }
+    };
+
+    // vector element specifier 2 TODO clearer name
+    (@build_struct [$name:ident, $default:literal] [$($body:tt)*] e2 $($rest:tt)*) => {
+        instructions! { @build_struct [$name, $default]
+            [$($body)* #[bits(21..=24, rw)] pub e2: u4,] $($rest)*
+        }
+    };
+
+    // vector offset
+    (@build_struct [$name:ident, $default:literal] [$($body:tt)*] voffset $($rest:tt)*) => {
+        instructions! { @build_struct [$name, $default]
+            [$($body)* #[bits(0..=6, rw)] pub voffset: u7,] $($rest)*
         }
     };
 
@@ -167,4 +202,10 @@ instructions! {
     J = 0x0800_0000 { target },
     // Special
     Break = 0x0000_000D { },
+    // Vector
+    Mfc2 = 0x4880_0000 { rt rd e },
+    Mtc2 = 0x4880_0000 { rt rd e },
+    Vxor = 0x4A00_002C { e2 vt vs vd },
+    Lqv = 0xC800_2000 { base vt voffset }, // TODO no e?
+    Sqv = 0xE800_2000 { base vt e voffset },
 }

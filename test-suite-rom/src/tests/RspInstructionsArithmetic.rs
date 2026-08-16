@@ -1,7 +1,7 @@
 use alloc::format;
 use n64_specs::{
     cpu::registers::Register as CpuRegister,
-    rsp::{DMEM_START, instructions::*, registers::Register},
+    rsp::{DMEM_START, instructions::*},
 };
 
 use crate::{

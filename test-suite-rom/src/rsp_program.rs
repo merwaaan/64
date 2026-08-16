@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use arbitrary_int::prelude::*;
 
 use n64_specs::{
     cpu::registers::Register,
@@ -28,6 +29,21 @@ impl RspProgram {
     pub fn nop(&mut self) -> &mut Self {
         // NOP = SLL r0, r0, r0
         self.push(Sll::default().into())
+    }
+
+    pub fn clear_vec_regs(&mut self) -> &mut Self {
+        for i in 0..8 {
+            let vreg = u5::from_u8(i);
+
+            self.push(
+                Vxor::default()
+                    .with_vt(vreg)
+                    .with_vs(vreg)
+                    .with_vd(vreg)
+                    .into(),
+            );
+        }
+        self
     }
 
     pub fn run(&self) {
